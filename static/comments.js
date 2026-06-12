@@ -715,6 +715,26 @@
     if (chip) hd.appendChild(chip);
     hd.appendChild(el('span', null, `${t.comments.length} 条`));
     const ops = el('div', 'pp-anno-ops');
+    const linkBtn = el('button', null, '🔗');
+    linkBtn.title = '复制这条评论的链接（打开即定位）';
+    linkBtn.onclick = async () => {
+      const url = location.href.split('#')[0] + '#pp-comment-' + t.id;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch (e) {
+        // http 等非安全上下文没有 clipboard API：退回 execCommand
+        const tmp = el('textarea');
+        tmp.dataset.ppAnno = '1';
+        tmp.value = url;
+        tmp.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(tmp);
+        tmp.select();
+        try { document.execCommand('copy'); } catch (e2) { /* ignore */ }
+        tmp.remove();
+      }
+      toast('链接已复制，打开即定位到这条评论');
+    };
+    ops.appendChild(linkBtn);
     const resolveBtn = el('button', 'pp-anno-resolve', t.resolved ? '↩ 重新打开' : '✓ 解决');
     resolveBtn.onclick = async () => {
       try {
@@ -1021,7 +1041,8 @@
 
   /* ---------------- 深链 #pp-comment-<id> ---------------- */
   function maybeDeepLink() {
-    const m = location.hash.match(/^#pp-comment-([0-9a-f]{24})$/);
+    // id 形态宽匹配（UUID 等）；原 24 位 hex 正则是内部版 ObjectId 的遗留，UUID 永远匹配不上
+    const m = location.hash.match(/^#pp-comment-([\w-]{8,})$/);
     if (!m) return;
     const t = state.threads.find((x) => x.id === m[1]);
     if (!t) return;
