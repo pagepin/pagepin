@@ -14,7 +14,7 @@ import {
 import { deploySite } from '../api';
 import { collectFromDataTransfer, collectFromFileList, slugify } from '../lib/collect';
 import type { Collection } from '../lib/collect';
-import { copyText, formatBytes } from '../lib/format';
+import { copyText, formatBytes, formatRelative } from '../lib/format';
 import { useStore } from '../store';
 import { SLUG_RE } from '../types';
 import type { SiteOut } from '../types';
@@ -28,6 +28,7 @@ type Stage =
 
 export function DropZone() {
   const me = useStore((s) => s.me);
+  const sites = useStore((s) => s.sites);
   const deployTarget = useStore((s) => s.deployTarget);
   const setDeployTarget = useStore((s) => s.setDeployTarget);
   const refreshSites = useStore((s) => s.refreshSites);
@@ -143,6 +144,12 @@ export function DropZone() {
   const previewUrl = me
     ? `${me.content_base.replace(/\/$/, '')}/${me.handle}/${slug || '<slug>'}/`
     : '';
+
+  // slug 撞上已有站点 = 这次部署是「更新」:部署前就把话说明白,而不是事后惊讶
+  const existing =
+    (stage.kind === 'ready' || stage.kind === 'uploading') && slug
+      ? (sites.find((x) => x.slug === slug) ?? null)
+      : null;
 
   return (
     <section ref={rootRef} className="animate-fade-up">
@@ -379,6 +386,16 @@ export function DropZone() {
 
               <div className="mt-2 truncate font-mono text-xs text-stone-400">{previewUrl}</div>
 
+              {stage.kind === 'ready' && existing && !slugLocked && (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
+                  slug「{slug}」已被你的站点
+                  <b>「{existing.title || existing.slug}」</b>占用:这次部署会作为它的
+                  <b>新版本</b>发布(现有 {existing.file_count} 个文件,更新于{' '}
+                  {formatRelative(existing.updated_at)};旧版本随时可回滚)。
+                  想新建独立站点的话,改一下 slug 即可。
+                </div>
+              )}
+
               {stage.kind === 'ready' && problems.length > 0 && (
                 <ul className="mt-3 space-y-1 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
                   {problems.map((p) => (
@@ -411,7 +428,7 @@ export function DropZone() {
                   onClick={() => void deploy()}
                 >
                   <Rocket className="h-4 w-4" />
-                  部署到 {slug || '…'}
+                  {existing ? `更新站点 ${slug}` : `部署到 ${slug || '…'}`}
                 </button>
               )}
             </div>
