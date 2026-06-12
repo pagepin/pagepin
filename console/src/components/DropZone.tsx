@@ -40,6 +40,7 @@ export function DropZone() {
   const dragDepth = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const dirInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const slugLocked = deployTarget !== null;
 
@@ -77,7 +78,9 @@ export function DropZone() {
     }
   }
 
-  function onPickDir(e: React.ChangeEvent<HTMLInputElement>) {
+  // 文件选择与文件夹选择共用:collectFromFileList 对平铺 FileList(无 webkitRelativePath)
+  // 自然退化为按文件名收集
+  function onPickInput(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files;
     if (list && list.length > 0) applyCollection(collectFromFileList(list));
     e.target.value = '';
@@ -143,6 +146,9 @@ export function DropZone() {
 
   return (
     <section ref={rootRef} className="animate-fade-up">
+      {/* 两个隐藏 input:webkitdirectory 的对话框只能选文件夹(html/md 等文件是灰的),
+          单文件/多文件必须走这个不带它的普通 input */}
+      <input ref={fileInputRef} type="file" className="hidden" multiple onChange={onPickInput} />
       <input
         ref={dirInputRef}
         type="file"
@@ -150,7 +156,7 @@ export function DropZone() {
         // @ts-expect-error 非标准属性，Chrome/Edge/Safari 均支持
         webkitdirectory=""
         multiple
-        onChange={onPickDir}
+        onChange={onPickInput}
       />
 
       {/* ── 结果卡 ─────────────────────────────── */}
@@ -223,7 +229,7 @@ export function DropZone() {
           {stage.kind === 'idle' && (
             <button
               type="button"
-              onClick={() => dirInputRef.current?.click()}
+              onClick={() => fileInputRef.current?.click()}
               className="flex w-full flex-col items-center px-6 py-14 text-center focus:outline-none sm:py-20"
             >
               <span
@@ -234,10 +240,28 @@ export function DropZone() {
                 <UploadCloud className="h-8 w-8" />
               </span>
               <span className="mt-5 text-lg font-semibold text-stone-800">
-                {dragOver ? '松手即上传' : '把文件夹拖到这里'}
+                {dragOver ? '松手即上传' : '把文件或文件夹拖到这里'}
               </span>
               <span className="mt-1.5 text-sm text-stone-500">
-                或点击选择文件夹 · 部署完成立刻得到分享链接
+                或点击选择文件 ·{' '}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="cursor-pointer font-medium text-tide-600 underline-offset-2 hover:underline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dirInputRef.current?.click();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.stopPropagation();
+                      dirInputRef.current?.click();
+                    }
+                  }}
+                >
+                  选择整个文件夹
+                </span>{' '}
+                · 部署完成立刻得到分享链接
               </span>
               {slugLocked && (
                 <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
