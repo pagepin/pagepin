@@ -79,8 +79,10 @@ export const commentThreads = sqliteTable(
     pagePath: text('page_path').notNull(), // 站点内页面路径("index.html" / "docs/a.html")
     versionId: text('version_id').notNull(), // 创建时的 current_version_id
     selector: text('selector').notNull(), // 被评论元素的 CSS path;"@page" = 整页评论
-    rx: real('rx').notNull(), // 点击点在元素盒内的相对偏移(0~1)
+    rx: real('rx').notNull(), // 锚点在元素盒内的相对偏移(0~1);框选时为框左上角
     ry: real('ry').notNull(),
+    rw: real('rw'), // 框选区域的相对宽高(0~1);null = 点评论
+    rh: real('rh'),
     kind: text('kind'), // copy/style/question/bug;null = 普通评论
     anchorText: text('anchor_text'), // 创建时目标元素文本指纹(SPA 换数据降级判定)
     resolved: integer('resolved', { mode: 'boolean' }).notNull().default(false),

@@ -134,6 +134,11 @@
   /* pin 必须高于弹窗（2147482500）：否则弹窗会盖住相邻 pin，点它命中的是弹窗而非 pin，弹窗不切换 */
   .pp-anno-pin{position:absolute;z-index:2147482600;width:32px;height:32px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700;cursor:pointer;transform:translate(-4px,-28px);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(28,26,23,.35);user-select:none;transition:transform .15s,box-shadow .15s}
   .pp-anno-pin:hover{transform:translate(-4px,-28px) scale(1.15)}
+  /* 框选区域:pin 之下、宿主内容之上;pointer-events 关掉,不挡页面交互(入口仍是 pin) */
+  .pp-anno-region{position:absolute;z-index:2147481900;border:2px solid;border-radius:4px;pointer-events:none;box-sizing:border-box}
+  .pp-anno-region.pp-anno-resolved{opacity:.35;filter:saturate(.3)}
+  .pp-anno-region.pp-anno-current{box-shadow:0 0 0 3px rgba(194,54,27,.30)}
+  .pp-anno-rubber{position:absolute;z-index:2147482700;border:2px dashed #c2361b;background:rgba(194,54,27,.08);border-radius:4px;pointer-events:none;box-sizing:border-box}
   .pp-anno-pin.pp-anno-resolved{opacity:.45;filter:saturate(.3)}
   .pp-anno-pin.pp-anno-current{box-shadow:0 0 0 4px rgba(194,54,27,.35),0 3px 10px rgba(28,26,23,.35)}
   .pp-anno-pin.pp-anno-pulse{animation:ppAnnoPinPop .45s cubic-bezier(.2,1.6,.4,1)}
@@ -347,7 +352,7 @@
   const pinThreads = () => visibleThreads().filter((t) => resolveAnchor(t).status === 'ok');
 
   function render() {
-    layer.querySelectorAll('.pp-anno-pin').forEach((n) => n.remove());
+    layer.querySelectorAll('.pp-anno-pin, .pp-anno-region').forEach((n) => n.remove());
     // 打开中的弹窗跟随锚点重定位（内部容器滚动时）
     if (state.openPopup && state.openPopup._getPos) {
       const pp = state.openPopup._getPos();
@@ -360,6 +365,23 @@
       const pos = a.pos;
       n += 1;
       t._num = n;
+      // 框选线程:先铺区域框(rx/ry 即框左上角,pin 钉在角上)
+      if (t.rw != null && t.rh != null && a.el) {
+        const r = a.el.getBoundingClientRect();
+        const reg = el('div', 'pp-anno-region'
+          + (t.resolved ? ' pp-anno-resolved' : '')
+          + (state.openThreadId === t.id ? ' pp-anno-current' : ''));
+        reg.dataset.ppAnno = '1';
+        reg.dataset.tid = t.id;
+        const color = colorOf(t.comments[0].author_name);
+        reg.style.borderColor = color;
+        reg.style.background = 'color-mix(in srgb, ' + color + ' 12%, transparent)';
+        reg.style.left = (r.left + scrollX + r.width * t.rx) + 'px';
+        reg.style.top = (r.top + scrollY + r.height * t.ry) + 'px';
+        reg.style.width = (r.width * t.rw) + 'px';
+        reg.style.height = (r.height * t.rh) + 'px';
+        layer.appendChild(reg);
+      }
       const pin = el('div', 'pp-anno-pin' + (t.resolved ? ' pp-anno-resolved' : ''), String(n));
       pin.dataset.ppAnno = '1';
       pin.dataset.tid = t.id;
@@ -548,11 +570,13 @@
       shakePopup();
       return false; // composer 草稿保护
     }
+    if (state.openPopup._cleanup) state.openPopup._cleanup();
     state.openPopup.remove();
     state.openPopup = null;
     state.openThreadId = null;
     popupTarget = null;
     setBound(null);
+    layer.querySelectorAll('.pp-anno-region.pp-anno-current').forEach((n) => n.classList.remove('pp-anno-current'));
     document.documentElement.classList.remove('pp-anno-paused');
     return true;
   }
@@ -617,7 +641,7 @@
     return ta;
   }
 
-  function openComposer(x, y, selector, rx, ry) {
+  function openComposer(x, y, selector, rx, ry, box) {
     const p = popupShell(x, y);
     if (!p) return;
     if (selector !== PAGE_SELECTOR) {
@@ -631,7 +655,20 @@
         return { x: r.left + scrollX + r.width * rx, y: r.top + scrollY + r.height * ry };
       };
     }
-    const hd = el('div', 'pp-anno-hd', selector === PAGE_SELECTOR ? '📄 整页意见' : '📍 新评论');
+    if (box && popupTarget) {
+      // 撰写期间保留虚线框预览,关闭/发布时随 _cleanup 撤掉
+      const r = popupTarget.getBoundingClientRect();
+      const reg = el('div', 'pp-anno-rubber');
+      reg.dataset.ppAnno = '1';
+      reg.style.left = (r.left + scrollX + r.width * rx) + 'px';
+      reg.style.top = (r.top + scrollY + r.height * ry) + 'px';
+      reg.style.width = (r.width * box.rw) + 'px';
+      reg.style.height = (r.height * box.rh) + 'px';
+      layer.appendChild(reg);
+      p._cleanup = () => reg.remove();
+    }
+    const hd = el('div', 'pp-anno-hd',
+      selector === PAGE_SELECTOR ? '📄 整页意见' : box ? '⬚ 区域评论' : '📍 新评论');
     const ops = el('div', 'pp-anno-ops');
     const xBtn = el('button', null, '✕');
     xBtn.onclick = () => closePopup(true);
@@ -641,7 +678,11 @@
     const ta = footer(p, selector === PAGE_SELECTOR ? '对这个页面整体说点什么…' : '说点什么…', async (text, kind) => {
       // 内容指纹：发布时快照目标元素文本，SPA 换数据后据此判定「内容已变化」
       const anchor_text = popupTarget && selector !== PAGE_SELECTOR ? fingerprint(popupTarget) || null : null;
-      const t = await createThread({ path: CFG.path, selector, rx, ry, kind, anchor_text, text });
+      const t = await createThread({
+        path: CFG.path, selector, rx, ry,
+        rw: box ? box.rw : null, rh: box ? box.rh : null,
+        kind, anchor_text, text,
+      });
       state.threads.push(t);
       closePopup(true);
       render();
@@ -657,6 +698,8 @@
     const p = popupShell(pos.x, pos.y);
     if (!p) return;
     state.openThreadId = t.id;
+    layer.querySelectorAll('.pp-anno-region').forEach((n) =>
+      n.classList.toggle('pp-anno-current', n.dataset.tid === t.id));
     popupTarget = threadEl(t);
     setBound(popupTarget);
     p._getPos = () => resolveAnchor(t).pos;
@@ -764,6 +807,55 @@
   document.addEventListener('dragstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
   document.addEventListener('selectstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
 
+  /* ---------------- 图片框选(bbox 评论) ----------------
+   * 评论模式下在 <img> 上按住拖动 = 圈出一块区域评论;轻点(位移 < 5px)仍走点打点。
+   * rx/ry 存框左上角、rw/rh 存相对宽高(0~1),随图片缩放自适应。 */
+  let suppressNextClick = false; // 框选松手派生的 click 要吞掉,防止又开一个点评论
+  document.addEventListener('mousedown', (down) => {
+    if (!state.mode || state.openPopup || down.button !== 0) return;
+    const img = down.target;
+    if (!(img instanceof HTMLImageElement) || img.closest('[data-pp-anno]')) return;
+    const r0 = img.getBoundingClientRect();
+    if (!r0.width || !r0.height) return;
+    const sx = down.clientX, sy = down.clientY;
+    let rubber = null;
+    const cl = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    const geom = (e) => {
+      const x1 = cl(Math.min(sx, e.clientX), r0.left, r0.right);
+      const x2 = cl(Math.max(sx, e.clientX), r0.left, r0.right);
+      const y1 = cl(Math.min(sy, e.clientY), r0.top, r0.bottom);
+      const y2 = cl(Math.max(sy, e.clientY), r0.top, r0.bottom);
+      return { x1, y1, w: x2 - x1, h: y2 - y1 };
+    };
+    const onMove = (e) => {
+      if (!rubber) {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) < 5) return;
+        rubber = el('div', 'pp-anno-rubber');
+        rubber.dataset.ppAnno = '1';
+        layer.appendChild(rubber);
+      }
+      const g = geom(e);
+      rubber.style.left = (g.x1 + scrollX) + 'px';
+      rubber.style.top = (g.y1 + scrollY) + 'px';
+      rubber.style.width = g.w + 'px';
+      rubber.style.height = g.h + 'px';
+    };
+    const onUp = (e) => {
+      removeEventListener('mousemove', onMove);
+      removeEventListener('mouseup', onUp);
+      if (!rubber) return;               // 轻点:不拦,后续 click 走点打点
+      rubber.remove();
+      suppressNextClick = true;
+      const g = geom(e);
+      if (g.w < 8 || g.h < 8) return;    // 框太小视为误触,什么都不发生
+      openComposer(g.x1 + g.w + scrollX, g.y1 + g.h + scrollY, cssPath(img),
+        cl((g.x1 - r0.left) / r0.width, 0, 1), cl((g.y1 - r0.top) / r0.height, 0, 1),
+        { rw: Math.min(1, g.w / r0.width), rh: Math.min(1, g.h / r0.height) });
+    };
+    addEventListener('mousemove', onMove);
+    addEventListener('mouseup', onUp);
+  }, true);
+
   function composeAt(e) {
     const node = e.target;
     const r = node.getBoundingClientRect();
@@ -774,6 +866,7 @@
   }
 
   document.addEventListener('click', (e) => {
+    if (suppressNextClick) { suppressNextClick = false; e.preventDefault(); e.stopPropagation(); return; }
     if (e.target.closest('[data-pp-anno]')) return;
     if (state.mode || e.altKey) {            // 评论模式，或任意时刻 ⌥+点击
       e.preventDefault();
@@ -790,7 +883,7 @@
     if (!pins.length) return;
     state.cursor = (state.cursor + delta + pins.length) % pins.length;
     const t = pins[state.cursor];
-    layer.querySelectorAll('.pp-anno-pin').forEach((p) => p.classList.toggle('pp-anno-current', p.dataset.tid === t.id));
+    layer.querySelectorAll('.pp-anno-pin, .pp-anno-region').forEach((p) => p.classList.toggle('pp-anno-current', p.dataset.tid === t.id));
     const pos = anchorXY(t);
     if (pos) scrollTo({ top: pos.y - innerHeight / 2, behavior: 'smooth' });
   }

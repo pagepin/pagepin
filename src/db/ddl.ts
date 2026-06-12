@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS comment_threads (
   selector TEXT NOT NULL,
   rx REAL NOT NULL,
   ry REAL NOT NULL,
+  rw REAL,
+  rh REAL,
   kind TEXT,
   anchor_text TEXT,
   resolved INTEGER NOT NULL DEFAULT 0,

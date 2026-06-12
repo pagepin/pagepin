@@ -15,7 +15,17 @@ export function createNodeDb(file: string) {
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
   sqlite.exec(DDL);
+  migrate(sqlite);
   return drizzle(sqlite, { schema });
+}
+
+/** 增量列迁移:CREATE TABLE IF NOT EXISTS 不会给存量库加列,这里按列名补齐。 */
+function migrate(sqlite: InstanceType<typeof Database>): void {
+  const cols = (sqlite.prepare('PRAGMA table_info(comment_threads)').all() as { name: string }[])
+    .map((c) => c.name);
+  if (!cols.includes('rw')) {
+    sqlite.exec('ALTER TABLE comment_threads ADD COLUMN rw REAL; ALTER TABLE comment_threads ADD COLUMN rh REAL;');
+  }
 }
 
 export type Db = ReturnType<typeof createNodeDb>;

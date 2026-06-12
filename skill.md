@@ -68,6 +68,8 @@ curl -s "{{CONSOLE_BASE}}/api/sites/my-demo/comments" \
 ```
 
 返回的每条线程含:`selector`(被评元素的 CSS path,`"@page"` 表示整页意见)、
+`rx`/`ry`(意见锚点在元素盒内的相对位置,0~1;若同时有 `rw`/`rh`,表示意见针对
+元素内的一块框选区域 —— 常见于图片上圈出某一块)、
 `kind`(意见类型:copy=改文案 / style=改样式 / question=提问 / bug,可能为 null)、
 `comments`(评论与回复,含作者)、`stale`(true = 基于旧版本提出,可能已处理过)、
 `url`(直达该评论的页面链接)。

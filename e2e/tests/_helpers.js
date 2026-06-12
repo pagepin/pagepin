@@ -58,6 +58,8 @@ async function setup(page, opts = {}) {
   const {
     boxes = DEFAULT_BOXES, threads = [], viewer = VIEWER,
     viewerStatus = 200, threadsStatus = 200, reply,
+    html,        // 自定义整页 HTML(默认 fixtureHtml(boxes))
+    onCreate,    // 新建线程时回调(拿到 POST body,供断言 rw/rh 等)
   } = opts;
 
   await page.route('**/api/viewer', (route) =>
@@ -90,10 +92,12 @@ async function setup(page, opts = {}) {
     // 新建线程
     if (method === 'POST') {
       const body = JSON.parse(req.postData() || '{}');
+      if (onCreate) onCreate(body);
       const n = threads.length + 1;
       return route.fulfill({
         json: mkThread(n, body.selector, {
-          rx: body.rx, ry: body.ry, kind: body.kind, anchor_text: body.anchor_text,
+          rx: body.rx, ry: body.ry, rw: body.rw ?? null, rh: body.rh ?? null,
+          kind: body.kind, anchor_text: body.anchor_text,
           comments: [{
             id: `cnew${n}`, author_sub: VIEWER.sub, author_name: VIEWER.name,
             text: body.text, created_at: NOW,
@@ -110,7 +114,7 @@ async function setup(page, opts = {}) {
   await page.route('**/comments.js', (route) =>
     route.fulfill({ contentType: 'application/javascript; charset=utf-8', body: COMMENTS_JS }));
   await page.route('http://pagepin.test/', (route) =>
-    route.fulfill({ contentType: 'text/html; charset=utf-8', body: fixtureHtml(boxes) }));
+    route.fulfill({ contentType: 'text/html; charset=utf-8', body: html || fixtureHtml(boxes) }));
 }
 
 // 默认布局：3 在右、4 在其左、1/2 在上方，相互不重叠（贴近真实 demo 页面布局）。

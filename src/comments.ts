@@ -70,6 +70,8 @@ function threadOut(t: CommentThreadRow) {
     selector: t.selector,
     rx: t.rx,
     ry: t.ry,
+    rw: t.rw,
+    rh: t.rh,
     kind: t.kind,
     anchor_text: t.anchorText,
     resolved: t.resolved,
@@ -98,6 +100,8 @@ interface ThreadCreateIn {
   selector: string;
   rx: number;
   ry: number;
+  rw: number | null; // 框选区域相对宽高;null = 点评论
+  rh: number | null;
   kind: string | null;
   anchor_text: string | null;
   text: string;
@@ -119,6 +123,18 @@ function parseThreadCreate(raw: unknown): ThreadCreateIn {
       throw new ApiError(422, `${k} 必须是 0~1 之间的数字`);
     }
   }
+  // 框选区域:rw/rh 成对出现,(0,1] 区间
+  const hasRw = b.rw !== undefined && b.rw !== null;
+  const hasRh = b.rh !== undefined && b.rh !== null;
+  if (hasRw !== hasRh) throw new ApiError(422, 'rw/rh 必须成对出现');
+  if (hasRw) {
+    for (const k of ['rw', 'rh'] as const) {
+      const v = b[k];
+      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > 1) {
+        throw new ApiError(422, `${k} 必须是 0~1 之间的数字`);
+      }
+    }
+  }
   const kind = b.kind === undefined || b.kind === null ? null : b.kind;
   if (kind !== null && typeof kind !== 'string') throw new ApiError(422, 'kind 必须是字符串');
   const anchor = b.anchor_text === undefined || b.anchor_text === null ? null : b.anchor_text;
@@ -132,6 +148,8 @@ function parseThreadCreate(raw: unknown): ThreadCreateIn {
     selector: b.selector,
     rx: b.rx as number,
     ry: b.ry as number,
+    rw: hasRw ? (b.rw as number) : null,
+    rh: hasRw ? (b.rh as number) : null,
     kind,
     anchor_text: anchor,
     text: b.text,
@@ -252,6 +270,8 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         selector: body.selector,
         rx: body.rx,
         ry: body.ry,
+        rw: body.rw,
+        rh: body.rh,
         kind: body.kind,
         anchorText: body.anchor_text ? body.anchor_text.trim() : null,
         resolved: false,
