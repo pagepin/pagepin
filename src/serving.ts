@@ -142,48 +142,107 @@ document.getElementById('pp-md-content').innerHTML =
 </script>
 </body></html>`;
 
-/** 同版本兄弟图片导航(顺序与画廊一致:rel 升序)。 */
-interface ImgNav {
-  prev: string | null; // 绝对 href(已逐段编码)
-  next: string | null;
-  pos: string; // "3 / 12"
+/** 同版本兄弟图片(顺序与画廊一致:rel 升序);单图/旧版本无清单 → null。 */
+interface ImgView {
+  imgs: string[];
+  i: number;
+  base: string; // 站点根的绝对路径前缀(/p/<handle>/<slug>/)
 }
 
-function imageNav(files: string[] | undefined, rel: string, siteBase: string): ImgNav | null {
+function imageView(files: string[] | undefined, rel: string, siteBase: string): ImgView | null {
   if (!files) return null; // 旧版本无清单 → 不出导航
   const imgs = files.filter((f) => IMG_EXTS.has(extOf(f))).sort((a, b) => a.localeCompare(b));
   const i = imgs.indexOf(rel);
   if (i < 0 || imgs.length < 2) return null;
-  return {
-    prev: i > 0 ? siteBase + relHref(imgs[i - 1]!) : null,
-    next: i < imgs.length - 1 ? siteBase + relHref(imgs[i + 1]!) : null,
-    pos: `${i + 1} / ${imgs.length}`,
-  };
+  return { imgs, i, base: siteBase };
 }
 
-const imgShell = (title: string, src: string, inject: string, nav: ImgNav | null): string => {
-  const arrows = nav
-    ? [
-        nav.prev
-          ? `<a class="pp-img-nav pp-img-prev" href="${escapeHtml(nav.prev)}" title="上一张（←）">‹</a>`
-          : '',
-        nav.next
-          ? `<a class="pp-img-nav pp-img-next" href="${escapeHtml(nav.next)}" title="下一张（→）">›</a>`
-          : '',
-      ].join('\n')
+const imgShell = (title: string, src: string, inject: string, view: ImgView | null): string => {
+  const pos = view ? `<span id="pp-img-pos">${view.i + 1} / ${view.imgs.length}</span> · ` : '';
+  const arrow = (cls: string, id: string, rel: string | null, tip: string, ch: string) =>
+    `<a class="pp-img-nav ${cls}" id="${id}" href="${rel ? escapeHtml(view!.base + relHref(rel)) : '#'}"${
+      rel ? '' : ' style="visibility:hidden"'
+    } title="${tip}">${ch}</a>`;
+  const arrows = view
+    ? arrow('pp-img-prev', 'pp-prev', view.i > 0 ? view.imgs[view.i - 1]! : null, '上一张（←）', '‹') +
+      '\n' +
+      arrow(
+        'pp-img-next',
+        'pp-next',
+        view.i < view.imgs.length - 1 ? view.imgs[view.i + 1]! : null,
+        '下一张（→）',
+        '›',
+      )
     : '';
-  // 评论弹窗开着时方向键不翻页(防丢草稿);输入框里打字时同理
-  const navScript = nav
+  // 就地切换(lightbox):换 <img> 节点不跳页 → 零闪烁;pushState 同步 URL(刷新/分享/后退
+  // 都落在正确图片);邻图预解码秒切。切换前派发 cancelable 的 pagepin:navigate,评论层
+  // 据此换路径重拉线程,composer 有未发草稿时 preventDefault 阻断本次切换。
+  const viewerScript = view
     ? `<script>
-addEventListener('keydown', (e) => {
-  if (e.altKey || e.ctrlKey || e.metaKey) return;
-  const t = e.target;
-  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-  if (document.querySelector('.pp-anno-popup')) return;
-  const prev = ${JSON.stringify(nav.prev)}, next = ${JSON.stringify(nav.next)};
-  if (e.key === 'ArrowLeft' && prev) location.href = prev;
-  else if (e.key === 'ArrowRight' && next) location.href = next;
-});
+(() => {
+  const IMGS = ${JSON.stringify(view.imgs).replaceAll('</', '<\\/')};
+  const BASE = ${JSON.stringify(view.base)};
+  let i = ${view.i};
+  const href = (rel) => BASE + rel.split('/').map(encodeURIComponent).join('/');
+  let cur = document.getElementById('pp-image');
+  const nameEl = document.getElementById('pp-img-name');
+  const posEl = document.getElementById('pp-img-pos');
+  const prevA = document.getElementById('pp-prev');
+  const nextA = document.getElementById('pp-next');
+  const cache = new Map([[IMGS[i], cur]]); // rel → 预解码好的 <img>(no-store 下避免重拉字节)
+  const nodeFor = (rel) => {
+    let n = cache.get(rel);
+    if (!n) { n = new Image(); n.src = href(rel); cache.set(rel, n); }
+    return n;
+  };
+  const preload = () => {
+    if (i > 0) nodeFor(IMGS[i - 1]);
+    if (i < IMGS.length - 1) nodeFor(IMGS[i + 1]);
+  };
+  function show(j, push) {
+    if (j < 0 || j >= IMGS.length || j === i) return;
+    const ev = new CustomEvent('pagepin:navigate', { cancelable: true, detail: { path: IMGS[j] } });
+    if (!dispatchEvent(ev)) return; // 评论草稿未发:评论层已抖动提示,本次切换作罢
+    i = j;
+    const rel = IMGS[i];
+    const n = nodeFor(rel);
+    n.id = 'pp-image';
+    n.alt = rel;
+    n.style.opacity = '0';
+    cur.replaceWith(n);
+    cur = n;
+    (n.decode ? n.decode().catch(() => {}) : Promise.resolve())
+      .then(() => requestAnimationFrame(() => { n.style.opacity = ''; }));
+    nameEl.textContent = rel;
+    posEl.textContent = (i + 1) + ' / ' + IMGS.length;
+    document.title = rel.split('/').pop();
+    prevA.style.visibility = i > 0 ? '' : 'hidden';
+    nextA.style.visibility = i < IMGS.length - 1 ? '' : 'hidden';
+    if (i > 0) prevA.href = href(IMGS[i - 1]);
+    if (i < IMGS.length - 1) nextA.href = href(IMGS[i + 1]);
+    if (push) history.pushState({ ppImg: i }, '', href(rel));
+    preload();
+  }
+  const onNav = (d) => (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return; // 让开新标签页等原生行为
+    e.preventDefault();
+    show(i + d, true);
+  };
+  prevA.addEventListener('click', onNav(-1));
+  nextA.addEventListener('click', onNav(1));
+  addEventListener('keydown', (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'ArrowLeft') show(i - 1, true);
+    else if (e.key === 'ArrowRight') show(i + 1, true);
+  });
+  addEventListener('popstate', (e) => {
+    show(e.state && typeof e.state.ppImg === 'number' ? e.state.ppImg : ${view.i}, false);
+  });
+  history.replaceState({ ppImg: i }, '');
+  preload();
+})();
 </script>`
     : '';
   return `<!doctype html>
@@ -196,7 +255,7 @@ body{margin:0;background:#22211e;font-family:-apple-system,"PingFang SC",sans-se
 .pp-img-wrap{min-height:100vh;display:grid;place-items:center}
 figure{margin:24px;text-align:center}
 img{max-width:calc(100vw - 48px);max-height:calc(100vh - 110px);border-radius:6px;
-  box-shadow:0 10px 40px rgba(0,0,0,.5);background:#fff}
+  box-shadow:0 10px 40px rgba(0,0,0,.5);background:#fff;transition:opacity .15s ease}
 figcaption{color:#8d877c;font-size:12.5px;margin-top:12px}
 /* 翻页箭头压在评论层之下(pin 2147482600 / 区域框 2147481900) */
 .pp-img-nav{position:fixed;top:50%;transform:translateY(-50%);z-index:2147480000;
@@ -212,11 +271,11 @@ ${inject}</head>
 <figure>
   <img id="pp-image" src="${src}" alt="${title}"
        onerror="this.closest('figure').innerHTML='<figcaption>图片加载失败</figcaption>'">
-  <figcaption>${title}${nav ? ` · ${nav.pos}` : ''} · <a href="?raw=1" style="color:#8d877c">原图</a></figcaption>
+  <figcaption><span id="pp-img-name">${title}</span> · ${pos}<a href="?raw=1" style="color:#8d877c">原图</a></figcaption>
 </figure>
 </div>
 ${arrows}
-${navScript}
+${viewerScript}
 </body></html>`;
 };
 
@@ -343,7 +402,7 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
             escapeHtml(fname),
             escapeHtml(c.req.path),
             injectHtml,
-            imageNav(cur.files, rel, siteBase),
+            imageView(cur.files, rel, siteBase),
           ),
           200,
           baseHeaders,

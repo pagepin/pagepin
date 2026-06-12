@@ -981,6 +981,23 @@
   setInterval(refresh, 30000);
   addEventListener('focus', refresh);
 
+  /* ---------------- 宿主页就地换路径（图片查看器壳的 lightbox 切换） ----------------
+   * 壳在切换前派发 cancelable 的 pagepin:navigate（detail.path = 新站内路径）：
+   * composer 有未发草稿 → preventDefault 阻断切换（closePopup 已抖动提示）；
+   * 否则换路径清空线程重拉，后续新建评论自动落在新路径上。 */
+  addEventListener('pagepin:navigate', (e) => {
+    const next = e && e.detail && e.detail.path;
+    if (!next || next === CFG.path) return;
+    if (!closePopup()) { e.preventDefault(); return; }
+    CFG.path = next;
+    state.threads = [];
+    state.cursor = -1;
+    render();
+    fetchThreads()
+      .then((data) => { state.threads = data.threads; render(); })
+      .catch(() => { /* 静默：30s 轮询/聚焦刷新会补 */ });
+  });
+
   /* ---------------- 首次引导（非阻断 chip） ---------------- */
   function maybeChip() {
     let seen = null;
