@@ -43,3 +43,25 @@ test('弹窗 🔗:复制「当前页去 hash + #pp-comment-<id>」并 toast', as
     `http://pagepin.test/#pp-comment-${UUID}`,
   );
 });
+
+test('侧栏行 🔗:复制同样的深链,且不触发整行跳转打开弹窗', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: (s) => { window.__copied = s; return Promise.resolve(); } },
+    });
+  });
+  const t = mkThread(1, '#t1', { id: UUID });
+  await setup(page, { threads: [t] });
+  await page.goto('http://pagepin.test/');
+
+  await page.locator('.pp-anno-toolbar button', { hasText: '列表' }).click();
+  const item = page.locator('.pp-anno-sb-item');
+  await expect(item).toHaveCount(1);
+  await item.hover();
+  await item.locator('.pp-anno-sb-link').click();
+  await expect(page.locator('.pp-anno-toast')).toContainText('链接已复制');
+  expect(await page.evaluate(() => window.__copied)).toBe(
+    `http://pagepin.test/#pp-comment-${UUID}`,
+  );
+  await expect(page.locator('.pp-anno-popup')).toHaveCount(0); // stopPropagation:没开弹窗
+});

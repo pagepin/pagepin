@@ -192,6 +192,9 @@
   .pp-anno-sb-top{display:flex;align-items:center;gap:8px}
   .pp-anno-sb-num{width:21px;height:21px;border-radius:50% 50% 50% 3px;flex:none;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
   .pp-anno-sb-when{font-size:11px;color:#aaa295;margin-left:auto}
+  .pp-anno-sb-link{border:none;background:none;cursor:pointer;font-size:11px;padding:2px 5px;border-radius:6px;opacity:0;transition:opacity .12s}
+  .pp-anno-sb-item:hover .pp-anno-sb-link{opacity:.65}
+  .pp-anno-sb-link:hover{opacity:1!important;background:#efe9dd}
   .pp-anno-sb-txt{font-size:13px;color:#5d574d;margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .pp-anno-sb-meta{font-size:11px;color:#aaa295;margin-top:4px;display:flex;gap:6px;align-items:center}
   .pp-anno-sb-item.pp-anno-resolved{opacity:.55}
@@ -462,6 +465,10 @@
     const num = el('span', 'pp-anno-sb-num', icon || (t._num != null ? String(t._num) : '•'));
     num.style.background = icon ? '#5d574d' : colorOf(c0.author_name);
     top.append(num, el('span', 'pp-anno-who', c0.author_name), el('span', 'pp-anno-sb-when', fmtTime(c0.created_at)));
+    const link = el('button', 'pp-anno-sb-link', '🔗');
+    link.title = '复制这条评论的链接';
+    link.onclick = (e) => { e.stopPropagation(); copyThreadLink(t); }; // 不触发整行的跳转
+    top.appendChild(link);
     const meta = el('div', 'pp-anno-sb-meta');
     const chip = kindChip(t.kind);
     if (chip) meta.appendChild(chip);
@@ -700,6 +707,25 @@
   }
   const openComposerForPage = () => openComposer(centerPos().x, centerPos().y, PAGE_SELECTOR, 0, 0);
 
+  /** 复制评论深链（弹窗 🔗 与侧栏行共用）。http 等非安全上下文没有
+   * clipboard API，退回 execCommand。 */
+  async function copyThreadLink(t) {
+    const url = location.href.split('#')[0] + '#pp-comment-' + t.id;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (e) {
+      const tmp = el('textarea');
+      tmp.dataset.ppAnno = '1';
+      tmp.value = url;
+      tmp.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(tmp);
+      tmp.select();
+      try { document.execCommand('copy'); } catch (e2) { /* ignore */ }
+      tmp.remove();
+    }
+    toast('链接已复制，打开即定位到这条评论');
+  }
+
   function openThread(t, pos, focusReply) {
     const p = popupShell(pos.x, pos.y);
     if (!p) return;
@@ -717,23 +743,7 @@
     const ops = el('div', 'pp-anno-ops');
     const linkBtn = el('button', null, '🔗');
     linkBtn.title = '复制这条评论的链接（打开即定位）';
-    linkBtn.onclick = async () => {
-      const url = location.href.split('#')[0] + '#pp-comment-' + t.id;
-      try {
-        await navigator.clipboard.writeText(url);
-      } catch (e) {
-        // http 等非安全上下文没有 clipboard API：退回 execCommand
-        const tmp = el('textarea');
-        tmp.dataset.ppAnno = '1';
-        tmp.value = url;
-        tmp.style.cssText = 'position:fixed;opacity:0';
-        document.body.appendChild(tmp);
-        tmp.select();
-        try { document.execCommand('copy'); } catch (e2) { /* ignore */ }
-        tmp.remove();
-      }
-      toast('链接已复制，打开即定位到这条评论');
-    };
+    linkBtn.onclick = () => copyThreadLink(t);
     ops.appendChild(linkBtn);
     const resolveBtn = el('button', 'pp-anno-resolve', t.resolved ? '↩ 重新打开' : '✓ 解决');
     resolveBtn.onclick = async () => {
