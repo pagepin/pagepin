@@ -1,0 +1,15 @@
+{
+  "name": "pagepin-comments-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "评论层（注入式 comments.js）端到端回归测试 —— 自包含，stub 后端，不需 DB",
+  "packageManager": "pnpm@10.18.1",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.1"
+  }
+}

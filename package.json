@@ -1,0 +1,47 @@
+{
+  "name": "pagepin",
+  "version": "0.1.0",
+  "description": "Self-hosted static page hosting with built-in pin-point review comments and an AI feedback loop.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pagepin/pagepin"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.18.1",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --target node20 --clean && tsc --noEmit",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "pnpm -C e2e test"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@noble/hashes": "^1.5.0",
+    "better-sqlite3": "^11.7.0",
+    "drizzle-orm": "^0.44.0",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "tsup": {
+    "external": [
+      "better-sqlite3"
+    ]
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

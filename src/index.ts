@@ -1,0 +1,95 @@
+/** Node 入口(Node 专有依赖只允许出现在这里与 db/node.ts、storage/fs.ts)。
+ *
+ * 启动流程:secret 落盘/读取 → loadConfig → SQLite → Storage →
+ * admin bootstrap(可选)→ createApp → @hono/node-server。
+ */
+
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { serve } from '@hono/node-server';
+import { eq } from 'drizzle-orm';
+
+import { createApp } from './app.js';
+import { hashPassword } from './auth/password.js';
+import { consoleBase, contentBase, loadConfig } from './config.js';
+import { createNodeDb } from './db/node.js';
+import { users } from './db/schema.js';
+import { createStorage } from './storage/index.js';
+import { nowIso, uuid } from './util.js';
+
+async function main(): Promise<void> {
+  // secret:env 优先;否则持久化在 {dataDir}/secret(首启生成,0600)——
+  // 重启不换 secret,会话/CSRF 不失效。
+  const dataDir = process.env.PAGEPIN_DATA_DIR || './data';
+  let secret = process.env.PAGEPIN_SECRET || '';
+  if (!secret) {
+    const secretFile = join(dataDir, 'secret');
+    if (existsSync(secretFile)) {
+      secret = readFileSync(secretFile, 'utf-8').trim();
+    }
+    if (!secret) {
+      secret = randomBytes(24).toString('hex'); // 48 hex
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(secretFile, secret, { mode: 0o600 });
+      console.log(`已生成会话密钥:${secretFile}`);
+    }
+  }
+
+  const cfg = loadConfig({ ...process.env, PAGEPIN_SECRET: secret });
+  const db = createNodeDb(join(cfg.dataDir, 'pagepin.db'));
+  const storage = await createStorage(cfg);
+
+  // admin bootstrap:配置了邮箱+密码则 upsert(存在则刷新密码哈希并确保 isAdmin,不动其他字段);
+  // 未配置时回落「首个注册用户为 admin」(signup 逻辑负责)。
+  if (cfg.adminEmail && cfg.adminPassword) {
+    const passwordHash = await hashPassword(cfg.adminPassword);
+    const existing = db.select().from(users).where(eq(users.email, cfg.adminEmail)).get();
+    if (existing) {
+      db.update(users).set({ passwordHash, isAdmin: true }).where(eq(users.id, existing.id)).run();
+    } else {
+      db.insert(users).values({
+        id: uuid(),
+        email: cfg.adminEmail,
+        passwordHash,
+        displayName: cfg.adminEmail.split('@')[0] || cfg.adminEmail,
+        isAdmin: true,
+        createdAt: nowIso(),
+      }).run();
+    }
+    console.log(`admin 账号就绪:${cfg.adminEmail}`);
+  }
+
+  // skill.md 与 console/dist 均相对仓库根定位;src/index.ts 与 dist/index.js
+  // 距仓库根同深(一层),'../' 在两种形态下都成立。
+  const skillMd = readFileSync(new URL('../skill.md', import.meta.url), 'utf-8');
+  const consoleDistUrl = new URL('../console/dist', import.meta.url);
+  const consoleDist = existsSync(consoleDistUrl) ? fileURLToPath(consoleDistUrl) : undefined;
+
+  const app = await createApp({ config: cfg, db, storage }, { consoleDist, skillMd });
+
+  serve({ fetch: app.fetch, port: cfg.port }, (info) => {
+    console.log(
+      `pagepin 已启动:mode=${cfg.mode} auth=${cfg.authMode} storage=${cfg.storage} port=${info.port}`,
+    );
+    if (cfg.mode === 'dual') {
+      console.log(`console=${consoleBase(cfg)} content=${contentBase(cfg)}`);
+    } else {
+      console.log(`地址:${cfg.baseUrl}(本机 http://localhost:${info.port})`);
+      if (!/\/\/(localhost|127\.0\.0\.1|\[::1\])([:/]|$)/.test(cfg.baseUrl)) {
+        console.warn(
+          '⚠️ 单域模式下托管页面与控制台同源:页面内 JS 可以已登录访问者的身份调用管理 API(含读取 API token)。' +
+            '仅适合信任环境(本地/团队内网);公网部署请改用 PAGEPIN_CONSOLE_HOST + PAGEPIN_CONTENT_HOST 双域隔离。',
+        );
+      }
+    }
+    if (!consoleDist) console.log('console dist 未构建:控制台前端走 vite 代理(pnpm -C console dev)');
+  });
+}
+
+main().catch((e) => {
+  console.error('pagepin 启动失败:', e);
+  process.exit(1);
+});

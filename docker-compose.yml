@@ -1,0 +1,47 @@
+services:
+  pagepin:
+    build: .
+    # image: ghcr.io/pagepin/pagepin   # once published, use this instead of build
+    ports:
+      - "8000:8000"
+    volumes:
+      - pagepin-data:/data
+    restart: unless-stopped
+    # environment:
+    #   # --- recommended minimum ---
+    #   PAGEPIN_ADMIN_EMAIL: admin@example.com      # bootstrap admin (upserted on start)
+    #   PAGEPIN_ADMIN_PASSWORD: change-me-please
+    #   PAGEPIN_BASE_URL: https://pages.example.com # public URL in single-domain mode
+    #
+    #   # --- dual-domain mode (isolate hosted content from the console) ---
+    #   # PAGEPIN_CONSOLE_HOST: pagepin.example.com
+    #   # PAGEPIN_CONTENT_HOST: pages.example.com
+    #   # PAGEPIN_EXTERNAL_SCHEME: https
+    #
+    #   # --- S3-compatible storage (e.g. the minio service below) ---
+    #   # PAGEPIN_STORAGE: s3
+    #   # PAGEPIN_S3_ENDPOINT: http://minio:9000
+    #   # PAGEPIN_S3_BUCKET: pagepin
+    #   # PAGEPIN_S3_ACCESS_KEY: pagepin
+    #   # PAGEPIN_S3_SECRET_KEY: change-me-please
+    #   # PAGEPIN_S3_PREFIX: pagepin/
+    #   # PAGEPIN_S3_REGION: auto
+    #   # PAGEPIN_S3_FORCE_PATH_STYLE: "true"
+
+  # --- optional: S3-compatible object storage via MinIO -------------------
+  # minio:
+  #   image: minio/minio
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: pagepin
+  #     MINIO_ROOT_PASSWORD: change-me-please
+  #   volumes:
+  #     - minio-data:/data
+  #   ports:
+  #     - "9000:9000"   # S3 API
+  #     - "9001:9001"   # web console
+  #   restart: unless-stopped
+
+volumes:
+  pagepin-data:
+  # minio-data:

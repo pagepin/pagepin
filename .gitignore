@@ -1,0 +1,25 @@
+# deps / build
+node_modules/
+dist/
+console/dist/
+console/node_modules/
+
+# runtime data
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.env.*
+
+# e2e artifacts
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/.playwright/
+
+# editor / os
+.idea/
+.vscode/
+.DS_Store
