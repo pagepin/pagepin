@@ -146,8 +146,9 @@ const imgShell = (title: string, src: string, inject: string) => `<!doctype html
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
 <style>
-body{margin:0;min-height:100vh;background:#22211e;display:grid;place-items:center;
-  font-family:-apple-system,"PingFang SC",sans-serif}
+body{margin:0;background:#22211e;font-family:-apple-system,"PingFang SC",sans-serif}
+/* 居中交给内层包裹,body 保持普通流 —— 对后插入 body 的脚本/容器免疫 */
+.pp-img-wrap{min-height:100vh;display:grid;place-items:center}
 figure{margin:24px;text-align:center}
 img{max-width:calc(100vw - 48px);max-height:calc(100vh - 110px);border-radius:6px;
   box-shadow:0 10px 40px rgba(0,0,0,.5);background:#fff}
@@ -155,11 +156,13 @@ figcaption{color:#8d877c;font-size:12.5px;margin-top:12px}
 </style>
 ${inject}</head>
 <body>
+<div class="pp-img-wrap">
 <figure>
   <img id="pp-image" src="${src}" alt="${title}"
        onerror="this.closest('figure').innerHTML='<figcaption>图片加载失败</figcaption>'">
   <figcaption>${title} · <a href="?raw=1" style="color:#8d877c">原图</a></figcaption>
 </figure>
+</div>
 </body></html>`;
 
 // 完整文档结构(html/head/body 都闭合):片段式 HTML 会让浏览器二次构树,居中布局先渲染后跳位

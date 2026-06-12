@@ -112,7 +112,9 @@
 
   /* ---------------- 样式 ---------------- */
   const STYLE = `
-  .pp-anno-root{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.6;color:#211f1c}
+  /* 根容器必须脱流(absolute + 零高):宿主 body 若是 grid/flex,在流 div 会成为布局项,
+     把页面内容挤跳。absolute 无定位祖先时以初始包含块为基准,layer 坐标系与从前一致 */
+  .pp-anno-root{position:absolute;top:0;left:0;width:100%;height:0;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.6;color:#211f1c}
   .pp-anno-root *{box-sizing:border-box;margin:0;padding:0}
   /* 十字光标：评论 UI 自身除外；弹窗打开期间（pp-anno-paused）整体暂停，输入时是正常光标 */
   .pp-anno-mode-on:not(.pp-anno-paused){cursor:crosshair}
