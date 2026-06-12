@@ -75,8 +75,10 @@ async function mountConsoleStatic(app: Hono<AppEnv>, consoleDist: string): Promi
   app.use('/assets/*', serveStatic({ root }));
   // 资源缺失时 404,不落 SPA fallback(静态目录的标准行为)
   app.get('/assets/*', (c) => c.text('not found', 404));
-  const indexHtml = readFileSync(join(consoleDist, 'index.html'), 'utf-8');
-  app.get('*', (c) => c.html(indexHtml));
+  // 生产缓存 index.html;开发态每请求现读 —— console 重新 build 后刷新即生效,免重启
+  const indexPath = join(consoleDist, 'index.html');
+  const cached = process.env.NODE_ENV === 'production' ? readFileSync(indexPath, 'utf-8') : null;
+  app.get('*', (c) => c.html(cached ?? readFileSync(indexPath, 'utf-8')));
 }
 
 /** 未捕获异常统一为 JSON 500(API 消费方拿到的错误体保持 {detail} 形状)。 */
