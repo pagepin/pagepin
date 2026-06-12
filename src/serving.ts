@@ -32,12 +32,27 @@ const HEAD_CLOSE_RE = /<\/head\s*>/i;
 const BODY_CLOSE_RE = /<\/body\s*>/i;
 
 // 仓库根 static/(src/ 与 dist/ 都在根下一层,'../static' 两边均成立)
-const COMMENTS_JS = new Uint8Array(readFileSync(new URL('../static/comments.js', import.meta.url)));
-const MARKED_JS = new Uint8Array(readFileSync(new URL('../static/marked.min.js', import.meta.url)));
+const COMMENTS_JS_URL = new URL('../static/comments.js', import.meta.url);
+const MARKED_JS_URL = new URL('../static/marked.min.js', import.meta.url);
 const etagOf = (data: Uint8Array) =>
   `"${createHash('sha256').update(data).digest('hex').slice(0, 16)}"`;
-const COMMENTS_JS_ETAG = etagOf(COMMENTS_JS);
-const MARKED_JS_ETAG = etagOf(MARKED_JS);
+
+interface StaticAsset {
+  data: Uint8Array<ArrayBuffer>;
+  etag: string;
+}
+function loadStatic(url: URL): StaticAsset {
+  const buf = readFileSync(url);
+  const data = new Uint8Array(new ArrayBuffer(buf.byteLength));
+  data.set(buf);
+  return { data, etag: etagOf(data) };
+}
+// 生产启动时缓存一次;开发态每请求现读(改 comments.js 刷新即生效,免重启)
+const PROD = process.env.NODE_ENV === 'production';
+const COMMENTS_CACHED = loadStatic(COMMENTS_JS_URL);
+const MARKED_CACHED = loadStatic(MARKED_JS_URL);
+const commentsAsset = () => (PROD ? COMMENTS_CACHED : loadStatic(COMMENTS_JS_URL));
+const markedAsset = () => (PROD ? MARKED_CACHED : loadStatic(MARKED_JS_URL));
 
 /** html.escape(quote=True) 等价 */
 function escapeHtml(s: string): string {
@@ -192,10 +207,14 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
   const app = new Hono<AppEnv>();
 
   // ★ 必须先于下方站点通配路由注册;"_pagepin" 不符合 handle 规则,无冲突
-  app.get('/_pagepin/comments.js', (c) => staticJs(c, COMMENTS_JS, COMMENTS_JS_ETAG, 'no-cache'));
-  app.get('/_pagepin/marked.min.js', (c) =>
-    staticJs(c, MARKED_JS, MARKED_JS_ETAG, 'public, max-age=86400'),
-  );
+  app.get('/_pagepin/comments.js', (c) => {
+    const a = commentsAsset();
+    return staticJs(c, a.data, a.etag, 'no-cache');
+  });
+  app.get('/_pagepin/marked.min.js', (c) => {
+    const a = markedAsset();
+    return staticJs(c, a.data, a.etag, 'public, max-age=86400');
+  });
 
   const notFound = (c: Context<AppEnv>) => c.html(NOT_FOUND_HTML, 404);
 

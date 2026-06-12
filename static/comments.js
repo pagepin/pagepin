@@ -754,6 +754,16 @@
     if (hoverHint && hoverHint !== document.body) hoverHint.classList.add('pp-anno-hover-hint');
   }, true);
 
+  /* 评论模式下屏蔽浏览器原生拖拽/划选:十字光标的语义是「点哪评哪」,
+   * 但按住稍一移动,图片会触发原生拖图幽灵、文本会开始划选,打点被截胡。
+   * 与十字光标同一套豁免:弹窗打开(paused)期间不拦,评论层自身 UI 不拦。 */
+  const modeArmed = (e) =>
+    state.mode &&
+    !document.documentElement.classList.contains('pp-anno-paused') &&
+    !(e.target.closest && e.target.closest('[data-pp-anno]'));
+  document.addEventListener('dragstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
+  document.addEventListener('selectstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
+
   function composeAt(e) {
     const node = e.target;
     const r = node.getBoundingClientRect();
