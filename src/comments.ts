@@ -18,7 +18,7 @@ import { commentThreads, sites } from './db/index.js';
 import type { CommentThreadRow, SiteRow, ThreadComment, UserRow } from './db/index.js';
 import { users } from './db/index.js';
 import type { AppDeps, AppEnv } from './types.js';
-import { normalizeSitePath, nowIso, uuid } from './util.js';
+import { normalizeSitePath, nowIso, shortId } from './util.js';
 
 const MAX_TEXT = 4000;
 const MAX_SELECTOR = 600;
@@ -254,14 +254,14 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       }
       const now = nowIso();
       const first: ThreadComment = {
-        id: uuid(),
+        id: shortId(),
         author_sub: user.id,
         author_name: authorName(user),
         text: cleanText(body.text),
         created_at: now,
       };
       const row: CommentThreadRow = {
-        id: uuid(),
+        id: shortId(),
         siteId: site.id,
         ownerHandle: handle,
         slug,
@@ -298,7 +298,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       const user = await viewerUser(c);
       const thread = getThread(c.req.param('tid') ?? '');
       const reply: ThreadComment = {
-        id: uuid(),
+        id: shortId(),
         author_sub: user.id,
         author_name: authorName(user),
         text: cleanText((raw as { text: string }).text),

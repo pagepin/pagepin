@@ -47,3 +47,20 @@ export function nowIso(): string {
 export function uuid(): string {
   return crypto.randomUUID();
 }
+
+const B62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+/** 短 id:12 位 base62 ≈ 71 bit 随机。会进分享链接的对象(评论线程等)用,
+ * UUID 36 位太长;站点/用户等纯内部 id 仍用 uuid()。拒绝采样去模偏。 */
+export function shortId(len = 12): string {
+  let out = '';
+  while (out.length < len) {
+    const buf = crypto.getRandomValues(new Uint8Array(len * 2));
+    for (const b of buf) {
+      if (b >= 248) continue; // 248 = 4×62,只取均匀覆盖区
+      out += B62[b % 62]!;
+      if (out.length === len) break;
+    }
+  }
+  return out;
+}
