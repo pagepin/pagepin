@@ -1,8 +1,8 @@
 /** 本地文件系统驱动(Node only)—— 自托管默认存储,`docker run -v data:/data` 即跑。 */
 
 import { createReadStream, createWriteStream } from 'node:fs';
-import { copyFile, mkdir, stat } from 'node:fs/promises';
-import { dirname, join, resolve, sep } from 'node:path';
+import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
@@ -56,6 +56,21 @@ export class FsStorage implements Storage {
     } catch {
       return false;
     }
+  }
+
+  async list(prefix: string): Promise<string[]> {
+    const dir = this.fileFor(prefix);
+    let entries;
+    try {
+      entries = await readdir(dir, { recursive: true, withFileTypes: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw e;
+    }
+    return entries
+      .filter((d) => d.isFile())
+      .map((d) => relative(dir, join(d.parentPath, d.name)).split(sep).join('/'))
+      .sort();
   }
 
   async open(key: string, opts?: { ifNoneMatch?: string }): Promise<{ meta: ObjectMeta; body: ReadableStream<Uint8Array> }> {

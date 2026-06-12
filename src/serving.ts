@@ -20,6 +20,7 @@ import { extOf, relHref } from './autoindex.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
 import { currentVersion, isPubliclyVisible, sites } from './db/index.js';
+import type { SiteRow, SiteVersion } from './db/index.js';
 import { NotFoundError, NotModifiedError } from './storage/index.js';
 import type { ObjectMeta } from './storage/index.js';
 import type { AppDeps, AppEnv } from './types.js';
@@ -335,6 +336,32 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
 
   const notFound = (c: Context<AppEnv>) => c.html(NOT_FOUND_HTML, 404);
 
+  /** 文件清单懒回填:清单随部署写入,更早的版本没有 → 有 list 能力的驱动(fs)
+   * 访问图片时现场补一次写回 DB,本次响应即带导航;S3 等无 list 驱动跳过。
+   * 回填清单会多出部署期生成物(自动索引页/根 html 别名),均非图片,不影响导航。 */
+  async function ensureFiles(site: SiteRow, cur: SiteVersion): Promise<string[] | undefined> {
+    if (cur.files || !storage.list) return cur.files;
+    let listed: string[];
+    try {
+      listed = await storage.list(cur.storage_prefix);
+    } catch {
+      return undefined; // 回填失败不影响出图
+    }
+    if (listed.length === 0 || listed.length > 2000) return undefined; // 上限与部署侧同一口径
+    cur.files = listed;
+    // 事务内重读再写回,避免覆盖并发 deploy 推入的新版本(与 deploy 同一套路);
+    // 不动 updatedAt —— 这是元数据补写,不是内容更新
+    db.transaction((tx) => {
+      const fresh = tx.select().from(sites).where(eq(sites.id, site.id)).get();
+      if (!fresh) return;
+      const v = fresh.versions.find((x) => x.id === cur.id);
+      if (!v || v.files) return;
+      v.files = listed;
+      tx.update(sites).set({ versions: fresh.versions }).where(eq(sites.id, site.id)).run();
+    });
+    return listed;
+  }
+
   /** 从 pathname 拆 handle/slug/站内路径(段级 decode,对齐 FastAPI path 参数解码)。 */
   function splitSitePath(c: Context<AppEnv>): { handle: string; slug: string; rest: string } {
     const segs = c.req.path.split('/'); // ['', ('p',) handle, slug, ...rest]
@@ -402,7 +429,7 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
             escapeHtml(fname),
             escapeHtml(c.req.path),
             injectHtml,
-            imageView(cur.files, rel, siteBase),
+            imageView(await ensureFiles(site, cur), rel, siteBase),
           ),
           200,
           baseHeaders,
