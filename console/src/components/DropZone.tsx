@@ -179,9 +179,15 @@ export function DropZone() {
             </button>
           </div>
           <div className="mt-5 flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3">
-            <span className="min-w-0 flex-1 truncate font-mono text-sm text-tide-800">
+            <a
+              className="min-w-0 flex-1 truncate font-mono text-sm text-tide-800 underline-offset-2 hover:underline"
+              href={stage.site.url}
+              target="_blank"
+              rel="noreferrer"
+              title={stage.site.url}
+            >
               {stage.site.url}
-            </span>
+            </a>
             <button
               type="button"
               className="btn-ghost !px-3 !py-1.5"
