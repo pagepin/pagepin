@@ -173,7 +173,8 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
         view.i < view.imgs.length - 1 ? view.imgs[view.i + 1]! : null,
         '下一张（→）',
         '›',
-      )
+      ) +
+      `\n<a class="pp-img-nav pp-img-close" id="pp-close" href="${escapeHtml(view.base)}" title="回到索引（Esc）">×</a>`
     : '';
   // 就地切换(lightbox):换 <img> 节点不跳页 → 零闪烁;pushState 同步 URL(刷新/分享/后退
   // 都落在正确图片);邻图预解码秒切。切换前派发 cancelable 的 pagepin:navigate,评论层
@@ -241,6 +242,23 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
   addEventListener('popstate', (e) => {
     show(e.state && typeof e.state.ppImg === 'number' ? e.state.ppImg : ${view.i}, false);
   });
+  // 关闭预览(×/Esc)回索引页。Esc 分层:评论弹窗/评论模式开着时归评论层
+  // (capture 比评论层的 document 监听先跑,看到的是未被它消费前的状态);
+  // × 在有未发草稿时拦下导航,评论层的点击外部处理会抖动提示,不丢稿。
+  const closeA = document.getElementById('pp-close');
+  closeA.addEventListener('click', (e) => {
+    const ta = document.querySelector('.pp-anno-popup textarea');
+    if (ta && ta.value.trim()) e.preventDefault();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const de = document.documentElement;
+    if (de.classList.contains('pp-anno-paused') || de.classList.contains('pp-anno-mode-on')) return;
+    if (document.querySelector('.pp-anno-sidebar.pp-anno-open')) return;
+    location.href = BASE;
+  }, true);
   history.replaceState({ ppImg: i }, '');
   preload();
 })();
@@ -265,6 +283,7 @@ figcaption{color:#8d877c;font-size:12.5px;margin-top:12px}
   text-decoration:none;user-select:none;transition:background .15s,color .15s}
 .pp-img-nav:hover{background:rgba(0,0,0,.6);color:#fff}
 .pp-img-prev{left:14px}.pp-img-next{right:14px}
+.pp-img-close{top:14px;right:14px;transform:none;font-size:22px}
 </style>
 ${inject}</head>
 <body>
