@@ -15,6 +15,7 @@ export interface SiteVersion {
   total_bytes: number;
   uploaded_by: string;
   created_at: string;
+  files?: string[]; // 上传文件 rel 清单(图片查看器壳「上一张/下一张」数据源;旧版本无此字段 → 不出导航)
 }
 
 export interface ThreadComment {

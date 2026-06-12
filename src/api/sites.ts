@@ -264,6 +264,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       uploaded_by: user.id,
       created_at: nowIso(),
     };
+    // 文件清单进版本记录(图片查看器壳的同版本导航用);超大站点不存,免得 versions JSON 列膨胀
+    if (uploaded.length <= 2000) version.files = uploaded.map((e) => e.rel);
     // 事务内重读再写回:整列替换 versions JSON,避免覆盖并发 deploy 推入的版本
     db.transaction((tx) => {
       const fresh = tx.select().from(sites).where(eq(sites.id, siteId)).get();

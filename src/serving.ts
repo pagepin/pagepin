@@ -16,6 +16,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 
+import { extOf, relHref } from './autoindex.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
 import { currentVersion, isPubliclyVisible, sites } from './db/index.js';
@@ -141,7 +142,51 @@ document.getElementById('pp-md-content').innerHTML =
 </script>
 </body></html>`;
 
-const imgShell = (title: string, src: string, inject: string) => `<!doctype html>
+/** 同版本兄弟图片导航(顺序与画廊一致:rel 升序)。 */
+interface ImgNav {
+  prev: string | null; // 绝对 href(已逐段编码)
+  next: string | null;
+  pos: string; // "3 / 12"
+}
+
+function imageNav(files: string[] | undefined, rel: string, siteBase: string): ImgNav | null {
+  if (!files) return null; // 旧版本无清单 → 不出导航
+  const imgs = files.filter((f) => IMG_EXTS.has(extOf(f))).sort((a, b) => a.localeCompare(b));
+  const i = imgs.indexOf(rel);
+  if (i < 0 || imgs.length < 2) return null;
+  return {
+    prev: i > 0 ? siteBase + relHref(imgs[i - 1]!) : null,
+    next: i < imgs.length - 1 ? siteBase + relHref(imgs[i + 1]!) : null,
+    pos: `${i + 1} / ${imgs.length}`,
+  };
+}
+
+const imgShell = (title: string, src: string, inject: string, nav: ImgNav | null): string => {
+  const arrows = nav
+    ? [
+        nav.prev
+          ? `<a class="pp-img-nav pp-img-prev" href="${escapeHtml(nav.prev)}" title="上一张（←）">‹</a>`
+          : '',
+        nav.next
+          ? `<a class="pp-img-nav pp-img-next" href="${escapeHtml(nav.next)}" title="下一张（→）">›</a>`
+          : '',
+      ].join('\n')
+    : '';
+  // 评论弹窗开着时方向键不翻页(防丢草稿);输入框里打字时同理
+  const navScript = nav
+    ? `<script>
+addEventListener('keydown', (e) => {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (document.querySelector('.pp-anno-popup')) return;
+  const prev = ${JSON.stringify(nav.prev)}, next = ${JSON.stringify(nav.next)};
+  if (e.key === 'ArrowLeft' && prev) location.href = prev;
+  else if (e.key === 'ArrowRight' && next) location.href = next;
+});
+</script>`
+    : '';
+  return `<!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
@@ -153,6 +198,13 @@ figure{margin:24px;text-align:center}
 img{max-width:calc(100vw - 48px);max-height:calc(100vh - 110px);border-radius:6px;
   box-shadow:0 10px 40px rgba(0,0,0,.5);background:#fff}
 figcaption{color:#8d877c;font-size:12.5px;margin-top:12px}
+/* 翻页箭头压在评论层之下(pin 2147482600 / 区域框 2147481900) */
+.pp-img-nav{position:fixed;top:50%;transform:translateY(-50%);z-index:2147480000;
+  width:44px;height:44px;border-radius:50%;display:grid;place-items:center;
+  background:rgba(0,0,0,.35);color:#d9d3c7;font-size:24px;line-height:1;
+  text-decoration:none;user-select:none;transition:background .15s,color .15s}
+.pp-img-nav:hover{background:rgba(0,0,0,.6);color:#fff}
+.pp-img-prev{left:14px}.pp-img-next{right:14px}
 </style>
 ${inject}</head>
 <body>
@@ -160,10 +212,13 @@ ${inject}</head>
 <figure>
   <img id="pp-image" src="${src}" alt="${title}"
        onerror="this.closest('figure').innerHTML='<figcaption>图片加载失败</figcaption>'">
-  <figcaption>${title} · <a href="?raw=1" style="color:#8d877c">原图</a></figcaption>
+  <figcaption>${title}${nav ? ` · ${nav.pos}` : ''} · <a href="?raw=1" style="color:#8d877c">原图</a></figcaption>
 </figure>
 </div>
+${arrows}
+${navScript}
 </body></html>`;
+};
 
 // 完整文档结构(html/head/body 都闭合):片段式 HTML 会让浏览器二次构树,居中布局先渲染后跳位
 const NOT_FOUND_HTML = `<!doctype html>
@@ -282,8 +337,14 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
 
     if (!rawMode && acceptHtml && IMG_EXTS.has(ext)) {
       if (await storage.exists(cur.storage_prefix + rel)) {
+        const siteBase = `${prefix}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}/`;
         return c.html(
-          imgShell(escapeHtml(fname), escapeHtml(c.req.path), injectHtml),
+          imgShell(
+            escapeHtml(fname),
+            escapeHtml(c.req.path),
+            injectHtml,
+            imageNav(cur.files, rel, siteBase),
+          ),
           200,
           baseHeaders,
         );

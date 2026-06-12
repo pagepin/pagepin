@@ -17,11 +17,11 @@ function escapeHtml(s: string): string {
 }
 
 /** 站内相对 href:逐段 URL 编码(路径已 normalizeSitePath,无 ../)。 */
-function relHref(rel: string): string {
+export function relHref(rel: string): string {
   return rel.split('/').map(encodeURIComponent).join('/');
 }
 
-function extOf(rel: string): string {
+export function extOf(rel: string): string {
   const name = rel.split('/').pop() ?? '';
   return name.includes('.') ? '.' + name.split('.').pop()!.toLowerCase() : '';
 }
