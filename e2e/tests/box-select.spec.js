@@ -98,3 +98,53 @@ test('轻点图片(位移 < 阈值)仍是点评论,不带 rw/rh', async ({ page 
   expect(created.rh == null).toBeTruthy();
   await expect(page.locator('.pp-anno-region')).toHaveCount(0);
 });
+
+test('框选 composer:页面滚动后弹窗跟随右下角,不吸去左上角', async ({ page }) => {
+  await setup(page, { html: IMG_HTML });
+  await goto(page);
+  await expect(page.locator('.pp-anno-toolbar')).toBeVisible();
+  await page.keyboard.press('c');
+
+  await page.mouse.move(150, 170);
+  await page.mouse.down();
+  await page.mouse.move(350, 290, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('.pp-anno-popup')).toBeVisible();
+
+  const before = await bbox(page.locator('.pp-anno-popup'));
+  await page.evaluate(() => window.scrollBy(0, 40)); // 模拟 focus 微滚
+  await page.waitForTimeout(120); // 等滚动触发的重摆
+  const after = await bbox(page.locator('.pp-anno-popup'));
+  // 页面坐标系不变 = 视口坐标 y 减小约 40,x 基本不动(修复前会向左跳一个框宽)
+  expect(Math.abs(after.x - before.x)).toBeLessThan(6);
+  // y 允许 positionPopup 的摆放偏移(±12px 翻转/间距逻辑);真正的回归信号是 x 不向左跳
+  expect(Math.abs(after.y - (before.y - 40))).toBeLessThan(16);
+});
+
+test('两步式:空 composer 开着时点别处只收掉,再点才开新框;⌥+点击直接弹', async ({ page }) => {
+  await setup(page, { html: IMG_HTML });
+  await goto(page);
+  await expect(page.locator('.pp-anno-toolbar')).toBeVisible();
+  await page.keyboard.press('c');
+
+  await page.mouse.click(200, 200);
+  await expect(page.locator('.pp-anno-popup')).toBeVisible();
+  // 没输入,点别处(选 (560,620):图片与弹窗都盖不到的空白区):只关闭,不再弹新框
+  await page.mouse.click(560, 620);
+  await expect(page.locator('.pp-anno-popup')).toHaveCount(0);
+  // 再点一下才开新的
+  await page.mouse.click(560, 620);
+  await expect(page.locator('.pp-anno-popup')).toBeVisible();
+  // 有草稿时点别处:抖动拦截,弹窗仍在
+  await page.fill('.pp-anno-popup textarea', '还没写完');
+  await page.mouse.click(150, 150);
+  await expect(page.locator('.pp-anno-popup')).toBeVisible();
+  // Esc 放弃草稿(并按设计退出评论模式);⌥+点击免模式直接弹出
+  // 注:mouse.click 不支持 modifiers 参数,必须真按住 Alt
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.pp-anno-popup')).toHaveCount(0);
+  await page.keyboard.down('Alt');
+  await page.mouse.click(300, 250);
+  await page.keyboard.up('Alt');
+  await expect(page.locator('.pp-anno-popup')).toBeVisible();
+});

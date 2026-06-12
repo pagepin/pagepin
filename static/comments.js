@@ -649,12 +649,16 @@
     if (selector !== PAGE_SELECTOR) {
       try { popupTarget = document.querySelector(selector); } catch (e) { popupTarget = null; }
       setBound(popupTarget);
+      // 跟随点必须 = 初始弹出点:框选时弹窗开在框右下角,若跟随 rx/ry(左上角),
+      // focus 引起的微滚一触发重摆,弹窗就会被吸去左上角(实测「点输入框弹窗移位」)
+      const fx = box ? Math.min(1, rx + box.rw) : rx;
+      const fy = box ? Math.min(1, ry + box.rh) : ry;
       p._getPos = () => {
         let node = null;
         try { node = document.querySelector(selector); } catch (e) { /* ignore */ }
         if (!node) return null;
         const r = node.getBoundingClientRect();
-        return { x: r.left + scrollX + r.width * rx, y: r.top + scrollY + r.height * ry };
+        return { x: r.left + scrollX + r.width * fx, y: r.top + scrollY + r.height * fy };
       };
     }
     if (box && popupTarget) {
@@ -873,6 +877,12 @@
     if (state.mode || e.altKey) {            // 评论模式，或任意时刻 ⌥+点击
       e.preventDefault();
       e.stopPropagation();
+      // 两步式:已有弹窗开着时,这次点击只负责收掉它(空稿直接关、有稿抖动拦截),
+      // 不在新位置立刻再开 —— 否则「一路点一路冒框」很乱。⌥+点击是明确意图,仍直接弹。
+      if (state.openPopup && !e.altKey) {
+        closePopup();
+        return;
+      }
       composeAt(e);
       return;
     }
