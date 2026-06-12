@@ -10,6 +10,8 @@ import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 
+import { galleryIndexHtml, redirectIndexHtml } from '../autoindex.js';
+import type { IndexEntry } from '../autoindex.js';
 import { siteUrl } from '../config.js';
 import {
   commentThreads,
@@ -208,6 +210,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const siteLimit = cfg.maxSiteMb * 1024 * 1024;
     let total = 0;
     const seen = new Set<string>();
+    const uploaded: IndexEntry[] = []; // 自动索引页用(rel + size)
 
     for (let i = 0; i < files.length; i++) {
       const f = files[i]!;
@@ -216,6 +219,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       if (rel === null) return c.json({ detail: `非法路径：${rawPath}` }, 422);
       if (seen.has(rel)) return c.json({ detail: `路径重复：${rel}` }, 422);
       seen.add(rel);
+      uploaded.push({ rel, size: f.size });
       const contentType = guessContentType(rel);
       // File.size 预判(超限即 413,且完全不写存储)
       if (f.size > perFileLimit) {
@@ -228,8 +232,10 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       }
     }
 
-    // 拖单个 HTML 文件(根目录唯一 .html/.htm 且没有 index.html)时自动补 index.html 别名,
-    // 让根 URL /{handle}/{slug}/ 直接可访问 —— 「拖一个文件就能用」的核心场景。
+    // 没有 index.html 时的根 URL 兜底(三层,任一命中即止;生成物不计入 file_count/total_bytes):
+    //   1. 根目录唯一 .html/.htm → 别名 copy(「拖一个 html 就能用」)
+    //   2. 全站只有一个文件(图片/md/任意)→ 生成秒跳页,落到查看器壳
+    //   3. 多文件无 html(图片文件夹等)→ 生成画廊/文件索引页(评论层照常注入)
     if (!seen.has('index.html')) {
       const rootHtmls = [...seen].filter(
         (p) =>
@@ -237,6 +243,16 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       );
       if (rootHtmls.length === 1) {
         await storage.copy(storagePrefix + rootHtmls[0]!, storagePrefix + 'index.html');
+      } else {
+        const html =
+          uploaded.length === 1
+            ? redirectIndexHtml(uploaded[0]!.rel)
+            : galleryIndexHtml(title || slug, uploaded);
+        await storage.put(
+          storagePrefix + 'index.html',
+          new TextEncoder().encode(html),
+          'text/html; charset=utf-8',
+        );
       }
     }
 
