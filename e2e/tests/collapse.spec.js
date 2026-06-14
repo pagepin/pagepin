@@ -109,3 +109,18 @@ test('dot 有 role=button 与含未解决数的 aria-label', async ({ page }) =>
   await expect(dot).toHaveAttribute('role', 'button');
   await expect(dot).toHaveAttribute('aria-label', /2 unresolved/);
 });
+
+test('键盘 Enter 恢复后焦点落进命令条(不丢到 body)', async ({ page }) => {
+  await setup(page, { threads: [mkThread(1, '#t1')] });
+  await goto(page);
+  await act(page, 'collapse').click();
+  await collapsed(page).focus();
+  await page.keyboard.press('Enter');
+  await expect(bar(page)).toBeVisible();
+  const focusedInBar = await page.evaluate(() => {
+    const ae = document.activeElement;
+    const b = document.querySelector('[data-pp-role="bar"]');
+    return !!(ae && b && b.contains(ae) && ae.tagName === 'BUTTON');
+  });
+  expect(focusedInBar).toBe(true);
+});

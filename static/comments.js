@@ -155,7 +155,7 @@
 
   /* ---------------- 样式（新交互模型） ---------------- */
   const STYLE = `
-  .pp-anno-root{position:absolute;top:0;left:0;width:100%;height:0;font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;font-size:14px;line-height:1.55;color:#11161b}
+  .pp-anno-root{position:absolute;top:0;left:0;width:100%;height:0;font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;font-size:14px;line-height:1.55;color:#11161b;transform:none;filter:none}
   .pp-anno-root *{box-sizing:border-box;margin:0;padding:0}
   .pp-anno-ic{display:inline-flex}.pp-anno-ic svg{display:block}
   .pp-anno-mode-on:not(.pp-anno-paused){cursor:crosshair}
@@ -181,7 +181,7 @@
   .pp-anno-rbtn{width:32px;height:32px;padding:0!important;justify-content:center}
   .pp-anno-kbd{font:500 10px/1 'JetBrains Mono',monospace;color:#6b7480;letter-spacing:.12em}
   /* ── pin（泪滴，kind 上色，白圈在任意宿主色上都清晰） ── */
-  .pp-anno-layer{position:absolute;top:0;left:0;width:100%;height:0;z-index:2147482000}
+  .pp-anno-layer{position:absolute;top:0;left:0;width:100%;height:0;z-index:2147482000;transform:none;filter:none}
   .pp-anno-pin{position:absolute;z-index:2147482600;width:30px;height:30px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font:700 12.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transform:translate(-4px,-26px);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(28,26,23,.3);user-select:none;transition:transform .15s,box-shadow .15s}
   .pp-anno-pin:hover{transform:translate(-4px,-26px) scale(1.12)}
   .pp-anno-pin.pp-anno-pulse{animation:ppPin .45s cubic-bezier(.2,1.6,.4,1)}
@@ -250,7 +250,7 @@
   .pp-anno-caught{display:inline-flex;align-items:center;gap:7px;padding:0 6px 0 13px;color:#7fe3d6;font-weight:600;font-size:13px}
   .pp-anno-toast{position:fixed;bottom:74px;left:50%;transform:translateX(-50%);z-index:2147483100;background:#15191c;color:#f3efe7;font-size:12.5px;font-weight:500;padding:9px 16px;border-radius:9px;box-shadow:0 10px 28px -8px rgba(15,124,114,.6);animation:ppPop .2s}
   /* ── 收起态（命令条第 5 形态：tuck 成一颗 pin teardrop，同 bar 的暗色 chrome） ── */
-  .pp-anno-collapsed{position:fixed;width:48px;height:48px;z-index:2147483000;display:grid;place-items:center;background:#15191c;color:#e7ebee;box-shadow:0 14px 40px -10px rgba(17,22,27,.55),0 2px 6px rgba(17,22,27,.3);cursor:grab;user-select:none;transition:transform .16s,box-shadow .16s;animation:ppDotIn .18s cubic-bezier(.2,1.3,.4,1)}
+  .pp-anno-collapsed{position:fixed;width:48px;height:48px;z-index:2147483001;display:grid;place-items:center;background:#15191c;color:#e7ebee;box-shadow:0 14px 40px -10px rgba(17,22,27,.55),0 2px 6px rgba(17,22,27,.3);cursor:grab;user-select:none;pointer-events:auto;touch-action:none;transition:transform .16s,box-shadow .16s;animation:ppDotIn .18s cubic-bezier(.2,1.3,.4,1)}
   .pp-anno-collapsed:hover{transform:scale(1.07);box-shadow:0 18px 48px -10px rgba(17,22,27,.6),0 2px 8px rgba(17,22,27,.35)}
   .pp-anno-collapsed:focus-visible{outline:2px solid #7fe3d6;outline-offset:3px}
   .pp-anno-collapsed.pp-anno-zero{color:#7fe3d6}
@@ -262,11 +262,13 @@
   @keyframes ppBarIn{from{opacity:0;transform:translateX(-50%) scale(.9)}}
   @media (max-width:640px){.pp-anno-bar{flex-wrap:wrap;justify-content:center}.pp-anno-list{width:calc(100vw - 24px)}}
   @media (prefers-reduced-motion:reduce){.pp-anno-root *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+  @media print{.pp-anno-root{display:none!important}}
   `;
 
   /* ---------------- UI 骨架 ---------------- */
   let root, layer, bar, listEl, dotEl;
   let draggingDot = false;
+  let dragActive = false; // 拖拽 session 进行中（防重入；区别于 draggingDot=已移动）
 
   function buildUI() {
     const style = document.createElement('style');
@@ -282,18 +284,18 @@
     dotEl = el('div', 'pp-anno-collapsed');
     dotEl.dataset.ppAnno = '1';
     dotEl.dataset.ppRole = 'collapsed';
-    dotEl.title = 'Open comments';
     dotEl.tabIndex = 0;
     dotEl.setAttribute('role', 'button');
-    dotEl.setAttribute('aria-label', 'Open comments');
+    dotEl.setAttribute('aria-label', 'Open comments'); // 可访问名仅由 aria-label 提供（不设 title，避免重复读）
     dotEl.style.display = 'none';
     bindCollapseDrag();
+    loadCollapse(); // 先确定收起态，使 bar 永不以可见态插入 DOM（消除恢复时的一帧闪条）
+    if (state.collapsed) bar.style.display = 'none';
     root.append(layer, bar, dotEl);
     document.body.appendChild(root);
-    loadCollapse();
     renderBar();
-    // 从上次会话恢复收起态：隐藏 bar，把 dot 摆到记忆的角落
-    if (state.collapsed) { bar.style.display = 'none'; renderCollapse(); dotEl.style.display = ''; }
+    // 从上次会话恢复收起态：把 dot 摆到记忆的角落
+    if (state.collapsed) { renderCollapse(); dotEl.style.display = ''; }
   }
 
   /* ---------------- 命令条变形 ---------------- */
@@ -403,22 +405,29 @@
   // 展开 = 离开收起态：任何交互（进 comment/walk、开任何弹层）前都先 expand
   function expand() {
     if (!state.collapsed) return;
+    const refocus = document.activeElement === dotEl; // 键盘从 dot 触发：展开后把焦点带进命令条
     state.collapsed = false;
     persistCollapse();
     dotEl.style.display = 'none';
     bar.style.display = '';
     bar.classList.remove('pp-anno-barin'); void bar.offsetWidth; bar.classList.add('pp-anno-barin');
     renderBar();
+    if (refocus) { const b = bar.querySelector('button'); if (b) b.focus(); }
   }
   function bindCollapseDrag() {
-    // 键盘可达：Enter/Space 恢复命令条（dot 是 role=button、tabindex=0）
+    // 键盘可达：Enter/Space 恢复命令条（拖拽进行中忽略键盘，避免冲突）
     dotEl.addEventListener('keydown', (e) => {
+      if (draggingDot) return;
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(false); }
     });
-    dotEl.addEventListener('mousedown', (down) => {
-      if (down.button !== 0) return;
+    // 拖拽用 Pointer Events + setPointerCapture：跨 iframe / 移出窗口都能收到 up（mouseup 会丢），并顺带支持触屏
+    dotEl.addEventListener('pointerdown', (down) => {
+      if (down.pointerType === 'mouse' && down.button !== 0) return; // 鼠标只响应左键
+      if (dragActive) return; // 防重入：同一时刻只允许一个拖拽 session
+      dragActive = true;
       down.preventDefault();
       down.stopPropagation();
+      try { dotEl.setPointerCapture(down.pointerId); } catch (e) { /* 不支持则退化 */ }
       const r = dotEl.getBoundingClientRect();
       const offX = down.clientX - r.left, offY = down.clientY - r.top;
       let moved = false;
@@ -432,21 +441,24 @@
         dotEl.style.right = dotEl.style.bottom = 'auto';
       };
       const onUp = (e) => {
-        removeEventListener('mousemove', onMove, true);
-        removeEventListener('mouseup', onUp, true);
+        dotEl.removeEventListener('pointermove', onMove);
+        dotEl.removeEventListener('pointerup', onUp);
+        dotEl.removeEventListener('pointercancel', onUp);
+        try { dotEl.releasePointerCapture(down.pointerId); } catch (e) { /* ignore */ }
         try {
-          if (!moved) { setCollapsed(false); return; } // 没拖动 = 点击 → 恢复
+          if (!moved) { setCollapsed(false); return; } // 没拖动 = 点击/轻触 → 恢复
           // 吸附到最近角
           state.collapseCorner = (e.clientY < innerHeight / 2 ? 't' : 'b') + (e.clientX < innerWidth / 2 ? 'l' : 'r');
           persistCollapse();
           placeCollapse();
-        } finally { // 无论吸附是否抛错，都复位拖拽标记，避免 dot 计数永久停更
-          draggingDot = false;
+        } finally { // 无论吸附是否抛错/手势是否被取消，都复位标记，避免 dot 卡死
+          draggingDot = false; dragActive = false;
           dotEl.classList.remove('pp-anno-dragging');
         }
       };
-      addEventListener('mousemove', onMove, true);
-      addEventListener('mouseup', onUp, true);
+      dotEl.addEventListener('pointermove', onMove);
+      dotEl.addEventListener('pointerup', onUp);
+      dotEl.addEventListener('pointercancel', onUp); // 系统取消手势（如来电、四指切换）兜底复位
     });
   }
 
@@ -1159,7 +1171,8 @@
     state.walk.curId = null;
     if (state.mode === 'walk') setMode('rest');
     render();
-    fetchThreads().then((data) => { state.threads = data.threads; render(); }).catch(() => { /* 静默 */ });
+    // 守卫乱序响应：快速连续导航时，丢弃晚到的旧 path 结果（否则 dot/pin 会闪错计数）
+    fetchThreads().then((data) => { if (CFG.path !== next) return; state.threads = data.threads; render(); }).catch(() => { /* 静默 */ });
   });
 
   /* ---------------- 深链 #pp-comment-<id>（保留 id 形态宽匹配） ---------------- */
