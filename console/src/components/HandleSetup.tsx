@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { AtSign, Check, Loader2, X } from 'lucide-react';
+import { AtSign, Check, Loader2, AlertTriangle, X } from 'lucide-react';
 import { api, ApiError } from '../api';
 import { useStore } from '../store';
 import { toast, toastError } from './Toast';
 import { HANDLE_RE } from '../types';
+
+const HANDLE_HINT = '2–32 chars: lowercase letters, digits, or hyphens, starting with a letter';
 
 type CheckState =
   | { kind: 'idle' }
@@ -48,7 +50,7 @@ export function HandleSetup() {
       return;
     }
     if (!HANDLE_RE.test(value)) {
-      setCheck({ kind: 'bad', reason: '2-32 位小写字母 / 数字 / 中划线，且以字母开头' });
+      setCheck({ kind: 'bad', reason: HANDLE_HINT });
       return;
     }
     setCheck({ kind: 'checking' });
@@ -59,7 +61,7 @@ export function HandleSetup() {
         .then((r) => {
           if (seq.current !== mySeq) return;
           if (r.ok) setCheck({ kind: 'ok' });
-          else setCheck({ kind: 'bad', reason: r.reason || '不可用' });
+          else setCheck({ kind: 'bad', reason: r.reason || 'Not available' });
         })
         .catch(() => {
           if (seq.current === mySeq) setCheck({ kind: 'idle' });
@@ -73,13 +75,13 @@ export function HandleSetup() {
     try {
       const { handle: confirmed } = await api.setHandle(handle);
       if (me) setMe({ ...me, handle: confirmed, needs_handle: false });
-      toast(`你的 handle 已设为 @${confirmed}`);
+      toast(`Handle set to @${confirmed}`);
       void refreshSites();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
-        setCheck({ kind: 'bad', reason: '已被占用，换一个试试' });
+        setCheck({ kind: 'bad', reason: 'Already taken — try another' });
       } else if (e instanceof ApiError && e.status === 422) {
-        setCheck({ kind: 'bad', reason: '格式不正确' });
+        setCheck({ kind: 'bad', reason: 'Invalid format' });
       } else {
         toastError(e);
       }
@@ -92,15 +94,15 @@ export function HandleSetup() {
 
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4">
-      <div className="w-full max-w-md animate-fade-up rounded-2xl border border-stone-200 bg-white p-8 shadow-card">
-        <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-xl bg-tide-50 text-tide-600">
+      <div className="w-full max-w-md animate-fade-up rounded-card border border-ink-200 bg-white p-7 shadow-login">
+        <div className="flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
           <AtSign className="h-5 w-5" />
         </div>
-        <h1 className="mt-4 text-xl font-semibold text-stone-900">先取一个 handle</h1>
-        <p className="mt-2 text-sm leading-relaxed text-stone-500">
-          它会出现在你所有页面的分享链接里：
+        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">Pick a handle</h1>
+        <p className="mt-1.5 text-[13px] leading-relaxed text-ink-500">
+          It appears in every share link:
           <br />
-          <span className="font-mono text-xs text-stone-600">
+          <span className="font-mono text-xs text-ink-600">
             {me?.content_base ?? ''}/
             <span className="rounded bg-tide-50 px-1 py-0.5 font-semibold text-tide-700">
               {handle || 'your-handle'}
@@ -109,14 +111,14 @@ export function HandleSetup() {
           </span>
         </p>
 
-        <div className="relative mt-6">
-          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-mono text-sm text-stone-400">
+        <div className="relative mt-5">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-mono text-sm text-ink-400">
             @
           </span>
           <input
             className="input pl-8 font-mono"
             value={handle}
-            placeholder="例如 zhang-san"
+            placeholder="your-handle"
             autoFocus
             maxLength={32}
             onChange={(e) => {
@@ -129,35 +131,32 @@ export function HandleSetup() {
             }}
           />
           <span className="absolute inset-y-0 right-3 flex items-center">
-            {check.kind === 'checking' && (
-              <Loader2 className="h-4 w-4 animate-spin text-stone-400" />
-            )}
+            {check.kind === 'checking' && <Loader2 className="h-4 w-4 animate-spin text-ink-400" />}
             {check.kind === 'ok' && <Check className="h-4 w-4 text-tide-600" />}
             {check.kind === 'bad' && <X className="h-4 w-4 text-red-500" />}
           </span>
         </div>
 
-        <div className="mt-2 min-h-[20px] text-xs">
+        <div className="mt-2 min-h-[18px] text-xs">
           {check.kind === 'bad' && <span className="text-red-600">{check.reason}</span>}
-          {check.kind === 'ok' && <span className="text-tide-700">这个名字可以用</span>}
+          {check.kind === 'ok' && <span className="text-tide-700">That name is available.</span>}
           {check.kind !== 'bad' && check.kind !== 'ok' && (
-            <span className="text-stone-400">
-              2-32 位小写字母 / 数字 / 中划线，以字母开头
-            </span>
+            <span className="text-ink-400">{HANDLE_HINT}</span>
           )}
         </div>
 
         <button
           type="button"
-          className="btn-primary mt-5 w-full"
+          className="btn-primary mt-4 w-full !py-2.5"
           disabled={!canSubmit}
           onClick={() => void submit()}
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          确认使用 @{handle || '…'}
+          Claim @{handle || '…'}
         </button>
-        <p className="mt-3 text-center text-xs text-amber-700/80">
-          确认后不可修改，请谨慎选择
+        <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] text-amber-700">
+          <AlertTriangle className="h-3 w-3" />
+          Can&rsquo;t be changed once set.
         </p>
       </div>
     </div>

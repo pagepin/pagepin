@@ -45,6 +45,7 @@ export default {
       boxShadow: {
         card: '0 1px 2px rgba(17, 22, 27, 0.04)',
         lift: '0 2px 8px rgba(17, 22, 27, 0.06), 0 14px 30px -12px rgba(17, 22, 27, 0.14)',
+        login: '0 12px 30px -16px rgba(17, 22, 27, 0.2)',
         frame: '0 24px 60px -28px rgba(17, 22, 27, 0.28), 0 2px 8px rgba(17, 22, 27, 0.05)',
         modal: '0 20px 50px -18px rgba(0, 0, 0, 0.5)',
         toast: '0 10px 30px -8px rgba(0, 0, 0, 0.4)',

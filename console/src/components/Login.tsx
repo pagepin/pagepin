@@ -31,11 +31,11 @@ export function Login() {
   async function submit() {
     if (submitting) return;
     if (!email.trim() || !password) {
-      setError('请输入邮箱和密码');
+      setError('Please enter your email and password');
       return;
     }
     if (mode === 'signup' && password.length < 8) {
-      setError('密码至少 8 位');
+      setError('Password must be at least 8 characters');
       return;
     }
     setSubmitting(true);
@@ -48,7 +48,7 @@ export function Login() {
       }
       location.href = next;
     } catch (e) {
-      setError(e instanceof Error ? e.message : '请求失败');
+      setError(e instanceof Error ? e.message : 'Request failed');
       setSubmitting(false);
     }
   }
@@ -56,9 +56,9 @@ export function Login() {
   if (!config) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="flex items-center gap-2 text-stone-400">
+        <div className="flex items-center gap-2 text-ink-400">
           <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">正在进入 pagepin…</span>
+          <span className="text-sm">Loading pagepin…</span>
         </div>
       </div>
     );
@@ -68,24 +68,30 @@ export function Login() {
   if (config.mode !== 'password') {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="w-full max-w-md animate-fade-up rounded-2xl border border-stone-200 bg-white p-8 shadow-card">
-          <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-xl bg-tide-50 text-tide-600">
+        <div className="w-full max-w-md animate-fade-up rounded-card border border-ink-200 bg-white p-7 shadow-login">
+          <div className="flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
             <LogIn className="h-5 w-5" />
           </div>
-          <h1 className="mt-4 text-xl font-semibold text-stone-900">登录 pagepin</h1>
-          <p className="mt-2 text-sm leading-relaxed text-stone-500">
-            使用单点登录（SSO）继续。
+          <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
+            Sign in to pagepin
+          </h1>
+          <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
+            This instance uses single sign-on. Continue with your identity provider.
           </p>
           <button
             type="button"
-            className="btn-primary mt-6 w-full"
+            className="btn-primary mt-5 w-full !py-2.5"
             onClick={() => {
               location.href = '/auth/login?next=' + encodeURIComponent(next);
             }}
           >
             <LogIn className="h-4 w-4" />
-            使用 SSO 登录
+            Continue with SSO
           </button>
+          <div className="mt-4 border-t border-ink-100 pt-3.5 text-center text-[11px] text-ink-400">
+            Configured via{' '}
+            <span className="font-mono text-ink-500">AUTH_MODE={config.mode}</span>
+          </div>
         </div>
       </div>
     );
@@ -95,22 +101,24 @@ export function Login() {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-md animate-fade-up rounded-2xl border border-stone-200 bg-white p-8 shadow-card">
-        <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-xl bg-tide-50 text-tide-600">
+      <div className="w-full max-w-md animate-fade-up rounded-card border border-ink-200 bg-white p-7 shadow-login">
+        <div className="flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
           {isSignup ? <UserPlus className="h-5 w-5" /> : <KeyRound className="h-5 w-5" />}
         </div>
-        <h1 className="mt-4 text-xl font-semibold text-stone-900">
-          {isSignup ? '注册 pagepin' : '登录 pagepin'}
+        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
+          {isSignup ? 'Create your account' : 'Sign in to pagepin'}
         </h1>
-        <p className="mt-2 text-sm leading-relaxed text-stone-500">
-          {isSignup ? '创建账号，开始托管你的静态页面。' : '使用邮箱和密码登录。'}
+        <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
+          {isSignup
+            ? 'Host static pages and collect pin-point review comments.'
+            : 'Use your email and password.'}
         </p>
 
-        <div className="mt-6 space-y-3">
+        <div className="mt-5 space-y-2.5">
           <input
             className="input"
             type="email"
-            placeholder="邮箱"
+            placeholder="Email"
             autoFocus
             autoComplete="email"
             value={email}
@@ -122,7 +130,7 @@ export function Login() {
           <input
             className="input"
             type="password"
-            placeholder={isSignup ? '密码（至少 8 位）' : '密码'}
+            placeholder={isSignup ? 'At least 8 characters' : 'Password'}
             autoComplete={isSignup ? 'new-password' : 'current-password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -134,7 +142,7 @@ export function Login() {
             <input
               className="input"
               type="text"
-              placeholder="显示名（可选）"
+              placeholder="Display name (optional)"
               maxLength={64}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
@@ -145,32 +153,32 @@ export function Login() {
           )}
         </div>
 
-        <div className="mt-2 min-h-[20px] text-xs">
+        <div className="mt-2 min-h-[18px] text-xs">
           {error && <span className="text-red-600">{error}</span>}
         </div>
 
         <button
           type="button"
-          className="btn-primary mt-3 w-full"
+          className="btn-primary mt-2 w-full !py-2.5"
           disabled={submitting}
           onClick={() => void submit()}
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isSignup ? '注册并登录' : '登录'}
+          {isSignup ? 'Sign up' : 'Sign in'}
         </button>
 
         {config.allow_signup && (
-          <p className="mt-4 text-center text-xs text-stone-400">
-            {isSignup ? '已有账号？' : '还没有账号？'}
+          <p className="mt-4 text-center text-xs text-ink-400">
+            {isSignup ? 'Already have an account?' : 'No account yet?'}
             <button
               type="button"
-              className="ml-1 text-tide-600 underline hover:text-tide-700"
+              className="ml-1 font-semibold text-tide-600 underline underline-offset-2 hover:text-tide-700"
               onClick={() => {
                 setMode(isSignup ? 'login' : 'signup');
                 setError(null);
               }}
             >
-              {isSignup ? '去登录' : '注册'}
+              {isSignup ? 'Sign in' : 'Sign up'}
             </button>
           </p>
         )}

@@ -58,11 +58,11 @@ export function Confirmer() {
   return createPortal(
     // z-[60]：要压住 TokenDialog（z-50）—— 轮换/吊销的确认从它里面弹出
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/40 px-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-ink-900/55 px-4"
       onClick={() => settle(false)}
     >
       <div
-        className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-card animate-fade-up"
+        className="w-full max-w-sm rounded-card border border-ink-200 bg-white p-5 shadow-modal animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3">
@@ -70,8 +70,8 @@ export function Confirmer() {
             <AlertTriangle className="h-4 w-4 text-red-600" />
           </span>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-stone-800">{req.title}</div>
-            {req.body && <p className="mt-1 text-xs leading-relaxed text-stone-500">{req.body}</p>}
+            <div className="text-sm font-bold text-ink-800">{req.title}</div>
+            {req.body && <p className="mt-1 text-xs leading-relaxed text-ink-500">{req.body}</p>}
           </div>
         </div>
         <div className="mt-4 flex justify-end gap-2">
@@ -85,7 +85,7 @@ export function Confirmer() {
           <button
             type="button"
             autoFocus
-            className="rounded-lg bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+            className="rounded-field bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
             onClick={() => settle(true)}
           >
             {req.confirmText}
