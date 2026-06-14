@@ -1,6 +1,4 @@
-/** 存储抽象 —— 唯一入口(put/copy/exists + 流式 open)。 */
-
-import type { Config } from '../config.js';
+/** 存储抽象 —— 纯接口(edge-safe,无 Node 依赖)。Node 工厂在 storage/factory.ts。 */
 
 export interface ObjectMeta {
   etag?: string;
@@ -23,14 +21,4 @@ export interface Storage {
   list?(prefix: string): Promise<string[]>;
   /** 404 → NotFoundError,ETag 命中 → NotModifiedError。 */
   open(key: string, opts?: { ifNoneMatch?: string }): Promise<{ meta: ObjectMeta; body: ReadableStream<Uint8Array> }>;
-}
-
-/** Node 入口用的工厂;Workers 入口自带 R2 驱动,不走这里。 */
-export async function createStorage(cfg: Config): Promise<Storage> {
-  if (cfg.storage === 's3') {
-    const { S3Storage } = await import('./s3.js');
-    return new S3Storage(cfg.s3!);
-  }
-  const { FsStorage } = await import('./fs.js');
-  return new FsStorage(cfg.dataDir);
 }

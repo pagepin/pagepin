@@ -3,6 +3,9 @@ node_modules/
 dist/
 console/dist/
 console/node_modules/
+.wrangler/
+# 由 `pnpm gen:assets` 生成(static/* + skill.md 内联);cf:dev/cf:deploy 自动跑
+src/generated/
 
 # runtime data
 data/

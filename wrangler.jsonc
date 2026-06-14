@@ -1,0 +1,42 @@
+{
+  // pagepin 官方服务(Cloudflare Workers + D1 + R2)。见 ~/git/pagepin/PORT-SPEC-CF.md。
+  // 占位项(database_id / custom domains)在 provision 时填;Workers Paid 必需(scrypt CPU)。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pagepin",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "migrations_dir": "drizzle",
+
+  // React 控制台经 Static Assets 提供;Worker 只处理 /api|/auth|/p|/_pagepin|/skill.md|/healthz。
+  "assets": {
+    "directory": "./console/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pagepin",
+      "database_id": "TODO-run-wrangler-d1-create-pagepin",
+      "migrations_dir": "drizzle"
+    }
+  ],
+
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "pagepin" }],
+
+  // 明文配置(loadConfig 直接消费;config.ts 已是纯函数,Workers 传 env 即可)。
+  "vars": {
+    "PAGEPIN_BASE_URL": "https://pagepin.ai",
+    "PAGEPIN_CONSOLE_HOST": "pagepin.ai",
+    "PAGEPIN_CONTENT_HOST": "pagepin.page",
+    "PAGEPIN_EXTERNAL_SCHEME": "https",
+    "PAGEPIN_AUTH_MODE": "password",
+    "PAGEPIN_ALLOW_SIGNUP": "false"
+  }
+
+  // secrets(wrangler secret put):PAGEPIN_SECRET、PAGEPIN_ADMIN_EMAIL、PAGEPIN_ADMIN_PASSWORD、PAGEPIN_OIDC_CLIENT_SECRET
+  // custom domains:pagepin.ai(控制台/API)、pagepin.page(内容)绑同一 Worker(dashboard 或 routes)。
+}

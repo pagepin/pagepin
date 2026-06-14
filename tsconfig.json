@@ -13,5 +13,6 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/db/d1.ts", "src/db/libsql.ts", "src/storage/r2.ts", "src/worker.ts", "src/generated"]
 }

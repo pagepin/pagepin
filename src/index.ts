@@ -17,7 +17,7 @@ import { hashPassword } from './auth/password.js';
 import { consoleBase, contentBase, loadConfig } from './config.js';
 import { createNodeDb } from './db/node.js';
 import { users } from './db/schema.js';
-import { createStorage } from './storage/index.js';
+import { createStorage } from './storage/factory.js';
 import { nowIso, uuid } from './util.js';
 
 async function main(): Promise<void> {
