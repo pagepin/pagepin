@@ -19,7 +19,7 @@ import type { Context } from 'hono';
 import { extOf, relHref } from './autoindex.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
-import { currentVersion, isPubliclyVisible, sites } from './db/index.js';
+import { currentVersion, isPubliclyVisible, sites, users } from './db/index.js';
 import type { SiteRow, SiteVersion } from './db/index.js';
 import { NotFoundError, NotModifiedError } from './storage/index.js';
 import type { ObjectMeta } from './storage/index.js';
@@ -107,35 +107,144 @@ function injectScriptBytes(buf: Uint8Array, tag: string): Uint8Array<ArrayBuffer
 const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif']);
 const MD_EXTS = new Set(['.md', '.markdown']);
 
-const mdShell = (title: string, contentJson: string, inject: string) => `<!doctype html>
-<html lang="zh-CN">
+// ---- 品牌字体 + 访问门页(登录墙 / 已过期 / 404),pagepin 品牌壳,无评论层 ----
+const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">`;
+
+/** 居中卡片 + 点阵底纹的品牌门页外壳。 */
+function gateDoc(title: string, inner: string): string {
+  return `<!doctype html>
+<html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
+${FONTS}<title>${title}</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;
+  font-family:'Hanken Grotesk',system-ui,sans-serif;color:#11161b;background:#ECEEEF;
+  background-image:radial-gradient(rgba(15,124,114,.05) 1px,transparent 1px);background-size:22px 22px}
+.card{width:100%;max-width:380px;background:#fff;border:1px solid #e7e9eb;border-radius:16px;
+  padding:28px 30px;box-shadow:0 18px 44px -26px rgba(17,22,27,.3)}
+.chip{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;margin-bottom:18px}
+.chip-teal{background:#e6f4f2;color:#0b6358}.chip-amber{background:#fef6e7;color:#b06a08}
+h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em}
+.body{margin:8px 0 0;font-size:13.5px;line-height:1.6;color:#6b7480}
+.mono{font-family:'JetBrains Mono',monospace}.teal{color:#0f7c72}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;margin-top:18px;padding:10px;
+  border-radius:9px;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer}
+.btn-primary{background:#0f7c72;color:#fff}.btn-primary:hover{background:#0b6358}
+.btn-ghost{background:#fff;border:1px solid #e1e4e6;color:#3a424b}.btn-ghost:hover{border-color:#0f7c72;color:#0f7c72}
+.row{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12.5px;color:#9aa1a9}
+.avatar{width:22px;height:22px;border-radius:999px;background:#0f7c72;color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700}
+.foot{margin-top:16px;font-size:11px;color:#c3c8cd}
+</style></head>
+<body><div class="card">${inner}</div></body></html>`;
+}
+
+const LOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+const CLOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
+
+/** 私有页登录墙:命名 slug + 站长 + 「Sign in to view」(→ /auth/login?next=)。 */
+function loginWallHtml(slug: string, ownerName: string, loginHref: string): string {
+  const initial = escapeHtml((ownerName.replace(/^@/, '').trim()[0] || 'P').toUpperCase());
+  return gateDoc(
+    'Private · pagepin',
+    `<div class="chip chip-teal">${LOCK_SVG}</div>
+<h1>This page is private</h1>
+<p class="body">You&rsquo;ve been invited to review <span class="mono teal">${escapeHtml(slug)}</span>. Sign in to view it &mdash; most reviewers use the email their invite was sent to.</p>
+<a class="btn btn-primary" href="${escapeHtml(loginHref)}">Sign in to view</a>
+<div class="row"><span class="avatar">${initial}</span>Shared by ${escapeHtml(ownerName)}</div>
+<div class="foot">Hosted on <span class="mono">pagepin</span></div>`,
+  );
+}
+
+/** 公开窗口已过期:已回落私有,告诉访客何时关闭 + 站长,可登录(若有权限)。 */
+function linkExpiredHtml(ownerHandle: string, closedAgo: string, loginHref: string): string {
+  return gateDoc(
+    'Link expired · pagepin',
+    `<div class="chip chip-amber">${CLOCK_SVG}</div>
+<h1>This link has expired</h1>
+<p class="body">This page was public for a limited time and has reverted to private. The share window closed <span style="color:#3a424b;font-weight:600">${escapeHtml(closedAgo)}</span>.</p>
+<a class="btn btn-ghost" href="${escapeHtml(loginHref)}">Sign in</a>
+<div class="row">Owner · <span class="mono" style="color:#8a929b">@${escapeHtml(ownerHandle)}</span></div>
+<div class="foot">Hosted on <span class="mono">pagepin</span></div>`,
+  );
+}
+
+/** 404:JetBrains-Mono 数字 + 可选「Go to site root →」。 */
+function notFoundHtml(siteRoot?: string): string {
+  return gateDoc(
+    '404 · pagepin',
+    `<div style="text-align:center">
+<div class="mono" style="font-size:40px;font-weight:600;letter-spacing:-.02em;color:#11161b">404</div>
+<div style="margin-top:4px;font-size:15px;font-weight:600;color:#3a424b">Page not found</div>
+<p class="body" style="max-width:230px;margin:6px auto 0">We couldn&rsquo;t find that page or file on this site.</p>
+${siteRoot ? `<a href="${escapeHtml(siteRoot)}" style="display:inline-block;margin-top:16px;font-size:13px;font-weight:600;color:#0f7c72;text-decoration:none">Go to site root &rarr;</a>` : ''}
+</div>`,
+  );
+}
+
+/** 过去时间的人话(站点过期判定:Date 在 Node 服务端,非沙箱)。 */
+function fmtAgo(iso: string, now: Date): string {
+  const diff = now.getTime() - new Date(iso).getTime();
+  const min = 60_000,
+    hour = 60 * min,
+    day = 24 * hour;
+  if (diff >= day) {
+    const d = Math.floor(diff / day);
+    return `${d} day${d === 1 ? '' : 's'} ago`;
+  }
+  if (diff >= hour) {
+    const h = Math.floor(diff / hour);
+    return `${h} hour${h === 1 ? '' : 's'} ago`;
+  }
+  return 'just now';
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const FILE_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
+const CODE_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>`;
+
+const mdShell = (fname: string, contentJson: string, inject: string, sizeBytes: number) => `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+${FONTS}<title>${fname}</title>
 <style>
 :root{color-scheme:light}
-body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#24292f;
-  max-width:860px;margin:0 auto;padding:40px 28px 120px;line-height:1.75;font-size:15.5px}
-h1,h2,h3,h4{line-height:1.35;margin:1.6em 0 .6em;font-weight:700}
-h1{font-size:1.9em;padding-bottom:.3em;border-bottom:1px solid #eee}
-h2{font-size:1.45em;padding-bottom:.25em;border-bottom:1px solid #f0f0f0}
-h3{font-size:1.15em} p{margin:.8em 0} a{color:#0969da}
-code{background:#f3f1ec;padding:.15em .45em;border-radius:5px;font-size:.88em;
-  font-family:"SF Mono",Menlo,Consolas,monospace}
-pre{background:#f6f8fa;border:1px solid #eee;border-radius:10px;padding:14px 18px;overflow-x:auto}
-pre code{background:none;padding:0;font-size:.86em;line-height:1.6}
-blockquote{margin:.8em 0;padding:.1em 1em;color:#57606a;border-left:4px solid #d8dee4}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:#3a424b;background:#fff}
+.pp-md-head{display:flex;align-items:center;gap:11px;padding:13px 22px;border-bottom:1px solid #f0f1f2;background:#fcfcfd}
+.pp-md-ic{width:30px;height:30px;border-radius:8px;background:#eef0f1;color:#6b7480;display:grid;place-items:center;flex-shrink:0}
+.pp-md-name{display:block;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:#11161b;line-height:1.3}
+.pp-md-sub{display:block;font-size:11.5px;color:#9aa1a9;margin-top:1px}
+.pp-md-raw{margin-left:auto;display:inline-flex;align-items:center;gap:5px;text-decoration:none;
+  border:1px solid #e1e4e6;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600;color:#3a424b}
+.pp-md-raw:hover{border-color:#0f7c72;color:#0f7c72}
+main{max-width:680px;margin:0 auto;padding:34px 28px 96px;line-height:1.7;font-size:15.5px}
+h1,h2,h3,h4{line-height:1.3;margin:1.6em 0 .6em;font-weight:700;color:#11161b}
+h1{font-size:28px;letter-spacing:-.01em} h2{font-size:19px;padding-bottom:.25em;border-bottom:1px solid #f0f1f2}
+h3{font-size:16px} p{margin:.8em 0;color:#3a424b} a{color:#0f7c72}
+code{background:#f4f5f6;padding:.15em .45em;border-radius:5px;font-size:.86em;
+  font-family:'JetBrains Mono',monospace;color:#0b6358}
+pre{background:#11161b;border-radius:10px;padding:14px 18px;overflow-x:auto}
+pre code{background:none;padding:0;font-size:.84em;line-height:1.65;color:#cfd6d4}
+blockquote{margin:.8em 0;padding:.4em 1em;color:#57606a;border-left:3px solid #bfe5df;background:#f6f9f8;border-radius:0 6px 6px 0}
 table{border-collapse:collapse;margin:1em 0;display:block;overflow-x:auto}
-th,td{border:1px solid #d8dee4;padding:7px 14px} th{background:#f6f8fa}
-img{max-width:100%;border-radius:8px} hr{border:none;border-top:1px solid #eee;margin:2em 0}
+th,td{border:1px solid #e7e9eb;padding:7px 14px} th{background:#f4f5f6}
+img{max-width:100%;border-radius:8px} hr{border:none;border-top:1px solid #eef0f1;margin:2em 0}
 ul,ol{padding-left:1.6em} li{margin:.3em 0}
-.pp-md-meta{font-size:12px;color:#9a9183;border-bottom:1px solid #eee;padding-bottom:10px;
-  margin-bottom:8px;display:flex;gap:14px}
-.pp-md-meta a{color:#9a9183}
 </style>
 ${inject}</head>
 <body>
-<div class="pp-md-meta"><span>📄 ${title}</span><a href="?raw=1">查看原文</a></div>
-<main id="pp-md-content">渲染中…</main>
+<header class="pp-md-head">
+  <span class="pp-md-ic">${FILE_ICON}</span>
+  <span><span class="pp-md-name">${fname}</span><span class="pp-md-sub">Markdown · ${fmtBytes(sizeBytes)}</span></span>
+  <a class="pp-md-raw" href="?raw=1">${CODE_ICON} View raw</a>
+</header>
+<main id="pp-md-content">Rendering…</main>
 <script src="/_pagepin/marked.min.js"></script>
 <script>
 document.getElementById('pp-md-content').innerHTML =
@@ -158,23 +267,30 @@ function imageView(files: string[] | undefined, rel: string, siteBase: string): 
   return { imgs, i, base: siteBase };
 }
 
+const CHEV_L = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
+const CHEV_R = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
+const X_18 = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+const EXT_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+
 const imgShell = (title: string, src: string, inject: string, view: ImgView | null): string => {
-  const pos = view ? `<span id="pp-img-pos">${view.i + 1} / ${view.imgs.length}</span> · ` : '';
+  const pos = view
+    ? `<span id="pp-img-pos" class="pp-img-pos">${view.i + 1} / ${view.imgs.length}</span>`
+    : '';
   const arrow = (cls: string, id: string, rel: string | null, tip: string, ch: string) =>
     `<a class="pp-img-nav ${cls}" id="${id}" href="${rel ? escapeHtml(view!.base + relHref(rel)) : '#'}"${
       rel ? '' : ' style="visibility:hidden"'
     } title="${tip}">${ch}</a>`;
   const arrows = view
-    ? arrow('pp-img-prev', 'pp-prev', view.i > 0 ? view.imgs[view.i - 1]! : null, '上一张（←）', '‹') +
+    ? arrow('pp-img-prev', 'pp-prev', view.i > 0 ? view.imgs[view.i - 1]! : null, 'Previous (←)', CHEV_L) +
       '\n' +
       arrow(
         'pp-img-next',
         'pp-next',
         view.i < view.imgs.length - 1 ? view.imgs[view.i + 1]! : null,
-        '下一张（→）',
-        '›',
+        'Next (→)',
+        CHEV_R,
       ) +
-      `\n<a class="pp-img-nav pp-img-close" id="pp-close" href="${escapeHtml(view.base)}" title="回到索引（Esc）">×</a>`
+      `\n<a class="pp-img-nav pp-img-close" id="pp-close" href="${escapeHtml(view.base)}" title="Back to index (Esc)">${X_18}</a>`
     : '';
   // 就地切换(lightbox):换 <img> 节点不跳页 → 零闪烁;pushState 同步 URL(刷新/分享/后退
   // 都落在正确图片);邻图预解码秒切。切换前派发 cancelable 的 pagepin:navigate,评论层
@@ -265,50 +381,50 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
 </script>`
     : '';
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
+${FONTS}<title>${title}</title>
 <style>
-body{margin:0;background:#22211e;font-family:-apple-system,"PingFang SC",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;font-family:'Hanken Grotesk',system-ui,sans-serif;
+  background:#e9ebec;background-image:repeating-conic-gradient(#e3e5e7 0 25%,#e9ebec 0 50%);background-size:20px 20px}
+.pp-img-head{display:flex;align-items:center;gap:12px;padding:11px 18px;background:#fcfcfd;border-bottom:1px solid #f0f1f2;flex-shrink:0}
+.pp-img-name{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:600;color:#11161b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-img-right{margin-left:auto;display:flex;align-items:center;gap:14px;flex-shrink:0}
+.pp-img-pos{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#9aa1a9;font-variant-numeric:tabular-nums}
+.pp-img-orig{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:#0f7c72;text-decoration:none}
+.pp-img-orig:hover{text-decoration:underline}
 /* 居中交给内层包裹,body 保持普通流 —— 对后插入 body 的脚本/容器免疫 */
-.pp-img-wrap{min-height:100vh;display:grid;place-items:center}
-figure{margin:24px;text-align:center}
-img{max-width:calc(100vw - 48px);max-height:calc(100vh - 110px);border-radius:6px;
-  box-shadow:0 10px 40px rgba(0,0,0,.5);background:#fff;transition:opacity .15s ease}
-figcaption{color:#8d877c;font-size:12.5px;margin-top:12px}
+.pp-img-wrap{flex:1;display:grid;place-items:center;min-height:0;padding:24px}
+figure{margin:0;text-align:center}
+img{max-width:calc(100vw - 48px);max-height:calc(100vh - 130px);border-radius:6px;
+  box-shadow:0 12px 40px -8px rgba(17,22,27,.28);background:#fff;transition:opacity .15s ease}
+.pp-img-err{color:#6b7480;font-size:13px}
 /* 翻页箭头压在评论层之下(pin 2147482600 / 区域框 2147481900) */
-.pp-img-nav{position:fixed;top:50%;transform:translateY(-50%);z-index:2147480000;
-  width:44px;height:44px;border-radius:50%;display:grid;place-items:center;
-  background:rgba(0,0,0,.35);color:#d9d3c7;font-size:24px;line-height:1;
-  text-decoration:none;user-select:none;transition:background .15s,color .15s}
-.pp-img-nav:hover{background:rgba(0,0,0,.6);color:#fff}
-.pp-img-prev{left:14px}.pp-img-next{right:14px}
-.pp-img-close{top:14px;right:14px;transform:none;font-size:22px}
+.pp-img-nav{position:fixed;top:calc(50% + 22px);transform:translateY(-50%);z-index:2147480000;
+  width:40px;height:40px;border-radius:50%;display:grid;place-items:center;
+  background:#fff;border:1px solid #e1e4e6;color:#3a424b;box-shadow:0 4px 14px -4px rgba(17,22,27,.2);
+  text-decoration:none;user-select:none;transition:border-color .15s,color .15s,box-shadow .15s}
+.pp-img-nav:hover{border-color:#0f7c72;color:#0f7c72;box-shadow:0 6px 18px -4px rgba(17,22,27,.28)}
+.pp-img-prev{left:16px}.pp-img-next{right:16px}
+.pp-img-close{top:58px;right:16px;transform:none;width:36px;height:36px}
 </style>
 ${inject}</head>
 <body>
+<header class="pp-img-head">
+  <span id="pp-img-name" class="pp-img-name">${title}</span>
+  <span class="pp-img-right">${pos}<a class="pp-img-orig" href="?raw=1">${EXT_ICON} View original</a></span>
+</header>
 <div class="pp-img-wrap">
 <figure>
   <img id="pp-image" src="${src}" alt="${title}"
-       onerror="this.closest('figure').innerHTML='<figcaption>图片加载失败</figcaption>'">
-  <figcaption><span id="pp-img-name">${title}</span> · ${pos}<a href="?raw=1" style="color:#8d877c">原图</a></figcaption>
+       onerror="this.closest('figure').innerHTML='<div class=&quot;pp-img-err&quot;>Image failed to load</div>'">
 </figure>
 </div>
 ${arrows}
 ${viewerScript}
 </body></html>`;
 };
-
-// 完整文档结构(html/head/body 都闭合):片段式 HTML 会让浏览器二次构树,居中布局先渲染后跳位
-const NOT_FOUND_HTML = `<!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>404 · pagepin</title></head>
-<body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0;color:#334155">
-<div style="text-align:center"><div style="font-size:64px;font-weight:700">404</div>
-<p>站点或文件不存在，或已被删除</p></div>
-</body>
-</html>`;
 
 function safeDecode(s: string): string {
   try {
@@ -353,7 +469,7 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
     return staticJs(c, a.data, a.etag, 'public, max-age=86400');
   });
 
-  const notFound = (c: Context<AppEnv>) => c.html(NOT_FOUND_HTML, 404);
+  const notFound = (c: Context<AppEnv>, siteRoot?: string) => c.html(notFoundHtml(siteRoot), 404);
 
   /** 文件清单懒回填:清单随部署写入,更早的版本没有 → 有 list 能力的驱动(fs)
    * 访问图片时现场补一次写回 DB,本次响应即带导航;S3 等无 list 驱动跳过。
@@ -409,10 +525,21 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
       .get();
     if (!site || site.currentVersionId === null) return notFound(c);
 
-    const pub = isPubliclyVisible(site, new Date());
+    const siteRoot = `${prefix}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}/`;
+    const now = new Date();
+    const pub = isPubliclyVisible(site, now);
     const claims = await readSession(c, cfg, plane);
     if (!pub && claims === null) {
-      return c.redirect(`/auth/login?next=${encodeURIComponent(c.req.path)}`, 302);
+      // 品牌门页(不再裸 302):曾公开但窗口已关 → 过期页;否则私有 → 登录墙。
+      // 「Sign in」回 /auth/login?next=,登录后落回本页。
+      const loginHref = `/auth/login?next=${encodeURIComponent(c.req.path)}`;
+      const gateHeaders = { 'Cache-Control': 'no-store, private' };
+      if (site.visibility === 'public' && site.publicExpiresAt) {
+        return c.html(linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now), loginHref), 200, gateHeaders);
+      }
+      const owner = db.select().from(users).where(eq(users.id, site.ownerId)).get();
+      const ownerName = owner?.displayName || `@${handle}`;
+      return c.html(loginWallHtml(slug, ownerName, loginHref), 200, gateHeaders);
     }
     // 评论层只给已登录访问者注入:匿名公开访客(对外客户)看到的是干净页面
     const canInject = site.commentsEnabled && claims !== null;
@@ -420,10 +547,10 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
     // 目录式 URL(空路径或尾斜杠)直接落 index.html
     const raw = !rest || rest.endsWith('/') ? rest + 'index.html' : rest;
     const rel = normalizeSitePath(raw);
-    if (rel === null) return c.json({ detail: '非法路径' }, 400);
+    if (rel === null) return c.json({ detail: 'Invalid path' }, 400);
 
     const cur = currentVersion(site);
-    if (!cur) return notFound(c); // 防御:current_version_id 与 versions 不一致时明确 404 而非 500
+    if (!cur) return notFound(c, siteRoot); // 防御:current_version_id 与 versions 不一致时明确 404 而非 500
 
     const baseHeaders: Record<string, string> = {
       'X-Content-Type-Options': 'nosniff',
@@ -470,7 +597,11 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
           const text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
           // </ 转义防止 markdown 原文里的 </script> 提前闭合壳页脚本
           const contentJson = JSON.stringify(text).replaceAll('</', '<\\/');
-          return c.html(mdShell(escapeHtml(fname), contentJson, injectHtml), 200, baseHeaders);
+          return c.html(
+            mdShell(escapeHtml(fname), contentJson, injectHtml, opened.meta.contentLength ?? buf.byteLength),
+            200,
+            baseHeaders,
+          );
         }
         // 超大 md:原样流出(已打开的流直接用)
         return new Response(opened.body, {
@@ -506,7 +637,7 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
         throw e;
       }
     }
-    if (meta === null || body === null) return notFound(c);
+    if (meta === null || body === null) return notFound(c, siteRoot);
 
     // 评论层注入:HTML 整读改写(≤5MB;超限/类型不符回落 streaming 原样输出)
     const hitLower = hit.toLowerCase();
