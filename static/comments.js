@@ -70,7 +70,7 @@
   const fetchThreads = () => api(`${base}?path=${encodeURIComponent(CFG.path)}`);
   const createThread = (body) => api(base, { method: 'POST', body: JSON.stringify(body) });
   const addReply = (id, text) => api(`/api/comments/threads/${id}/replies`, { method: 'POST', body: JSON.stringify({ text }) });
-  const patchThread = (id, resolved) => api(`/api/comments/threads/${id}`, { method: 'PATCH', body: JSON.stringify({ resolved }) });
+  const patchThread = (id, body) => api(`/api/comments/threads/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
   const deleteThread = (id) => api(`/api/comments/threads/${id}`, { method: 'DELETE' });
 
   /* ---------------- 工具（保留 + 英文化） ---------------- */
@@ -733,7 +733,7 @@
     resolveInFlight = true;
     let ok = false;
     try {
-      const updated = await patchThread(t.id, true);
+      const updated = await patchThread(t.id, { resolved: true });
       Object.assign(t, updated);
       state.walk.resolvedThisPass += 1;
       ok = true;
@@ -820,9 +820,28 @@
     });
     p.appendChild(msgs);
 
-    // kind chips：只读展示线程当前 kind（高亮）。kind 在创建时由 composer 设定并持久化；
-    // 改已有线程的 kind 需后端 PATCH 端点（无该端点时不做「假可点」误导，留待阶段 4）。
-    p.appendChild(kindChips(t.kind, null, true));
+    // kind chips：点选即改 kind（PATCH，任意登录成员可改，再点同一项取消）。改后重绘 pin/accent 上色，弹层不关。
+    let kindInFlight = false;
+    const applyKindSel = (wrap) => {
+      wrap.querySelectorAll('.pp-anno-chip2').forEach((x) => {
+        const on = !!t.kind && x.dataset.ppKind === t.kind;
+        x.classList.toggle('pp-anno-on', on);
+        x.style.background = on ? KIND[t.kind].color : '';
+      });
+    };
+    p.appendChild(kindChips(t.kind, async (k, b, wrap) => {
+      if (kindInFlight) return;
+      const newKind = t.kind === k ? null : k;
+      kindInFlight = true;
+      try {
+        const updated = await patchThread(t.id, { kind: newKind });
+        Object.assign(t, updated);
+        applyKindSel(wrap);
+        accent.style.background = kindColor(t);
+        render();
+      } catch (e) { toast(e.message || 'Failed'); }
+      kindInFlight = false;
+    }, false));
 
     // footer: reply 输入 + Resolve & next（同一按钮：有草稿先发回复，无草稿则解决并前进）
     const ta = footer(p, 'Reply…', 'Enter to reply', 'Resolve & next', ICON.check, async () => {});

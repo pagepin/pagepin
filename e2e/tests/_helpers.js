@@ -60,6 +60,7 @@ async function setup(page, opts = {}) {
     viewerStatus = 200, threadsStatus = 200, reply,
     html,        // 自定义整页 HTML(默认 fixtureHtml(boxes))
     onCreate,    // 新建线程时回调(拿到 POST body,供断言 rw/rh 等)
+    onPatch,     // PATCH 线程时回调(拿到 body,供断言 resolved/kind)
   } = opts;
 
   await page.route('**/api/viewer', (route) =>
@@ -80,10 +81,14 @@ async function setup(page, opts = {}) {
       };
       return route.fulfill({ json: c });
     }
-    // 标记解决 / 重新打开
+    // 标记解决 / 重新打开 / 改 kind —— 只回显本次改动的字段(对齐后端 threadOut 的合并语义)
     if (url.includes('/threads/') && method === 'PATCH') {
       const body = JSON.parse(req.postData() || '{}');
-      return route.fulfill({ json: { resolved: !!body.resolved } });
+      if (onPatch) onPatch(body);
+      const out = {};
+      if ('resolved' in body) out.resolved = !!body.resolved;
+      if ('kind' in body) out.kind = body.kind;
+      return route.fulfill({ json: out });
     }
     // 删除
     if (url.includes('/threads/') && method === 'DELETE') {
