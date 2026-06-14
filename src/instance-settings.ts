@@ -16,8 +16,8 @@ export function isRegistrationMode(v: unknown): v is RegistrationMode {
   return typeof v === 'string' && (REGISTRATION_MODES as readonly string[]).includes(v);
 }
 
-export function getSetting(deps: AppDeps, key: string): string | null {
-  const row = deps.db
+export async function getSetting(deps: AppDeps, key: string): Promise<string | null> {
+  const row = await deps.db
     .select({ value: instanceSettings.value })
     .from(instanceSettings)
     .where(eq(instanceSettings.key, key))
@@ -25,8 +25,8 @@ export function getSetting(deps: AppDeps, key: string): string | null {
   return row?.value ?? null;
 }
 
-export function setSetting(deps: AppDeps, key: string, value: string): void {
-  deps.db
+export async function setSetting(deps: AppDeps, key: string, value: string): Promise<void> {
+  await deps.db
     .insert(instanceSettings)
     .values({ key, value })
     .onConflictDoUpdate({ target: instanceSettings.key, set: { value } })
@@ -39,13 +39,13 @@ export function registrationModeLocked(deps: AppDeps): boolean {
 }
 
 /** 当前生效的注册模式。 */
-export function effectiveRegistrationMode(deps: AppDeps): RegistrationMode {
+export async function effectiveRegistrationMode(deps: AppDeps): Promise<RegistrationMode> {
   if (deps.config.registrationMode) return deps.config.registrationMode; // env 锁定
-  const stored = getSetting(deps, 'registration_mode');
+  const stored = await getSetting(deps, 'registration_mode');
   if (isRegistrationMode(stored)) return stored;
   return deps.config.allowSignup ? 'open' : 'closed'; // 兜底:沿用旧 allowSignup(默认 true → open)
 }
 
-export function setRegistrationMode(deps: AppDeps, mode: RegistrationMode): void {
-  setSetting(deps, 'registration_mode', mode);
+export async function setRegistrationMode(deps: AppDeps, mode: RegistrationMode): Promise<void> {
+  await setSetting(deps, 'registration_mode', mode);
 }

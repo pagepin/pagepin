@@ -6,10 +6,11 @@ import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 
+import type { Db } from './index.js';
 import * as schema from './schema.js';
 
-export async function createLibsqlDb(url: string) {
+export async function createLibsqlDb(url: string): Promise<Db> {
   const db = drizzle(createClient({ url }), { schema });
   await migrate(db, { migrationsFolder: './drizzle' });
-  return db;
+  return db as unknown as Db;
 }

@@ -15,7 +15,7 @@ import { eq } from 'drizzle-orm';
 import { createApp } from './app.js';
 import { hashPassword } from './auth/password.js';
 import { consoleBase, contentBase, loadConfig } from './config.js';
-import { createNodeDb } from './db/node.js';
+import { createLibsqlDb } from './db/libsql.js';
 import { users } from './db/schema.js';
 import { createStorage } from './storage/factory.js';
 import { nowIso, uuid } from './util.js';
@@ -39,25 +39,30 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig({ ...process.env, PAGEPIN_SECRET: secret });
-  const db = createNodeDb(join(cfg.dataDir, 'pagepin.db'));
+  // libSQL(纯 JS,无 native 构建);启动自动应用 drizzle 迁移(./drizzle,cwd 相对)
+  mkdirSync(cfg.dataDir, { recursive: true }); // libSQL 不会自建父目录
+  const db = await createLibsqlDb(`file:${join(cfg.dataDir, 'pagepin.db')}`);
   const storage = await createStorage(cfg);
 
   // admin bootstrap:配置了邮箱+密码则 upsert(存在则刷新密码哈希并确保 isAdmin,不动其他字段);
   // 未配置时回落「首个注册用户为 admin」(signup 逻辑负责)。
   if (cfg.adminEmail && cfg.adminPassword) {
     const passwordHash = await hashPassword(cfg.adminPassword);
-    const existing = db.select().from(users).where(eq(users.email, cfg.adminEmail)).get();
+    const existing = await db.select().from(users).where(eq(users.email, cfg.adminEmail)).get();
     if (existing) {
-      db.update(users).set({ passwordHash, isAdmin: true }).where(eq(users.id, existing.id)).run();
+      await db.update(users).set({ passwordHash, isAdmin: true }).where(eq(users.id, existing.id)).run();
     } else {
-      db.insert(users).values({
-        id: uuid(),
-        email: cfg.adminEmail,
-        passwordHash,
-        displayName: cfg.adminEmail.split('@')[0] || cfg.adminEmail,
-        isAdmin: true,
-        createdAt: nowIso(),
-      }).run();
+      await db
+        .insert(users)
+        .values({
+          id: uuid(),
+          email: cfg.adminEmail,
+          passwordHash,
+          displayName: cfg.adminEmail.split('@')[0] || cfg.adminEmail,
+          isAdmin: true,
+          createdAt: nowIso(),
+        })
+        .run();
     }
     console.log(`admin 账号就绪:${cfg.adminEmail}`);
   }

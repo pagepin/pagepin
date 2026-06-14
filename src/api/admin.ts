@@ -95,8 +95,8 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
   const r = new Hono<AppEnv>().basePath('/api/admin');
 
   // ---- 概览统计卡 ----
-  r.get('/overview', mw.adminUser, (c) => {
-    const allSites = db.select().from(sites).where(isNull(sites.deletedAt)).all();
+  r.get('/overview', mw.adminUser, async (c) => {
+    const allSites = await db.select().from(sites).where(isNull(sites.deletedAt)).all();
     let storageBytes = 0;
     let versionCount = 0;
     for (const s of allSites) {
@@ -104,8 +104,8 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
       storageBytes += cur ? cur.total_bytes : 0;
       versionCount += s.versions.length;
     }
-    const userCount = db.select({ n: count() }).from(users).get()?.n ?? 0;
-    const adminCount = db.select({ n: count() }).from(users).where(eq(users.isAdmin, true)).get()?.n ?? 0;
+    const userCount = (await db.select({ n: count() }).from(users).get())?.n ?? 0;
+    const adminCount = (await db.select({ n: count() }).from(users).where(eq(users.isAdmin, true)).get())?.n ?? 0;
     return c.json({
       sites: allSites.length,
       users: userCount,
@@ -116,9 +116,9 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
   });
 
   // ---- 用户列表(含每人站点数/占用) ----
-  r.get('/users', mw.adminUser, (c) => {
-    const rows = db.select().from(users).orderBy(desc(users.createdAt)).all();
-    const allSites = db.select().from(sites).where(isNull(sites.deletedAt)).all();
+  r.get('/users', mw.adminUser, async (c) => {
+    const rows = await db.select().from(users).orderBy(desc(users.createdAt)).all();
+    const allSites = await db.select().from(sites).where(isNull(sites.deletedAt)).all();
     const usage = ownerUsage(allSites);
     return c.json({
       users: rows.map((u) => userOut(u, usage.get(u.id) ?? { count: 0, bytes: 0 })),
@@ -136,7 +136,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     if (hasDisabled && typeof body.disabled !== 'boolean') return c.json({ detail: 'disabled 必须是布尔值' }, 422);
 
     const actor = c.get('user');
-    const target = db.select().from(users).where(eq(users.id, c.req.param('id'))).get();
+    const target = await db.select().from(users).where(eq(users.id, c.req.param('id'))).get();
     if (!target) return c.json({ detail: '用户不存在' }, 404);
 
     const resAdmin = hasAdmin ? (body.is_admin as boolean) : target.isAdmin;
@@ -150,28 +150,28 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const wasEnabledAdmin = target.isAdmin && !target.disabled;
     const willBeEnabledAdmin = resAdmin && !resDisabled;
     if (wasEnabledAdmin && !willBeEnabledAdmin) {
-      const enabled = db
+      const enabled = (await db
         .select({ n: count() })
         .from(users)
         .where(and(eq(users.isAdmin, true), eq(users.disabled, false)))
-        .get()?.n ?? 0;
+        .get())?.n ?? 0;
       if (enabled <= 1) return c.json({ detail: '至少保留一名启用的管理员' }, 400);
     }
 
-    db.update(users)
+    await db.update(users)
       .set({ isAdmin: resAdmin, disabled: resDisabled })
       .where(eq(users.id, target.id))
       .run();
-    const allSites = db.select().from(sites).where(isNull(sites.deletedAt)).all();
+    const allSites = await db.select().from(sites).where(isNull(sites.deletedAt)).all();
     const usage = ownerUsage(allSites).get(target.id) ?? { count: 0, bytes: 0 };
     return c.json(userOut({ ...target, isAdmin: resAdmin, disabled: resDisabled }, usage));
   });
 
   // ---- 实例设置:注册模式 ----
-  r.get('/settings', mw.adminUser, (c) =>
+  r.get('/settings', mw.adminUser, async (c) =>
     c.json({
       auth_mode: cfg.authMode,
-      registration_mode: effectiveRegistrationMode(deps),
+      registration_mode: await effectiveRegistrationMode(deps),
       registration_locked: registrationModeLocked(deps),
       limits: {
         max_file_mb: cfg.maxFileMb,
@@ -190,13 +190,13 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     if (!body || !isRegistrationMode(body.registration_mode)) {
       return c.json({ detail: 'registration_mode 只能是 open/invite/closed' }, 422);
     }
-    setRegistrationMode(deps, body.registration_mode);
+    await setRegistrationMode(deps, body.registration_mode);
     return c.json({ registration_mode: body.registration_mode });
   });
 
   // ---- 邀请 ----
-  r.get('/invites', mw.adminUser, (c) => {
-    const rows = db
+  r.get('/invites', mw.adminUser, async (c) => {
+    const rows = await db
       .select()
       .from(invites)
       .where(isNull(invites.acceptedAt))
@@ -210,7 +210,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     if (cfg.authMode !== 'password') {
       return c.json({ detail: '邀请注册仅在密码登录模式可用' }, 400);
     }
-    if (effectiveRegistrationMode(deps) === 'closed') {
+    if ((await effectiveRegistrationMode(deps)) === 'closed') {
       return c.json({ detail: '注册已关闭，无法签发邀请（先把注册模式切到 invite 或 open）' }, 400);
     }
     const body = await readJson<{ email?: unknown; is_admin?: unknown }>(c);
@@ -234,7 +234,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
       acceptedAt: null,
       acceptedUserId: null,
     };
-    db.insert(invites).values(inv).run();
+    await db.insert(invites).values(inv).run();
     return c.json({
       id: inv.id,
       token: raw, // 仅此一次返回明文
@@ -245,10 +245,10 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     });
   });
 
-  r.delete('/invites/:id', mw.adminMutatingUser, (c) => {
-    const inv = db.select().from(invites).where(eq(invites.id, c.req.param('id'))).get();
+  r.delete('/invites/:id', mw.adminMutatingUser, async (c) => {
+    const inv = await db.select().from(invites).where(eq(invites.id, c.req.param('id'))).get();
     if (!inv || inv.acceptedAt !== null) return c.json({ detail: '邀请不存在' }, 404);
-    db.delete(invites).where(eq(invites.id, inv.id)).run();
+    await db.delete(invites).where(eq(invites.id, inv.id)).run();
     return c.json({ ok: true });
   });
 

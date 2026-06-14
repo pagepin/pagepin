@@ -43,19 +43,19 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
       return c.json({ detail: 'token 无效（应为 pp_ 开头的 PAT）' }, 401);
     }
     const h = await sha256Hex(token);
-    const rec = db
+    const rec = await db
       .select()
       .from(apiTokens)
       .where(and(eq(apiTokens.tokenHash, h), isNull(apiTokens.revokedAt)))
       .get();
     if (!rec) return c.json({ detail: 'token 无效或已吊销' }, 401);
-    const user = db.select().from(users).where(eq(users.id, rec.userId)).get();
+    const user = await db.select().from(users).where(eq(users.id, rec.userId)).get();
     if (!user) return c.json({ detail: 'token 对应用户不存在' }, 401);
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     c.set('authVia', 'token');
     // last_used_at 节流写(5 分钟粒度足够审计,省掉每请求一次写库)
     if (!rec.lastUsedAt || Date.now() - Date.parse(rec.lastUsedAt) > 300_000) {
-      db.update(apiTokens).set({ lastUsedAt: nowIso() }).where(eq(apiTokens.id, rec.id)).run();
+      await db.update(apiTokens).set({ lastUsedAt: nowIso() }).where(eq(apiTokens.id, rec.id)).run();
     }
     c.set('user', user);
     return undefined;
@@ -69,7 +69,7 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     }
     const claims = await readSession(c, cfg, 'session');
     if (!claims) return c.json({ detail: '未登录' }, 401);
-    const user = db.select().from(users).where(eq(users.id, claims.sub)).get();
+    const user = await db.select().from(users).where(eq(users.id, claims.sub)).get();
     if (!user) return c.json({ detail: '用户不存在，请重新登录' }, 401);
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     c.set('sessionClaims', claims);

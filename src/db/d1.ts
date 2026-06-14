@@ -5,8 +5,9 @@
 import { drizzle } from 'drizzle-orm/d1';
 import type { D1Database } from '@cloudflare/workers-types';
 
+import type { Db } from './index.js';
 import * as schema from './schema.js';
 
-export function createD1Db(binding: D1Database) {
-  return drizzle(binding, { schema });
+export function createD1Db(binding: D1Database): Db {
+  return drizzle(binding, { schema }) as unknown as Db;
 }

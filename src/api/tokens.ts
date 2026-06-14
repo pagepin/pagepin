@@ -67,15 +67,15 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   const activeOf = (userId: string) => and(eq(apiTokens.userId, userId), isNull(apiTokens.revokedAt));
 
   /** 按 id 取本人未吊销的 token;不存在/他人/已吊销一律视为不存在。 */
-  const ownedToken = (tokenId: string, user: UserRow): ApiTokenRow | null => {
-    const rec = db.select().from(apiTokens).where(eq(apiTokens.id, tokenId)).get();
+  const ownedToken = async (tokenId: string, user: UserRow): Promise<ApiTokenRow | null> => {
+    const rec = await db.select().from(apiTokens).where(eq(apiTokens.id, tokenId)).get();
     if (!rec || rec.userId !== user.id || rec.revokedAt !== null) return null;
     return rec;
   };
 
-  app.get('/api/tokens', mw.cookieUser, (c) => {
+  app.get('/api/tokens', mw.cookieUser, async (c) => {
     const user = c.get('user');
-    const toks = db
+    const toks = await db
       .select()
       .from(apiTokens)
       .where(activeOf(user.id))
@@ -88,7 +88,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     const user = c.get('user');
     const name = (await readNameField(c)).trim();
     if (name.length < 1 || name.length > 64) return c.json({ detail: '名称需 1-64 字符' }, 422);
-    const row = db.select({ n: count() }).from(apiTokens).where(activeOf(user.id)).get();
+    const row = await db.select({ n: count() }).from(apiTokens).where(activeOf(user.id)).get();
     if ((row?.n ?? 0) >= MAX_TOKENS_PER_USER) {
       return c.json({ detail: `token 数量已达上限（${MAX_TOKENS_PER_USER}），请先吊销不用的` }, 409);
     }
@@ -105,7 +105,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       lastUsedAt: null,
       revokedAt: null,
     };
-    db.insert(apiTokens).values(rec).run();
+    await db.insert(apiTokens).values(rec).run();
     console.log(`token created handle=${user.handle} name=${name} prefix=${rec.prefix}`);
     return c.json(out(rec));
   });
@@ -113,21 +113,21 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   /** 原地换新值(名字/记录不变):旧明文立即失效,正在用它的 AI/脚本需换新 token。 */
   app.post('/api/tokens/:tokenId/rotate', mw.cookieMutatingUser, async (c) => {
     const user = c.get('user');
-    const rec = ownedToken(c.req.param('tokenId'), user);
+    const rec = await ownedToken(c.req.param('tokenId'), user);
     if (!rec) return c.json({ detail: 'token 不存在' }, 404);
     const raw = newRawToken();
     const tokenHash = await sha256Hex(raw);
     const prefix = raw.slice(0, 15);
-    db.update(apiTokens).set({ token: raw, tokenHash, prefix }).where(eq(apiTokens.id, rec.id)).run();
+    await db.update(apiTokens).set({ token: raw, tokenHash, prefix }).where(eq(apiTokens.id, rec.id)).run();
     console.log(`token rotated handle=${user.handle} ${rec.prefix} -> ${prefix}`);
     return c.json(out({ ...rec, token: raw, tokenHash, prefix }));
   });
 
-  app.delete('/api/tokens/:tokenId', mw.cookieMutatingUser, (c) => {
+  app.delete('/api/tokens/:tokenId', mw.cookieMutatingUser, async (c) => {
     const user = c.get('user');
-    const rec = ownedToken(c.req.param('tokenId'), user);
+    const rec = await ownedToken(c.req.param('tokenId'), user);
     if (!rec) return c.json({ detail: 'token 不存在' }, 404);
-    db.update(apiTokens).set({ revokedAt: nowIso() }).where(eq(apiTokens.id, rec.id)).run();
+    await db.update(apiTokens).set({ revokedAt: nowIso() }).where(eq(apiTokens.id, rec.id)).run();
     console.log(`token revoked handle=${user.handle} prefix=${rec.prefix}`);
     return c.json({ ok: true });
   });

@@ -483,17 +483,20 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
       return undefined; // 回填失败不影响出图
     }
     if (listed.length === 0 || listed.length > 2000) return undefined; // 上限与部署侧同一口径
-    cur.files = listed;
-    // 事务内重读再写回,避免覆盖并发 deploy 推入的新版本(与 deploy 同一套路);
-    // 不动 updatedAt —— 这是元数据补写,不是内容更新
-    db.transaction((tx) => {
-      const fresh = tx.select().from(sites).where(eq(sites.id, site.id)).get();
-      if (!fresh) return;
-      const v = fresh.versions.find((x) => x.id === cur.id);
-      if (!v || v.files) return;
-      v.files = listed;
-      tx.update(sites).set({ versions: fresh.versions }).where(eq(sites.id, site.id)).run();
-    });
+    cur.files = listed; // 本次响应即带导航,落库失败也不影响
+    // 尽力而为回填(D1 无交互事务):重读 → 该版本仍缺清单才写回;不动 updatedAt(元数据补写非内容更新)。
+    try {
+      const fresh = await db.select().from(sites).where(eq(sites.id, site.id)).get();
+      if (fresh) {
+        const v = fresh.versions.find((x) => x.id === cur.id);
+        if (v && !v.files) {
+          v.files = listed;
+          await db.update(sites).set({ versions: fresh.versions }).where(eq(sites.id, site.id)).run();
+        }
+      }
+    } catch {
+      /* 回填失败不影响出图 */
+    }
     return listed;
   }
 
@@ -518,7 +521,7 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
   const serve = async (c: Context<AppEnv>): Promise<Response> => {
     const { handle, slug, rest } = splitSitePath(c);
     if (RESERVED_SEGMENTS.has(handle)) return notFound(c);
-    const site = db
+    const site = await db
       .select()
       .from(sites)
       .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
@@ -532,7 +535,11 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
     // 查库判活:会话用户须存在且未被禁用,否则按未登录处理(私有页不放行、不注入评论层)
     let viewerActive = false;
     if (claims !== null) {
-      const u = db.select({ disabled: users.disabled }).from(users).where(eq(users.id, claims.sub)).get();
+      const u = await db
+        .select({ disabled: users.disabled })
+        .from(users)
+        .where(eq(users.id, claims.sub))
+        .get();
       viewerActive = u !== undefined && !u.disabled;
     }
     if (!pub && !viewerActive) {
@@ -543,7 +550,7 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
       if (site.visibility === 'public' && site.publicExpiresAt) {
         return c.html(linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now), loginHref), 200, gateHeaders);
       }
-      const owner = db.select().from(users).where(eq(users.id, site.ownerId)).get();
+      const owner = await db.select().from(users).where(eq(users.id, site.ownerId)).get();
       const ownerName = owner?.displayName || `@${handle}`;
       return c.html(loginWallHtml(slug, ownerName, loginHref), 200, gateHeaders);
     }

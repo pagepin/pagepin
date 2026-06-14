@@ -40,8 +40,9 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   const { config: cfg, db } = deps;
   const app = new Hono<AppEnv>();
 
-  const handleTaken = (handle: string): boolean =>
-    db.select({ id: users.id }).from(users).where(eq(users.handle, handle)).get() !== undefined;
+  const handleTaken = async (handle: string): Promise<boolean> =>
+    (await db.select({ id: users.id }).from(users).where(eq(users.handle, handle)).get()) !==
+    undefined;
 
   const limitsJson = () => ({
     max_file_mb: cfg.maxFileMb,
@@ -80,7 +81,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       displayName = t || null;
     } else return c.json({ detail: 'display_name 必须是字符串或 null' }, 422);
     const user = c.get('user');
-    db.update(users).set({ displayName }).where(eq(users.id, user.id)).run();
+    await db.update(users).set({ displayName }).where(eq(users.id, user.id)).run();
     return c.json({ display_name: displayName });
   });
 
@@ -105,14 +106,14 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       return c.json({ detail: '当前密码不正确' }, 403);
     }
     const passwordHash = await hashPassword(next);
-    db.update(users).set({ passwordHash }).where(eq(users.id, user.id)).run();
+    await db.update(users).set({ passwordHash }).where(eq(users.id, user.id)).run();
     return c.json({ ok: true });
   });
 
   /** 本人用量聚合(Account & Settings 的 Usage 区)。 */
-  app.get('/api/me/usage', mw.currentUser, (c) => {
+  app.get('/api/me/usage', mw.currentUser, async (c) => {
     const user = c.get('user');
-    const rows = db
+    const rows = await db
       .select()
       .from(sites)
       .where(and(eq(sites.ownerId, user.id), isNull(sites.deletedAt)))
@@ -130,14 +131,14 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       return { slug: s.slug, total_bytes: bytes, file_count: fc };
     });
     perSite.sort((a, b) => b.total_bytes - a.total_bytes);
-    const tok = db
+    const tok = await db
       .select({ n: count() })
       .from(apiTokens)
       .where(and(eq(apiTokens.userId, user.id), isNull(apiTokens.revokedAt)))
       .get();
     let unresolved = 0;
     if (rows.length > 0) {
-      const r = db
+      const r = await db
         .select({ n: count() })
         .from(commentThreads)
         .where(
@@ -175,8 +176,8 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     if (!validHandle(handle)) {
       return c.json({ detail: 'handle 需 2-32 位小写字母/数字/中划线、字母开头，且不在保留字内' }, 422);
     }
-    if (handleTaken(handle)) return c.json({ detail: 'handle 已被占用' }, 409);
-    db.update(users).set({ handle }).where(eq(users.id, user.id)).run();
+    if (await handleTaken(handle)) return c.json({ detail: 'handle 已被占用' }, 409);
+    await db.update(users).set({ handle }).where(eq(users.id, user.id)).run();
     // handle 进了会话 JWT —— 旧 Cookie 里 hdl=null,刷新一份
     await setLoginCookies(c, cfg, 'session', user.id, handle);
     return c.json({ handle });
@@ -187,19 +188,19 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     if (raw === null) return c.json({ detail: '请求体需包含 handle 字段' }, 422);
     const handle = raw.trim().toLowerCase();
     if (!validHandle(handle)) return c.json({ ok: false, reason: '格式不合法或为保留字' });
-    const taken = handleTaken(handle);
+    const taken = await handleTaken(handle);
     return c.json({ ok: !taken, reason: taken ? '已被占用' : null });
   });
 
   /** 从邮箱/姓名推一个默认 handle 建议(可能为空,前端兜底让用户自己输)。 */
-  app.post('/api/me/handle/suggest', mw.currentUser, (c) => {
+  app.post('/api/me/handle/suggest', mw.currentUser, async (c) => {
     const user = c.get('user');
     const cands: string[] = [];
     if (user.email && user.email.includes('@')) cands.push(user.email.split('@')[0]!);
     if (user.displayName) cands.push(user.displayName);
     for (const cand of cands) {
       const h = cand.toLowerCase().replace(/[_.]/g, '-').replace(/[^a-z0-9-]/g, '');
-      if (validHandle(h) && !handleTaken(h)) return c.json({ suggestion: h });
+      if (validHandle(h) && !(await handleTaken(h))) return c.json({ suggestion: h });
     }
     return c.json({ suggestion: null });
   });

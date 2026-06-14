@@ -2,7 +2,7 @@
  *
  * 发布流程(原子,无半成品暴露):
  *   1. 文件全量流式写到新 version 的存储前缀(限额边写边校验)
- *   2. 事务内重读站点行 → versions push + current_version_id 切换,一条 update 写回
+ *   2. 乐观并发:重读站点行 → versions push + current_version_id 切换,守 current_version_id 未变的一条 update 写回
  * 失败则 current 不动,旧版本继续服务。
  */
 
@@ -47,8 +47,8 @@ function siteOut(deps: AppDeps, site: SiteRow, unresolved: number) {
   };
 }
 
-function unresolvedCount(db: Db, siteId: string): number {
-  const row = db
+async function unresolvedCount(db: Db, siteId: string): Promise<number> {
+  const row = await db
     .select({ n: count() })
     .from(commentThreads)
     .where(
@@ -63,13 +63,13 @@ function unresolvedCount(db: Db, siteId: string): number {
 }
 
 /** 本人名下未删站点;不存在返回 null(调用方回 404 '站点不存在')。 */
-function ownedSite(db: Db, userId: string, slug: string): SiteRow | null {
+async function ownedSite(db: Db, userId: string, slug: string): Promise<SiteRow | null> {
   return (
-    db
+    (await db
       .select()
       .from(sites)
       .where(and(eq(sites.ownerId, userId), eq(sites.slug, slug), isNull(sites.deletedAt)))
-      .get() ?? null
+      .get()) ?? null
   );
 }
 
@@ -112,9 +112,9 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   const r = new Hono<AppEnv>().basePath('/api/sites');
 
   // ---- 列表(未解决评论数:一条 group by,避免 N 站点 N 次 count) ----
-  r.get('/', mw.currentUser, (c) => {
+  r.get('/', mw.currentUser, async (c) => {
     const user = c.get('user');
-    const rows = db
+    const rows = await db
       .select()
       .from(sites)
       .where(and(eq(sites.ownerId, user.id), isNull(sites.deletedAt)))
@@ -122,7 +122,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       .all();
     const counts = new Map<string, number>();
     if (rows.length > 0) {
-      const grouped = db
+      const grouped = await db
         .select({ siteId: commentThreads.siteId, n: count() })
         .from(commentThreads)
         .where(
@@ -181,7 +181,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     }
     const files = fileEntries as File[];
 
-    let site = ownedSite(db, user.id, slug);
+    let site = await ownedSite(db, user.id, slug);
     if (!site) {
       const created = nowIso();
       site = {
@@ -200,7 +200,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         updatedAt: created,
         deletedAt: null,
       };
-      db.insert(sites).values(site).run();
+      await db.insert(sites).values(site).run();
     }
     const siteId = site.id;
 
@@ -266,10 +266,11 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     };
     // 文件清单进版本记录(图片查看器壳的同版本导航用);超大站点不存,免得 versions JSON 列膨胀
     if (uploaded.length <= 2000) version.files = uploaded.map((e) => e.rel);
-    // 事务内重读再写回:整列替换 versions JSON,避免覆盖并发 deploy 推入的版本
-    db.transaction((tx) => {
-      const fresh = tx.select().from(sites).where(eq(sites.id, siteId)).get();
-      if (!fresh) return;
+    // 乐观并发(D1 无交互事务):重读 → 算 → 条件 UPDATE 守 current_version_id 未变 → RETURNING 检测命中,
+    // 未命中说明有并发 deploy 抢先推了版本,重读重试,避免覆盖它推入的版本。
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const fresh = await db.select().from(sites).where(eq(sites.id, siteId)).get();
+      if (!fresh) break;
       const set: {
         versions: SiteVersion[];
         currentVersionId: string;
@@ -277,14 +278,24 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         title?: string;
       } = { versions: [...fresh.versions, version], currentVersionId: vid, updatedAt: nowIso() };
       if (title) set.title = title;
-      tx.update(sites).set(set).where(eq(sites.id, siteId)).run();
-    });
+      const guard =
+        fresh.currentVersionId === null
+          ? isNull(sites.currentVersionId)
+          : eq(sites.currentVersionId, fresh.currentVersionId);
+      const wrote = await db
+        .update(sites)
+        .set(set)
+        .where(and(eq(sites.id, siteId), guard))
+        .returning({ id: sites.id })
+        .get();
+      if (wrote) break;
+    }
     console.log(
       `deploy handle=${handle} slug=${slug} vid=${vid} files=${files.length} bytes=${total}`,
     );
-    const updated = ownedSite(db, user.id, slug);
+    const updated = await ownedSite(db, user.id, slug);
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
-    return c.json(siteOut(deps, updated, unresolvedCount(db, updated.id)));
+    return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
   });
 
   // ---- 可见性 / 标题 / SPA / 评论开关 ----
@@ -294,7 +305,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const body = await readJson<SitePatchBody>(c);
     if (body === null) return c.json({ detail: '请求体格式错误' }, 422);
 
-    const site = ownedSite(db, user.id, slug);
+    const site = await ownedSite(db, user.id, slug);
     if (!site) return c.json({ detail: '站点不存在' }, 404);
 
     const set: Partial<typeof sites.$inferInsert> = {};
@@ -332,33 +343,33 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       set.commentsEnabled = b;
     }
     set.updatedAt = nowIso();
-    db.update(sites).set(set).where(eq(sites.id, site.id)).run();
+    await db.update(sites).set(set).where(eq(sites.id, site.id)).run();
 
-    const updated = ownedSite(db, user.id, slug);
+    const updated = await ownedSite(db, user.id, slug);
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
-    return c.json(siteOut(deps, updated, unresolvedCount(db, updated.id)));
+    return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
   });
 
   // ---- 软删(同名 slug 可复用) ----
-  r.delete('/:slug', mw.mutatingUser, (c) => {
+  r.delete('/:slug', mw.mutatingUser, async (c) => {
     const user = c.get('user');
-    const site = ownedSite(db, user.id, c.req.param('slug'));
+    const site = await ownedSite(db, user.id, c.req.param('slug'));
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     const now = nowIso();
-    db.update(sites).set({ deletedAt: now, updatedAt: now }).where(eq(sites.id, site.id)).run();
+    await db.update(sites).set({ deletedAt: now, updatedAt: now }).where(eq(sites.id, site.id)).run();
     return c.json({ ok: true });
   });
 
   // ---- 评论导出(AI 闭环入口,PAT 可访问):改页面前先拉未解决意见 ----
-  r.get('/:slug/comments', mw.currentUser, (c) => {
+  r.get('/:slug/comments', mw.currentUser, async (c) => {
     const user = c.get('user');
-    const site = ownedSite(db, user.id, c.req.param('slug'));
+    const site = await ownedSite(db, user.id, c.req.param('slug'));
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     const all = boolQuery(c.req.query('all'));
 
     const conds = [eq(commentThreads.siteId, site.id), isNull(commentThreads.deletedAt)];
     if (!all) conds.push(eq(commentThreads.resolved, false));
-    const threads = db
+    const threads = await db
       .select()
       .from(commentThreads)
       .where(and(...conds))
@@ -393,11 +404,11 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   });
 
   /** 定位本人站点下的某条评论(跨站 / 已删 / 不属于该站 → null,调用方回 404)。 */
-  function ownedThread(userId: string, slug: string, threadId: string) {
-    const site = ownedSite(db, userId, slug);
+  async function ownedThread(userId: string, slug: string, threadId: string) {
+    const site = await ownedSite(db, userId, slug);
     if (!site) return { site: null, thread: null };
     const thread =
-      db.select().from(commentThreads).where(eq(commentThreads.id, threadId)).get() ?? null;
+      (await db.select().from(commentThreads).where(eq(commentThreads.id, threadId)).get()) ?? null;
     if (!thread || thread.deletedAt !== null || thread.siteId !== site.id) {
       return { site, thread: null };
     }
@@ -411,10 +422,11 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     if (body === null || typeof body.resolved !== 'boolean') {
       return c.json({ detail: 'resolved 必须是布尔值' }, 422);
     }
-    const { site, thread } = ownedThread(user.id, c.req.param('slug'), c.req.param('tid'));
+    const { site, thread } = await ownedThread(user.id, c.req.param('slug'), c.req.param('tid'));
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     if (!thread) return c.json({ detail: '评论不存在' }, 404);
-    db.update(commentThreads)
+    await db
+      .update(commentThreads)
       .set({ resolved: body.resolved, updatedAt: nowIso() })
       .where(eq(commentThreads.id, thread.id))
       .run();
@@ -426,7 +438,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const user = c.get('user');
     const body = await readJson<{ text?: unknown }>(c);
     if (body === null) return c.json({ detail: '请求体格式错误' }, 422);
-    const { site, thread } = ownedThread(user.id, c.req.param('slug'), c.req.param('tid'));
+    const { site, thread } = await ownedThread(user.id, c.req.param('slug'), c.req.param('tid'));
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     if (!thread) return c.json({ detail: '评论不存在' }, 404);
 
@@ -441,15 +453,23 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       text,
       created_at: nowIso(),
     };
-    // 事务内重读再整列写回(原子追加,防覆盖并发写)
-    db.transaction((tx) => {
-      const fresh = tx.select().from(commentThreads).where(eq(commentThreads.id, thread.id)).get();
-      if (!fresh) return;
-      tx.update(commentThreads)
-        .set({ comments: [...fresh.comments, reply], updatedAt: nowIso() })
+    // 乐观并发(D1 无交互事务):重读 → 追加 → 条件 UPDATE 守 updated_at 未变 → RETURNING 检测命中,
+    // 未命中说明有并发回复抢先,重读重试,原子追加防覆盖。
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const fresh = await db
+        .select()
+        .from(commentThreads)
         .where(eq(commentThreads.id, thread.id))
-        .run();
-    });
+        .get();
+      if (!fresh) break;
+      const wrote = await db
+        .update(commentThreads)
+        .set({ comments: [...fresh.comments, reply], updatedAt: nowIso() })
+        .where(and(eq(commentThreads.id, thread.id), eq(commentThreads.updatedAt, fresh.updatedAt)))
+        .returning({ id: commentThreads.id })
+        .get();
+      if (wrote) break;
+    }
     return c.json({
       id: reply.id,
       author: reply.author_name,
@@ -459,9 +479,9 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   });
 
   // ---- 版本列表(created_at 倒序) ----
-  r.get('/:slug/versions', mw.currentUser, (c) => {
+  r.get('/:slug/versions', mw.currentUser, async (c) => {
     const user = c.get('user');
-    const site = ownedSite(db, user.id, c.req.param('slug'));
+    const site = await ownedSite(db, user.id, c.req.param('slug'));
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     const versions = [...site.versions].sort((a, b) => b.created_at.localeCompare(a.created_at));
     return c.json({
@@ -483,18 +503,19 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       return c.json({ detail: '缺少 version_id' }, 422);
     }
     const versionId = body.version_id;
-    const site = ownedSite(db, user.id, c.req.param('slug'));
+    const site = await ownedSite(db, user.id, c.req.param('slug'));
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     if (!site.versions.some((v) => v.id === versionId)) {
       return c.json({ detail: '版本不存在' }, 404);
     }
-    db.update(sites)
+    await db
+      .update(sites)
       .set({ currentVersionId: versionId, updatedAt: nowIso() })
       .where(eq(sites.id, site.id))
       .run();
-    const updated = ownedSite(db, user.id, c.req.param('slug'));
+    const updated = await ownedSite(db, user.id, c.req.param('slug'));
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
-    return c.json(siteOut(deps, updated, unresolvedCount(db, updated.id)));
+    return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
   });
 
   return r;

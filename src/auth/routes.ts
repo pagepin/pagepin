@@ -115,11 +115,11 @@ function loginPage(next: string): string {
 }
 
 /** none 模式:upsert 开发用户(每次登录刷新 last_login_at)。 */
-function upsertDevUser(deps: AppDeps): UserRow {
+async function upsertDevUser(deps: AppDeps): Promise<UserRow> {
   const now = nowIso();
-  const existing = deps.db.select().from(users).where(eq(users.email, 'dev@localhost')).get();
+  const existing = await deps.db.select().from(users).where(eq(users.email, 'dev@localhost')).get();
   if (existing) {
-    deps.db.update(users).set({ lastLoginAt: now }).where(eq(users.id, existing.id)).run();
+    await deps.db.update(users).set({ lastLoginAt: now }).where(eq(users.id, existing.id)).run();
     return existing;
   }
   return deps.db
@@ -137,38 +137,38 @@ function upsertDevUser(deps: AppDeps): UserRow {
 }
 
 /** OIDC upsert:按 oidc_sub 查;资料字段顺手刷新(handle 不动 —— 它是本地身份,
- * 一经确认不随 IdP 变);首个用户给 admin(与 signup 同一条「首个注册用户为 admin」规则)。 */
-function upsertOidcUser(deps: AppDeps, info: OidcIdentity): UserRow {
+ * 一经确认不随 IdP 变);首个用户给 admin(与 signup 同一条「首个注册用户为 admin」规则)。
+ * D1 无交互事务:改两条 await 语句;并发首登的双 admin 极小窄窗可接受(admin 可手动降级),
+ * oidc_sub 唯一索引兜并发同 sub。 */
+async function upsertOidcUser(deps: AppDeps, info: OidcIdentity): Promise<UserRow> {
   const now = nowIso();
-  return deps.db.transaction((tx): UserRow => {
-    const existing = tx.select().from(users).where(eq(users.oidcSub, info.sub)).get();
-    if (existing) {
-      return tx
-        .update(users)
-        .set({
-          displayName: info.name || existing.displayName,
-          email: info.email || existing.email,
-          lastLoginAt: now,
-        })
-        .where(eq(users.id, existing.id))
-        .returning()
-        .get();
-    }
-    const n = tx.select({ n: sql<number>`count(*)` }).from(users).get()?.n ?? 0;
-    return tx
-      .insert(users)
-      .values({
-        id: uuid(),
-        oidcSub: info.sub,
-        displayName: info.name ?? info.preferredUsername ?? null,
-        email: info.email ?? null,
-        isAdmin: n === 0,
-        createdAt: now,
+  const existing = await deps.db.select().from(users).where(eq(users.oidcSub, info.sub)).get();
+  if (existing) {
+    return deps.db
+      .update(users)
+      .set({
+        displayName: info.name || existing.displayName,
+        email: info.email || existing.email,
         lastLoginAt: now,
       })
+      .where(eq(users.id, existing.id))
       .returning()
       .get();
-  });
+  }
+  const n = (await deps.db.select({ n: sql<number>`count(*)` }).from(users).get())?.n ?? 0;
+  return deps.db
+    .insert(users)
+    .values({
+      id: uuid(),
+      oidcSub: info.sub,
+      displayName: info.name ?? info.preferredUsername ?? null,
+      email: info.email ?? null,
+      isAdmin: n === 0,
+      createdAt: now,
+      lastLoginAt: now,
+    })
+    .returning()
+    .get();
 }
 
 export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
@@ -179,7 +179,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const next = safeNext(c.req.query('next'));
 
     if (cfg.authMode === 'none') {
-      const user = upsertDevUser(deps);
+      const user = await upsertDevUser(deps);
       await setLoginCookies(c, cfg, plane, user.id, user.handle);
       return c.redirect(next, 302);
     }
@@ -205,12 +205,14 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const { body, isJson } = await readBody(c);
     const email = (body.email ?? '').trim();
     const password = body.password ?? '';
-    const user = email ? deps.db.select().from(users).where(eq(users.email, email)).get() : undefined;
+    const user = email
+      ? await deps.db.select().from(users).where(eq(users.email, email)).get()
+      : undefined;
     if (!user || !user.passwordHash || !password || !(await verifyPassword(password, user.passwordHash))) {
       return c.json({ detail: '邮箱或密码不正确' }, 401);
     }
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
-    deps.db.update(users).set({ lastLoginAt: nowIso() }).where(eq(users.id, user.id)).run();
+    await deps.db.update(users).set({ lastLoginAt: nowIso() }).where(eq(users.id, user.id)).run();
     await setLoginCookies(c, cfg, plane, user.id, user.handle);
     if (isJson) return c.json({ ok: true });
     return c.redirect(safeNext(body.next), 302);
@@ -218,7 +220,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
 
   app.post('/auth/signup', async (c) => {
     // 自助注册仅在 open 模式放行;invite 模式须走邀请链接,closed 完全关闭
-    if (cfg.authMode !== 'password' || effectiveRegistrationMode(deps) !== 'open') {
+    if (cfg.authMode !== 'password' || (await effectiveRegistrationMode(deps)) !== 'open') {
       return c.json({ detail: '注册未开放' }, 403);
     }
     const { body } = await readBody(c);
@@ -230,12 +232,13 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
 
     const passwordHash = await hashPassword(password);
     const now = nowIso();
-    // 事务内查重 + 数首个用户(count==0 → admin),并发注册不会产生双 admin/双邮箱
-    const created = deps.db.transaction((tx): UserRow | null => {
-      const dup = tx.select().from(users).where(eq(users.email, email)).get();
-      if (dup) return null;
-      const n = tx.select({ n: sql<number>`count(*)` }).from(users).get()?.n ?? 0;
-      return tx
+    // D1 无交互事务:查重 + 数首个用户(count==0 → admin),靠 email 唯一索引兜并发双注册
+    const dup = await deps.db.select().from(users).where(eq(users.email, email)).get();
+    if (dup) return c.json({ detail: '该邮箱已注册' }, 409);
+    const n = (await deps.db.select({ n: sql<number>`count(*)` }).from(users).get())?.n ?? 0;
+    let created: UserRow;
+    try {
+      created = await deps.db
         .insert(users)
         .values({
           id: uuid(),
@@ -248,8 +251,12 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
         })
         .returning()
         .get();
-    });
-    if (!created) return c.json({ detail: '该邮箱已注册' }, 409);
+    } catch (e) {
+      // 唯一索引兜并发同邮箱:落库失败后该邮箱已存在 → 409,否则真异常上抛
+      const exists = await deps.db.select().from(users).where(eq(users.email, email)).get();
+      if (exists) return c.json({ detail: '该邮箱已注册' }, 409);
+      throw e;
+    }
     await setLoginCookies(c, cfg, plane, created.id, created.handle);
     return c.json({ ok: true });
   });
@@ -270,7 +277,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       if (e instanceof OidcError) return c.json({ detail: e.detail }, 502);
       throw e;
     }
-    const user = upsertOidcUser(deps, info);
+    const user = await upsertOidcUser(deps, info);
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     await setLoginCookies(c, cfg, plane, user.id, user.handle);
     return c.redirect(safeNext(typeof st.nxt === 'string' ? st.nxt : null), 302);
@@ -282,8 +289,8 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   });
 
   // console 登录/注册 UI 用:匿名可读,决定渲染密码表单/注册入口还是跳 OIDC
-  app.get('/api/auth/config', (c) => {
-    const mode = effectiveRegistrationMode(deps);
+  app.get('/api/auth/config', async (c) => {
+    const mode = await effectiveRegistrationMode(deps);
     return c.json({
       mode: cfg.authMode,
       registration_mode: mode,
@@ -294,10 +301,10 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   /** 邀请校验(匿名):接受邀请屏据此回显被邀邮箱、判断是否有效。 */
   app.get('/api/auth/invite', async (c) => {
     if (cfg.authMode !== 'password') return c.json({ ok: false, reason: 'unsupported' });
-    if (effectiveRegistrationMode(deps) === 'closed') return c.json({ ok: false, reason: 'closed' });
+    if ((await effectiveRegistrationMode(deps)) === 'closed') return c.json({ ok: false, reason: 'closed' });
     const token = (c.req.query('token') ?? '').trim();
     if (!token) return c.json({ ok: false, reason: 'missing' });
-    const inv = deps.db.select().from(invites).where(eq(invites.tokenHash, await sha256Hex(token))).get();
+    const inv = await deps.db.select().from(invites).where(eq(invites.tokenHash, await sha256Hex(token))).get();
     if (!inv || inv.acceptedAt !== null || Date.parse(inv.expiresAt) <= Date.now()) {
       return c.json({ ok: false, reason: 'invalid' });
     }
@@ -307,7 +314,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   /** 接受邀请:凭一次性 token 建号并登录(handle 仍走首登确认)。 */
   app.post('/auth/accept-invite', async (c) => {
     if (cfg.authMode !== 'password') return c.json({ detail: '当前实例不支持邀请注册' }, 403);
-    if (effectiveRegistrationMode(deps) === 'closed') return c.json({ detail: '注册已关闭' }, 403);
+    if ((await effectiveRegistrationMode(deps)) === 'closed') return c.json({ detail: '注册已关闭' }, 403);
     const { body } = await readBody(c);
     const token = (body.token ?? '').trim();
     const password = body.password ?? '';
@@ -316,7 +323,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     if (password.length < 8) return c.json({ detail: '密码至少 8 位' }, 422);
 
     const tokenHash = await sha256Hex(token);
-    const inv = deps.db.select().from(invites).where(eq(invites.tokenHash, tokenHash)).get();
+    const inv = await deps.db.select().from(invites).where(eq(invites.tokenHash, tokenHash)).get();
     if (!inv || inv.acceptedAt !== null || Date.parse(inv.expiresAt) <= Date.now()) {
       return c.json({ detail: '邀请无效或已过期' }, 400);
     }
@@ -325,41 +332,46 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
 
     const passwordHash = await hashPassword(password);
     const now = nowIso();
-    // 事务:邮箱查重 + 建号 + 条件 UPDATE 抢占邀请(WHERE accepted_at IS NULL,
-    // changes!==1 即被并发抢先 → 抛错回滚已插入用户)。一次性语义落到 DB 层,跨进程也安全。
-    const USED = Symbol('invite-used');
-    let outcome: UserRow | 'dup';
+    // 常见 dup 先拦(不消耗邀请)
+    const dup = await deps.db.select().from(users).where(eq(users.email, email)).get();
+    if (dup) return c.json({ detail: '该邮箱已注册' }, 409);
+    // D1 无交互事务:① 先条件认领邀请(WHERE accepted_at IS NULL,RETURNING 检测命中=一次性语义),
+    // ② 认领成功才建号,③ 建号失败则补偿释放邀请。跨进程安全,无需交互事务。
+    const newUserId = uuid();
+    const claimed = await deps.db
+      .update(invites)
+      .set({ acceptedAt: now, acceptedUserId: newUserId })
+      .where(and(eq(invites.id, inv.id), isNull(invites.acceptedAt)))
+      .returning({ id: invites.id })
+      .get();
+    if (!claimed) return c.json({ detail: '邀请已被使用' }, 400);
+    let created: UserRow;
     try {
-      outcome = deps.db.transaction((tx): UserRow | 'dup' => {
-        const dup = tx.select().from(users).where(eq(users.email, email)).get();
-        if (dup) return 'dup';
-        const user = tx
-          .insert(users)
-          .values({
-            id: uuid(),
-            email,
-            passwordHash,
-            displayName: displayName || null,
-            isAdmin: inv.isAdmin,
-            createdAt: now,
-            lastLoginAt: now,
-          })
-          .returning()
-          .get();
-        const claim = tx
-          .update(invites)
-          .set({ acceptedAt: now, acceptedUserId: user.id })
-          .where(and(eq(invites.id, inv.id), isNull(invites.acceptedAt)))
-          .run();
-        if (claim.changes !== 1) throw USED; // 抢占失败 → 回滚整个事务(含已插入用户)
-        return user;
-      });
+      created = await deps.db
+        .insert(users)
+        .values({
+          id: newUserId,
+          email,
+          passwordHash,
+          displayName: displayName || null,
+          isAdmin: inv.isAdmin,
+          createdAt: now,
+          lastLoginAt: now,
+        })
+        .returning()
+        .get();
     } catch (e) {
-      if (e === USED) return c.json({ detail: '邀请已被使用' }, 400);
+      // 建号失败(如并发同邮箱抢先)→ 释放本次认领,回错
+      await deps.db
+        .update(invites)
+        .set({ acceptedAt: null, acceptedUserId: null })
+        .where(and(eq(invites.id, inv.id), eq(invites.acceptedUserId, newUserId)))
+        .run();
+      const exists = await deps.db.select().from(users).where(eq(users.email, email)).get();
+      if (exists) return c.json({ detail: '该邮箱已注册' }, 409);
       throw e;
     }
-    if (outcome === 'dup') return c.json({ detail: '该邮箱已注册' }, 409);
-    await setLoginCookies(c, cfg, plane, outcome.id, outcome.handle);
+    await setLoginCookies(c, cfg, plane, created.id, created.handle);
     return c.json({ ok: true });
   });
 
