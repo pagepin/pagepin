@@ -29,6 +29,10 @@ export interface AuthMiddleware {
   cookieUser: MiddlewareHandler<AppEnv>;
   /** 仅 Cookie 会话 + CSRF(token 管理写)。 */
   cookieMutatingUser: MiddlewareHandler<AppEnv>;
+  /** currentUser + 管理员校验(admin 只读接口)。 */
+  adminUser: MiddlewareHandler<AppEnv>;
+  /** 仅 Cookie 会话 + CSRF + 管理员校验(admin 写接口;PAT 不能做管理动作,限制泄露半径)。 */
+  adminMutatingUser: MiddlewareHandler<AppEnv>;
 }
 
 export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
@@ -47,6 +51,7 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     if (!rec) return c.json({ detail: 'token 无效或已吊销' }, 401);
     const user = db.select().from(users).where(eq(users.id, rec.userId)).get();
     if (!user) return c.json({ detail: 'token 对应用户不存在' }, 401);
+    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     c.set('authVia', 'token');
     // last_used_at 节流写(5 分钟粒度足够审计,省掉每请求一次写库)
     if (!rec.lastUsedAt || Date.now() - Date.parse(rec.lastUsedAt) > 300_000) {
@@ -66,6 +71,7 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     if (!claims) return c.json({ detail: '未登录' }, 401);
     const user = db.select().from(users).where(eq(users.id, claims.sub)).get();
     if (!user) return c.json({ detail: '用户不存在，请重新登录' }, 401);
+    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     c.set('sessionClaims', claims);
     c.set('authVia', 'cookie');
     c.set('user', user);
@@ -84,6 +90,11 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     if (c.get('authVia') !== 'cookie') {
       return c.json({ detail: '请在控制台浏览器里操作（API token 不能管理 token）' }, 403);
     }
+    return undefined;
+  }
+
+  function requireAdmin(c: Context<AppEnv>): Response | undefined {
+    if (!c.get('user').isAdmin) return c.json({ detail: '需要管理员权限' }, 403);
     return undefined;
   }
 
@@ -112,5 +123,18 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     await next();
   });
 
-  return { currentUser, mutatingUser, cookieUser, cookieMutatingUser };
+  const adminUser = createMiddleware<AppEnv>(async (c, next) => {
+    const err = (await authenticate(c)) ?? requireAdmin(c);
+    if (err) return err;
+    await next();
+  });
+
+  // admin 写接口强制浏览器 Cookie 会话:权能高(设/撤管理员、签发邀请),PAT 不得操作
+  const adminMutatingUser = createMiddleware<AppEnv>(async (c, next) => {
+    const err = (await authenticate(c)) ?? csrfGuard(c) ?? requireCookie(c) ?? requireAdmin(c);
+    if (err) return err;
+    await next();
+  });
+
+  return { currentUser, mutatingUser, cookieUser, cookieMutatingUser, adminUser, adminMutatingUser };
 }

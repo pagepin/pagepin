@@ -30,6 +30,8 @@ export interface Config {
   mode: 'single' | 'dual';
   authMode: 'password' | 'oidc' | 'none';
   allowSignup: boolean;
+  /** 注册模式的 env 覆盖;显式设置则锁定(管理员不能在 UI 改),未设置时由 DB instance_settings 决定。 */
+  registrationMode?: 'open' | 'invite' | 'closed';
   adminEmail?: string;
   adminPassword?: string;
   secret: string;
@@ -78,6 +80,17 @@ export function loadConfig(env: Env): Config {
   const authMode = str(env, 'PAGEPIN_AUTH_MODE', 'password') as Config['authMode'];
   if (!['password', 'oidc', 'none'].includes(authMode)) {
     throw new Error(`PAGEPIN_AUTH_MODE 只能是 password/oidc/none,收到:${authMode}`);
+  }
+
+  // 注册模式 env 覆盖:仅 PAGEPIN_REGISTRATION_MODE 显式给才锁定 UI(env 启动覆盖语义)。
+  // 旧开关 PAGEPIN_ALLOW_SIGNUP 不再锁 UI —— 只作 DB 无值时的兜底默认(见 instance-settings.ts)。
+  let registrationMode: Config['registrationMode'];
+  const rmRaw = env.PAGEPIN_REGISTRATION_MODE;
+  if (rmRaw !== undefined && rmRaw !== '') {
+    if (!['open', 'invite', 'closed'].includes(rmRaw)) {
+      throw new Error(`PAGEPIN_REGISTRATION_MODE 只能是 open/invite/closed,收到:${rmRaw}`);
+    }
+    registrationMode = rmRaw as Config['registrationMode'];
   }
 
   let oidc: OidcConfig | undefined;
@@ -141,6 +154,7 @@ export function loadConfig(env: Env): Config {
     mode,
     authMode,
     allowSignup: bool(env, 'PAGEPIN_ALLOW_SIGNUP', true),
+    registrationMode,
     adminEmail: env.PAGEPIN_ADMIN_EMAIL || undefined,
     adminPassword: env.PAGEPIN_ADMIN_PASSWORD || undefined,
     secret,

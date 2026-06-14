@@ -162,17 +162,22 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   const plane: Plane = cfg.mode === 'dual' ? 'view' : 'session';
   const app = new Hono<AppEnv>();
 
-  async function viewer(c: Context<AppEnv>): Promise<SessionClaims> {
+  // 查库判活:被禁用用户即时失效(数据面不经控制台中间件,disabled 须在此自行兜住)
+  async function activeViewer(c: Context<AppEnv>): Promise<{ claims: SessionClaims; user: UserRow }> {
     const claims = await readSession(c, cfg, plane);
     if (claims === null) throw new ApiError(401, '未登录');
-    return claims;
+    const user = db.select().from(users).where(eq(users.id, claims.sub)).get();
+    if (!user) throw new ApiError(401, '用户不存在，请重新登录');
+    if (user.disabled) throw new ApiError(403, '账号已被禁用');
+    return { claims, user };
+  }
+
+  async function viewer(c: Context<AppEnv>): Promise<SessionClaims> {
+    return (await activeViewer(c)).claims;
   }
 
   async function viewerUser(c: Context<AppEnv>): Promise<UserRow> {
-    const claims = await viewer(c);
-    const user = db.select().from(users).where(eq(users.id, claims.sub)).get();
-    if (!user) throw new ApiError(401, '用户不存在，请重新登录');
-    return user;
+    return (await activeViewer(c)).user;
   }
 
   function commentableSite(handle: string, slug: string): SiteRow {
@@ -316,22 +321,34 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     '/api/comments/threads/:tid',
     wrap(async (c) => {
       const raw = await readJson(c);
-      if (
-        typeof raw !== 'object' || raw === null ||
-        typeof (raw as Record<string, unknown>).resolved !== 'boolean'
-      ) {
-        throw new ApiError(422, 'resolved 必须是布尔值');
+      if (typeof raw !== 'object' || raw === null) throw new ApiError(422, '请求体格式错误');
+      const body = raw as Record<string, unknown>;
+      const hasResolved = 'resolved' in body;
+      const hasKind = 'kind' in body;
+      if (!hasResolved && !hasKind) throw new ApiError(422, '需提供 resolved 或 kind');
+      const set: { resolved?: boolean; kind?: string | null; updatedAt: string } = { updatedAt: nowIso() };
+      if (hasResolved) {
+        if (typeof body.resolved !== 'boolean') throw new ApiError(422, 'resolved 必须是布尔值');
+        set.resolved = body.resolved;
       }
-      // 解决/重开放开给所有登录成员(协作场景,留痕在回复里)
+      if (hasKind) {
+        const k = body.kind;
+        if (k !== null && (typeof k !== 'string' || !KINDS.has(k))) {
+          throw new ApiError(422, `kind 只能是 ${KINDS_HINT} 或 null`);
+        }
+        set.kind = k as string | null;
+      }
+      // 解决/重开/改 kind 放开给所有登录成员(协作场景,留痕在回复里)
       await viewer(c);
       const thread = getThread(c.req.param('tid') ?? '');
-      const resolved = (raw as { resolved: boolean }).resolved;
-      const now = nowIso();
-      db.update(commentThreads)
-        .set({ resolved, updatedAt: now })
-        .where(eq(commentThreads.id, thread.id))
-        .run();
-      return c.json(threadOut({ ...thread, resolved, updatedAt: now }));
+      db.update(commentThreads).set(set).where(eq(commentThreads.id, thread.id)).run();
+      const updated: CommentThreadRow = {
+        ...thread,
+        resolved: hasResolved ? set.resolved! : thread.resolved,
+        kind: hasKind ? (set.kind ?? null) : thread.kind,
+        updatedAt: set.updatedAt,
+      };
+      return c.json(threadOut(updated));
     }),
   );
 

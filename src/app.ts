@@ -16,6 +16,7 @@
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
+import { makeAdminRoutes } from './api/admin.js';
 import { makeAuthMiddleware } from './api/deps.js';
 import { makeMeRoutes } from './api/me.js';
 import { makeSiteRoutes } from './api/sites.js';
@@ -103,6 +104,7 @@ async function mountConsolePlane(
   app.route('/', makeMeRoutes(deps, mw));
   app.route('/', makeSiteRoutes(deps, mw));
   app.route('/', makeTokenRoutes(deps, mw));
+  app.route('/', makeAdminRoutes(deps, mw));
   if (opts.skillMd) mountSkillMd(app, deps, opts.skillMd);
 }
 

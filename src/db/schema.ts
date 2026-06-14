@@ -36,6 +36,7 @@ export const users = sqliteTable(
     handle: text('handle'), // 路径用户名(首登确认;唯一、URL 安全)
     displayName: text('display_name'),
     isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
+    disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false), // 禁用后所有认证路径即拒(控制面/数据面/登录入口);管理员可恢复
     createdAt: text('created_at').notNull(),
     lastLoginAt: text('last_login_at'),
   },
@@ -117,10 +118,34 @@ export const apiTokens = sqliteTable(
   ],
 );
 
+/** 注册邀请 —— 一次性链接,凭 token 建号。token 只存 sha256(明文),明文生成时展示一次。 */
+export const invites = sqliteTable(
+  'invites',
+  {
+    id: text('id').primaryKey(),
+    tokenHash: text('token_hash').notNull(), // sha256(明文 inv_...) hex
+    email: text('email'), // 限定被邀邮箱(可空 = 任意邮箱可用)
+    isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false), // 接受后是否给 admin
+    createdBy: text('created_by').notNull(), // = users.id(签发管理员)
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    acceptedAt: text('accepted_at'), // 非空 = 已用(一次性)
+    acceptedUserId: text('accepted_user_id'),
+  },
+  (t) => [uniqueIndex('invites_hash_uq').on(t.tokenHash)],
+);
+
+/** 实例级运行时设置(KV)—— 管理员可改、重启保留;env 显式设置时由 env 覆盖(见 instance-settings.ts)。 */
+export const instanceSettings = sqliteTable('instance_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+});
+
 export type UserRow = typeof users.$inferSelect;
 export type SiteRow = typeof sites.$inferSelect;
 export type CommentThreadRow = typeof commentThreads.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;
+export type InviteRow = typeof invites.$inferSelect;
 
 /** site.versions 里找当前版本(对应 Site.current_version())。 */
 export function currentVersion(site: SiteRow): SiteVersion | null {

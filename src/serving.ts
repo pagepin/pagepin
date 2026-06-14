@@ -529,7 +529,13 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
     const now = new Date();
     const pub = isPubliclyVisible(site, now);
     const claims = await readSession(c, cfg, plane);
-    if (!pub && claims === null) {
+    // 查库判活:会话用户须存在且未被禁用,否则按未登录处理(私有页不放行、不注入评论层)
+    let viewerActive = false;
+    if (claims !== null) {
+      const u = db.select({ disabled: users.disabled }).from(users).where(eq(users.id, claims.sub)).get();
+      viewerActive = u !== undefined && !u.disabled;
+    }
+    if (!pub && !viewerActive) {
       // 品牌门页(不再裸 302):曾公开但窗口已关 → 过期页;否则私有 → 登录墙。
       // 「Sign in」回 /auth/login?next=,登录后落回本页。
       const loginHref = `/auth/login?next=${encodeURIComponent(c.req.path)}`;
@@ -541,8 +547,8 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
       const ownerName = owner?.displayName || `@${handle}`;
       return c.html(loginWallHtml(slug, ownerName, loginHref), 200, gateHeaders);
     }
-    // 评论层只给已登录访问者注入:匿名公开访客(对外客户)看到的是干净页面
-    const canInject = site.commentsEnabled && claims !== null;
+    // 评论层只给已登录且未禁用的访问者注入:匿名公开访客(对外客户)看到的是干净页面
+    const canInject = site.commentsEnabled && viewerActive;
 
     // 目录式 URL(空路径或尾斜杠)直接落 index.html
     const raw = !rest || rest.endsWith('/') ? rest + 'index.html' : rest;

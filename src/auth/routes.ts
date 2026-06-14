@@ -13,10 +13,11 @@
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { sign, verify as jwtVerify } from 'hono/jwt';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import type { Config } from '../config.js';
-import { users, type UserRow } from '../db/index.js';
+import { invites, users, type UserRow } from '../db/index.js';
+import { effectiveRegistrationMode } from '../instance-settings.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso, uuid } from '../util.js';
 import { buildAuthorizeUrl, exchangeCode, OidcError, type OidcIdentity } from './oidc.js';
@@ -24,6 +25,11 @@ import { hashPassword, verifyPassword } from './password.js';
 import { clearLoginCookies, setLoginCookies, type Plane } from './sessions.js';
 
 const STATE_TTL = 600; // OIDC state 有效期 10 分钟
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 async function stateEncode(secret: string, plane: Plane, nextPath: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
@@ -203,6 +209,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     if (!user || !user.passwordHash || !password || !(await verifyPassword(password, user.passwordHash))) {
       return c.json({ detail: '邮箱或密码不正确' }, 401);
     }
+    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     deps.db.update(users).set({ lastLoginAt: nowIso() }).where(eq(users.id, user.id)).run();
     await setLoginCookies(c, cfg, plane, user.id, user.handle);
     if (isJson) return c.json({ ok: true });
@@ -210,7 +217,8 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   });
 
   app.post('/auth/signup', async (c) => {
-    if (cfg.authMode !== 'password' || !cfg.allowSignup) {
+    // 自助注册仅在 open 模式放行;invite 模式须走邀请链接,closed 完全关闭
+    if (cfg.authMode !== 'password' || effectiveRegistrationMode(deps) !== 'open') {
       return c.json({ detail: '注册未开放' }, 403);
     }
     const { body } = await readBody(c);
@@ -263,6 +271,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       throw e;
     }
     const user = upsertOidcUser(deps, info);
+    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     await setLoginCookies(c, cfg, plane, user.id, user.handle);
     return c.redirect(safeNext(typeof st.nxt === 'string' ? st.nxt : null), 302);
   });
@@ -272,8 +281,87 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     return c.redirect('/', 302);
   });
 
-  // console 登录 UI 用:匿名可读,决定渲染密码表单还是跳 OIDC
-  app.get('/api/auth/config', (c) => c.json({ mode: cfg.authMode, allow_signup: cfg.allowSignup }));
+  // console 登录/注册 UI 用:匿名可读,决定渲染密码表单/注册入口还是跳 OIDC
+  app.get('/api/auth/config', (c) => {
+    const mode = effectiveRegistrationMode(deps);
+    return c.json({
+      mode: cfg.authMode,
+      registration_mode: mode,
+      allow_signup: mode === 'open', // 兼容旧字段
+    });
+  });
+
+  /** 邀请校验(匿名):接受邀请屏据此回显被邀邮箱、判断是否有效。 */
+  app.get('/api/auth/invite', async (c) => {
+    if (cfg.authMode !== 'password') return c.json({ ok: false, reason: 'unsupported' });
+    if (effectiveRegistrationMode(deps) === 'closed') return c.json({ ok: false, reason: 'closed' });
+    const token = (c.req.query('token') ?? '').trim();
+    if (!token) return c.json({ ok: false, reason: 'missing' });
+    const inv = deps.db.select().from(invites).where(eq(invites.tokenHash, await sha256Hex(token))).get();
+    if (!inv || inv.acceptedAt !== null || Date.parse(inv.expiresAt) <= Date.now()) {
+      return c.json({ ok: false, reason: 'invalid' });
+    }
+    return c.json({ ok: true, email: inv.email, is_admin: inv.isAdmin });
+  });
+
+  /** 接受邀请:凭一次性 token 建号并登录(handle 仍走首登确认)。 */
+  app.post('/auth/accept-invite', async (c) => {
+    if (cfg.authMode !== 'password') return c.json({ detail: '当前实例不支持邀请注册' }, 403);
+    if (effectiveRegistrationMode(deps) === 'closed') return c.json({ detail: '注册已关闭' }, 403);
+    const { body } = await readBody(c);
+    const token = (body.token ?? '').trim();
+    const password = body.password ?? '';
+    const displayName = (body.display_name ?? '').trim();
+    if (!token) return c.json({ detail: '缺少邀请 token' }, 422);
+    if (password.length < 8) return c.json({ detail: '密码至少 8 位' }, 422);
+
+    const tokenHash = await sha256Hex(token);
+    const inv = deps.db.select().from(invites).where(eq(invites.tokenHash, tokenHash)).get();
+    if (!inv || inv.acceptedAt !== null || Date.parse(inv.expiresAt) <= Date.now()) {
+      return c.json({ detail: '邀请无效或已过期' }, 400);
+    }
+    const email = (inv.email ?? body.email ?? '').trim();
+    if (!/.+@.+/.test(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
+
+    const passwordHash = await hashPassword(password);
+    const now = nowIso();
+    // 事务:邮箱查重 + 建号 + 条件 UPDATE 抢占邀请(WHERE accepted_at IS NULL,
+    // changes!==1 即被并发抢先 → 抛错回滚已插入用户)。一次性语义落到 DB 层,跨进程也安全。
+    const USED = Symbol('invite-used');
+    let outcome: UserRow | 'dup';
+    try {
+      outcome = deps.db.transaction((tx): UserRow | 'dup' => {
+        const dup = tx.select().from(users).where(eq(users.email, email)).get();
+        if (dup) return 'dup';
+        const user = tx
+          .insert(users)
+          .values({
+            id: uuid(),
+            email,
+            passwordHash,
+            displayName: displayName || null,
+            isAdmin: inv.isAdmin,
+            createdAt: now,
+            lastLoginAt: now,
+          })
+          .returning()
+          .get();
+        const claim = tx
+          .update(invites)
+          .set({ acceptedAt: now, acceptedUserId: user.id })
+          .where(and(eq(invites.id, inv.id), isNull(invites.acceptedAt)))
+          .run();
+        if (claim.changes !== 1) throw USED; // 抢占失败 → 回滚整个事务(含已插入用户)
+        return user;
+      });
+    } catch (e) {
+      if (e === USED) return c.json({ detail: '邀请已被使用' }, 400);
+      throw e;
+    }
+    if (outcome === 'dup') return c.json({ detail: '该邮箱已注册' }, 409);
+    await setLoginCookies(c, cfg, plane, outcome.id, outcome.handle);
+    return c.json({ ok: true });
+  });
 
   return app;
 }

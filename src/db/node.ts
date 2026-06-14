@@ -19,12 +19,20 @@ export function createNodeDb(file: string) {
   return drizzle(sqlite, { schema });
 }
 
-/** 增量列迁移:CREATE TABLE IF NOT EXISTS 不会给存量库加列,这里按列名补齐。 */
+/** 增量列迁移:CREATE TABLE IF NOT EXISTS 不会给存量库加列,这里按列名补齐。
+ * (新增的整张表走 DDL 的 CREATE TABLE IF NOT EXISTS,无需在此处理。) */
 function migrate(sqlite: InstanceType<typeof Database>): void {
-  const cols = (sqlite.prepare('PRAGMA table_info(comment_threads)').all() as { name: string }[])
-    .map((c) => c.name);
-  if (!cols.includes('rw')) {
+  const colsOf = (table: string) =>
+    (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+
+  const threadCols = colsOf('comment_threads');
+  if (!threadCols.includes('rw')) {
     sqlite.exec('ALTER TABLE comment_threads ADD COLUMN rw REAL; ALTER TABLE comment_threads ADD COLUMN rh REAL;');
+  }
+
+  const userCols = colsOf('users');
+  if (!userCols.includes('disabled')) {
+    sqlite.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;');
   }
 }
 

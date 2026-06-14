@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   handle TEXT,
   display_name TEXT,
   is_admin INTEGER NOT NULL DEFAULT 0,
+  disabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   last_login_at TEXT
 );
@@ -72,4 +73,22 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS tokens_hash_uq ON api_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS tokens_user_idx ON api_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS invites (
+  id TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL,
+  email TEXT,
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  accepted_at TEXT,
+  accepted_user_id TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS invites_hash_uq ON invites(token_hash);
+
+CREATE TABLE IF NOT EXISTS instance_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
