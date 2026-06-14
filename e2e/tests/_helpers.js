@@ -137,6 +137,7 @@ const popover = (page) => page.locator('[data-pp-role="popover"]');
 const composer = (page) => page.locator('[data-pp-role="composer"]');
 const list = (page) => page.locator('[data-pp-role="list"]');
 const anyPopup = (page) => page.locator('.pp-anno-popup');
+const collapsed = (page) => page.locator('[data-pp-role="collapsed"]');
 
 async function goto(page) {
   await page.goto('http://pagepin.test/');
@@ -147,5 +148,5 @@ const ready = async (page) => { await bar(page).waitFor(); };
 module.exports = {
   COMMENTS_JS, NOW, VIEWER, DEFAULT_BOXES,
   mkThread, fixtureHtml, setup, goto,
-  pin, bar, act, popover, composer, list, anyPopup, ready,
+  pin, bar, act, popover, composer, list, anyPopup, collapsed, ready,
 };

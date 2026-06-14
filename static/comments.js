@@ -52,7 +52,25 @@
     listOpen: false,
     openPopup: null,
     openThreadId: null,
+    collapsed: false, // 命令条是否收起为 dot（rest 态的临时让位子态）
+    collapseCorner: 'tl', // tl|tr|bl|br，dot 停靠角落
   };
+
+  // 收起态偏好持久化（全局共享：所有站点同一收起/角落偏好）
+  const COLLAPSE_KEY = 'pp-anno-collapse';
+  function loadCollapse() {
+    try {
+      const v = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '{}');
+      if (v && typeof v === 'object') {
+        if (typeof v.corner === 'string' && /^[tb][lr]$/.test(v.corner)) state.collapseCorner = v.corner;
+        if (v.on === true) state.collapsed = true;
+      }
+    } catch (e) { /* localStorage 不可用：忽略 */ }
+  }
+  function persistCollapse() {
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify({ on: state.collapsed, corner: state.collapseCorner })); }
+    catch (e) { /* 忽略 */ }
+  }
 
   /* ---------------- API（保留） ---------------- */
   async function api(path, opts) {
@@ -99,6 +117,7 @@
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     minus: '<path d="M5 12h14"/>',
+    minimize: '<path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>',
   };
   const avatarColor = (name) => AVA[[...(name || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AVA.length];
   const initialOf = (name) => (name || '?').trim().slice(0, 1).toUpperCase();
@@ -230,11 +249,24 @@
   /* ── caught-up / toast ── */
   .pp-anno-caught{display:inline-flex;align-items:center;gap:7px;padding:0 6px 0 13px;color:#7fe3d6;font-weight:600;font-size:13px}
   .pp-anno-toast{position:fixed;bottom:74px;left:50%;transform:translateX(-50%);z-index:2147483100;background:#15191c;color:#f3efe7;font-size:12.5px;font-weight:500;padding:9px 16px;border-radius:9px;box-shadow:0 10px 28px -8px rgba(15,124,114,.6);animation:ppPop .2s}
+  /* ── 收起态（命令条第 5 形态：tuck 成一颗 pin teardrop，同 bar 的暗色 chrome） ── */
+  .pp-anno-collapsed{position:fixed;width:48px;height:48px;z-index:2147483000;display:grid;place-items:center;background:#15191c;color:#e7ebee;box-shadow:0 14px 40px -10px rgba(17,22,27,.55),0 2px 6px rgba(17,22,27,.3);cursor:grab;user-select:none;transition:transform .16s,box-shadow .16s;animation:ppDotIn .18s cubic-bezier(.2,1.3,.4,1)}
+  .pp-anno-collapsed:hover{transform:scale(1.07);box-shadow:0 18px 48px -10px rgba(17,22,27,.6),0 2px 8px rgba(17,22,27,.35)}
+  .pp-anno-collapsed:focus-visible{outline:2px solid #7fe3d6;outline-offset:3px}
+  .pp-anno-collapsed.pp-anno-zero{color:#7fe3d6}
+  .pp-anno-collapsed.pp-anno-dragging{cursor:grabbing;transition:none;animation:none}
+  .pp-anno-collapsed .pp-anno-ic svg{width:21px;height:21px}
+  @keyframes ppDotIn{from{opacity:0;transform:scale(.4)}}
+  .pp-anno-cn{position:absolute;top:-5px;right:-5px;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:#14958a;color:#fff;font:600 11px/19px 'JetBrains Mono',monospace;text-align:center;box-shadow:0 0 0 2px #15191c}
+  .pp-anno-bar.pp-anno-barin{animation:ppBarIn .18s cubic-bezier(.2,1.3,.4,1)}
+  @keyframes ppBarIn{from{opacity:0;transform:translateX(-50%) scale(.9)}}
   @media (max-width:640px){.pp-anno-bar{flex-wrap:wrap;justify-content:center}.pp-anno-list{width:calc(100vw - 24px)}}
+  @media (prefers-reduced-motion:reduce){.pp-anno-root *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
   `;
 
   /* ---------------- UI 骨架 ---------------- */
-  let root, layer, bar, listEl;
+  let root, layer, bar, listEl, dotEl;
+  let draggingDot = false;
 
   function buildUI() {
     const style = document.createElement('style');
@@ -247,9 +279,21 @@
     bar = el('div', 'pp-anno-bar');
     bar.dataset.ppAnno = '1';
     bar.dataset.ppRole = 'bar';
-    root.append(layer, bar);
+    dotEl = el('div', 'pp-anno-collapsed');
+    dotEl.dataset.ppAnno = '1';
+    dotEl.dataset.ppRole = 'collapsed';
+    dotEl.title = 'Open comments';
+    dotEl.tabIndex = 0;
+    dotEl.setAttribute('role', 'button');
+    dotEl.setAttribute('aria-label', 'Open comments');
+    dotEl.style.display = 'none';
+    bindCollapseDrag();
+    root.append(layer, bar, dotEl);
     document.body.appendChild(root);
+    loadCollapse();
     renderBar();
+    // 从上次会话恢复收起态：隐藏 bar，把 dot 摆到记忆的角落
+    if (state.collapsed) { bar.style.display = 'none'; renderCollapse(); dotEl.style.display = ''; }
   }
 
   /* ---------------- 命令条变形 ---------------- */
@@ -310,10 +354,101 @@
     const whole = barBtn('Whole page', ICON.plus, null, 'whole', openComposerForPage);
     const list = barBtn('List', ICON.list, state.listOpen ? 'pp-b-on' : 'pp-b-soft', 'list', toggleList);
     const review = barBtn('Review', ICON.play, 'pp-b-soft', 'review', startReview);
-    bar.append(comment, filter, whole, list, el('div', 'pp-anno-sep'), review);
+    // Tuck：纯图标，最右、分隔线之后，与动作隔开，绝不抢 Comment / Review
+    const collapse = barBtn(null, ICON.minimize, 'pp-anno-rbtn', 'collapse', () => setCollapsed(true), 'Tuck away');
+    bar.append(comment, filter, whole, list, el('div', 'pp-anno-sep'), review, el('div', 'pp-anno-sep'), collapse);
   }
 
   function toggleFilter() { state.filter = state.filter === 'open' ? 'all' : 'open'; renderBar(); render(); }
+
+  /* ---------------- 收起态（命令条第 5 形态：tuck → dot → restore） ---------------- */
+  // teardrop 尖角按所停角落镜像，始终朝向页面内侧
+  const TEARDROP = { tl: '50% 50% 6px 50%', tr: '50% 50% 50% 6px', bl: '50% 6px 50% 50%', br: '6px 50% 50% 50%' };
+  const CORNER_GAP = 18;
+
+  function placeCollapse() {
+    if (!dotEl) return;
+    const c = state.collapseCorner;
+    dotEl.style.top = dotEl.style.bottom = dotEl.style.left = dotEl.style.right = '';
+    dotEl.style[c[0] === 't' ? 'top' : 'bottom'] = CORNER_GAP + 'px';
+    dotEl.style[c[1] === 'l' ? 'left' : 'right'] = CORNER_GAP + 'px';
+    dotEl.style.borderRadius = TEARDROP[c] || TEARDROP.tl;
+  }
+  function paintCollapse() {
+    if (!dotEl) return;
+    dotEl.textContent = '';
+    dotEl.appendChild(svg(ICON.msg, 21));
+    const open = openCount();
+    dotEl.classList.toggle('pp-anno-zero', open === 0); // 零未解决 = 安静 teal dot，无数字
+    dotEl.setAttribute('aria-label', open > 0 ? `Open comments (${open} unresolved)` : 'Open comments (all resolved)');
+    if (open > 0) {
+      const cn = el('span', 'pp-anno-cn', String(open));
+      cn.dataset.ppRole = 'collapsed-count';
+      dotEl.appendChild(cn);
+    }
+  }
+  function renderCollapse() { placeCollapse(); paintCollapse(); }
+
+  function setCollapsed(on) {
+    if (on === state.collapsed) return;
+    if (!on) { if (closePopup()) expand(); return; } // 恢复前也清弹层（对称草稿保护；收起态通常无弹层）
+    if (!closePopup()) return; // composer 有未发草稿：shake 提示，不收起（草稿不丢）
+    if (state.listOpen) toggleList();
+    state.collapsed = true;
+    persistCollapse();
+    bar.style.display = 'none';
+    renderCollapse();
+    dotEl.style.display = '';
+  }
+  // 展开 = 离开收起态：任何交互（进 comment/walk、开任何弹层）前都先 expand
+  function expand() {
+    if (!state.collapsed) return;
+    state.collapsed = false;
+    persistCollapse();
+    dotEl.style.display = 'none';
+    bar.style.display = '';
+    bar.classList.remove('pp-anno-barin'); void bar.offsetWidth; bar.classList.add('pp-anno-barin');
+    renderBar();
+  }
+  function bindCollapseDrag() {
+    // 键盘可达：Enter/Space 恢复命令条（dot 是 role=button、tabindex=0）
+    dotEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(false); }
+    });
+    dotEl.addEventListener('mousedown', (down) => {
+      if (down.button !== 0) return;
+      down.preventDefault();
+      down.stopPropagation();
+      const r = dotEl.getBoundingClientRect();
+      const offX = down.clientX - r.left, offY = down.clientY - r.top;
+      let moved = false;
+      const onMove = (e) => {
+        if (!moved) {
+          if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 5) return;
+          moved = true; draggingDot = true; dotEl.classList.add('pp-anno-dragging');
+        }
+        dotEl.style.top = (e.clientY - offY) + 'px';
+        dotEl.style.left = (e.clientX - offX) + 'px';
+        dotEl.style.right = dotEl.style.bottom = 'auto';
+      };
+      const onUp = (e) => {
+        removeEventListener('mousemove', onMove, true);
+        removeEventListener('mouseup', onUp, true);
+        try {
+          if (!moved) { setCollapsed(false); return; } // 没拖动 = 点击 → 恢复
+          // 吸附到最近角
+          state.collapseCorner = (e.clientY < innerHeight / 2 ? 't' : 'b') + (e.clientX < innerWidth / 2 ? 'l' : 'r');
+          persistCollapse();
+          placeCollapse();
+        } finally { // 无论吸附是否抛错，都复位拖拽标记，避免 dot 计数永久停更
+          draggingDot = false;
+          dotEl.classList.remove('pp-anno-dragging');
+        }
+      };
+      addEventListener('mousemove', onMove, true);
+      addEventListener('mouseup', onUp, true);
+    });
+  }
 
   /* ---------------- 锚点解析（保留） ---------------- */
   const isPage = (t) => t.selector === PAGE_SELECTOR;
@@ -393,6 +528,7 @@
     const open = openCount();
     const cntEl = bar && bar.querySelector('.pp-anno-count');
     if (cntEl) cntEl.textContent = String(open);
+    if (state.collapsed && !draggingDot) paintCollapse(); // 收起态：dot 上的未解决数跟随
     if (state.listOpen) renderList();
   }
 
@@ -512,6 +648,7 @@
     return true;
   }
   function popupShell(x, y, role) {
+    if (state.collapsed) expand(); // 收起态下要弹任何面板（composer/popover）：先展开 bar
     if (!closePopup()) return null;
     const p = el('div', 'pp-anno-popup');
     p.dataset.ppAnno = '1';
@@ -662,6 +799,7 @@
     de.classList.toggle('pp-anno-paused', !!state.openPopup || state.listOpen || state.mode === 'walk');
   }
   function setMode(m) {
+    if (m !== 'rest' && state.collapsed) expand(); // 进入 comment/walk 前先展开
     state.mode = m;
     if (m !== 'comment' && hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
     syncFlags();
