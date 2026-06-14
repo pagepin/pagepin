@@ -15,6 +15,7 @@ data/
 *.db-shm
 .env
 .env.*
+.dev.vars
 
 # e2e artifacts
 e2e/node_modules/

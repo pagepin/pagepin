@@ -1,11 +1,17 @@
 {
-  // Workers 端类型检查(@cloudflare/workers-types)。本会话只校验新增的 edge 驱动文件;
-  // 全量 src 的 workers 校验要等 async 重构把 serving.ts 等的 node:* 去掉后再开。
+  // Workers 端类型检查(@cloudflare/workers-types + WebWorker lib)。
+  // 收全量 edge 代码(worker.ts + d1/r2 + serving/app/api/auth/...),排除 Node-only 入口与驱动。
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "types": ["@cloudflare/workers-types"],
     "lib": ["ES2022", "WebWorker"]
   },
-  "include": ["src/db/d1.ts", "src/storage/r2.ts"],
-  "exclude": []
+  "include": ["src"],
+  "exclude": [
+    "src/index.ts",
+    "src/db/libsql.ts",
+    "src/storage/fs.ts",
+    "src/storage/factory.ts",
+    "src/console-static.ts"
+  ]
 }

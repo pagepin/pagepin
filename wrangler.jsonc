@@ -7,20 +7,21 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-  "migrations_dir": "drizzle",
 
-  // React 控制台经 Static Assets 提供;Worker 只处理 /api|/auth|/p|/_pagepin|/skill.md|/healthz。
+  // React 控制台经 Static Assets 提供;只有这些路径交给 Worker,其余(/、SPA 路由、/assets/*)走资源层。
   "assets": {
     "directory": "./console/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*", "/p/*", "/_pagepin/*", "/skill.md", "/healthz"]
   },
 
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "pagepin",
-      "database_id": "TODO-run-wrangler-d1-create-pagepin",
+      // 占位 UUID(本地 wrangler dev 不校验远端);正式部署用 `wrangler d1 create pagepin` 的真值替换
+      "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "drizzle"
     }
   ],

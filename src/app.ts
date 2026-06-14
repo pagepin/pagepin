@@ -9,8 +9,8 @@
  *   打不到管理 API);Host 分流只是部署省事,隔离由浏览器同源策略保证。
  *   未知 Host 一律 404(/healthz 例外,给负载均衡健康检查)。
  *
- * 本文件保持 edge-safe:Node 专有依赖(fs/path/serve-static)只在
- * opts.consoleDist 存在时动态 import。
+ * 本文件 edge-safe:console 静态托管(Node only)由 opts.mountConsole 注入(见 console-static.ts);
+ * Workers 入口不传它(console 走 Static Assets binding)。
  */
 
 import { Hono } from 'hono';
@@ -30,6 +30,8 @@ import type { AppDeps, AppEnv } from './types.js';
 export interface CreateAppOptions {
   /** console 前端构建产物目录(绝对路径);不存在时不挂静态,GET / 仅提示 */
   consoleDist?: string;
+  /** console 静态托管挂载器(Node only,见 console-static.ts);Workers 不传 */
+  mountConsole?: (app: Hono<AppEnv>, consoleDist: string) => void;
   /** skill.md 模板原文;serve 时按 config 渲染占位符 */
   skillMd?: string;
 }
@@ -63,23 +65,6 @@ function mountSkillMd(app: Hono<AppEnv>, deps: AppDeps, skillMd: string): void {
     c.header('Content-Type', 'text/markdown; charset=utf-8');
     return c.body(rendered);
   });
-}
-
-/** console 静态托管:/assets/* 走 serve-static,其余 GET 未命中路径回 index.html
- * (SPA fallback;已注册路由先于本通配匹配,不会被吞)。Node only —— 动态 import。 */
-async function mountConsoleStatic(app: Hono<AppEnv>, consoleDist: string): Promise<void> {
-  const { serveStatic } = await import('@hono/node-server/serve-static');
-  const { readFileSync } = await import('node:fs');
-  const { join, relative } = await import('node:path');
-  // serve-static 只认相对 cwd 的 root
-  const root = relative(process.cwd(), consoleDist) || '.';
-  app.use('/assets/*', serveStatic({ root }));
-  // 资源缺失时 404,不落 SPA fallback(静态目录的标准行为)
-  app.get('/assets/*', (c) => c.text('not found', 404));
-  // 生产缓存 index.html;开发态每请求现读 —— console 重新 build 后刷新即生效,免重启
-  const indexPath = join(consoleDist, 'index.html');
-  const cached = process.env.NODE_ENV === 'production' ? readFileSync(indexPath, 'utf-8') : null;
-  app.get('*', (c) => c.html(cached ?? readFileSync(indexPath, 'utf-8')));
 }
 
 /** 未捕获异常统一为 JSON 500(API 消费方拿到的错误体保持 {detail} 形状)。 */
@@ -117,8 +102,8 @@ async function createSingleApp(deps: AppDeps, opts: CreateAppOptions): Promise<A
   await mountConsolePlane(app, deps, opts);
   app.route('/', makeCommentRoutes(deps)); // 数据平面 /api/viewer + /api/comments/*
   app.route('/', makeServingRoutes(deps)); // /p/:handle/:slug/* + /_pagepin/*
-  if (opts.consoleDist) {
-    await mountConsoleStatic(app, opts.consoleDist);
+  if (opts.consoleDist && opts.mountConsole) {
+    opts.mountConsole(app, opts.consoleDist);
   } else {
     mountNoConsoleHint(app);
   }
@@ -138,8 +123,8 @@ async function createDualApp(deps: AppDeps, opts: CreateAppOptions): Promise<App
   const consoleApp = new Hono<AppEnv>();
   jsonOnError(consoleApp);
   await mountConsolePlane(consoleApp, deps, opts);
-  if (opts.consoleDist) {
-    await mountConsoleStatic(consoleApp, opts.consoleDist);
+  if (opts.consoleDist && opts.mountConsole) {
+    opts.mountConsole(consoleApp, opts.consoleDist);
   } else {
     mountNoConsoleHint(consoleApp);
   }

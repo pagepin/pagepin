@@ -5,18 +5,16 @@
  *   否则        → 必须有 viewer 会话(双域 pp_view;单域复用 pp_session)
  * 本平面不挂任何改数据接口(评论 API 是有意例外,见 comments.ts)。
  *
- * ※ 本文件允许 Node import(static/ 文件模块顶层读一次缓存);
- *   集成 edge 运行时再把两段 JS 抽成注入的字符串常量。
+ * ※ edge-safe:静态 JS(comments.js/marked.min.js)构建期内联成字符串常量
+ *   (src/generated/edge-assets.ts,由 pnpm gen:assets 生成),运行时不读盘。
  */
-
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 
 import { and, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 import { extOf, relHref } from './autoindex.js';
+import { COMMENTS_JS, MARKED_JS } from './generated/edge-assets.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
 import { currentVersion, isPubliclyVisible, sites, users } from './db/index.js';
@@ -33,28 +31,28 @@ const INJECT_MAX_BYTES = 5 * 1024 * 1024;
 const HEAD_CLOSE_RE = /<\/head\s*>/i;
 const BODY_CLOSE_RE = /<\/body\s*>/i;
 
-// 仓库根 static/(src/ 与 dist/ 都在根下一层,'../static' 两边均成立)
-const COMMENTS_JS_URL = new URL('../static/comments.js', import.meta.url);
-const MARKED_JS_URL = new URL('../static/marked.min.js', import.meta.url);
-const etagOf = (data: Uint8Array) =>
-  `"${createHash('sha256').update(data).digest('hex').slice(0, 16)}"`;
-
+// 静态 JS 内联成构建期常量(edge 无 fs);ETag 用非加密 FNV-1a(只需内容变即变)
+const ASSET_ENC = new TextEncoder();
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
 interface StaticAsset {
   data: Uint8Array<ArrayBuffer>;
   etag: string;
 }
-function loadStatic(url: URL): StaticAsset {
-  const buf = readFileSync(url);
-  const data = new Uint8Array(new ArrayBuffer(buf.byteLength));
-  data.set(buf);
-  return { data, etag: etagOf(data) };
+function staticAsset(js: string): StaticAsset {
+  const u = ASSET_ENC.encode(js);
+  const data = new Uint8Array(new ArrayBuffer(u.byteLength));
+  data.set(u);
+  return { data, etag: `"${fnv1a(js)}${js.length.toString(16)}"` };
 }
-// 生产启动时缓存一次;开发态每请求现读(改 comments.js 刷新即生效,免重启)
-const PROD = process.env.NODE_ENV === 'production';
-const COMMENTS_CACHED = loadStatic(COMMENTS_JS_URL);
-const MARKED_CACHED = loadStatic(MARKED_JS_URL);
-const commentsAsset = () => (PROD ? COMMENTS_CACHED : loadStatic(COMMENTS_JS_URL));
-const markedAsset = () => (PROD ? MARKED_CACHED : loadStatic(MARKED_JS_URL));
+const COMMENTS_ASSET = staticAsset(COMMENTS_JS);
+const MARKED_ASSET = staticAsset(MARKED_JS);
 
 /** html.escape(quote=True) 等价 */
 function escapeHtml(s: string): string {
@@ -460,14 +458,12 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
   const app = new Hono<AppEnv>();
 
   // ★ 必须先于下方站点通配路由注册;"_pagepin" 不符合 handle 规则,无冲突
-  app.get('/_pagepin/comments.js', (c) => {
-    const a = commentsAsset();
-    return staticJs(c, a.data, a.etag, 'no-cache');
-  });
-  app.get('/_pagepin/marked.min.js', (c) => {
-    const a = markedAsset();
-    return staticJs(c, a.data, a.etag, 'public, max-age=86400');
-  });
+  app.get('/_pagepin/comments.js', (c) =>
+    staticJs(c, COMMENTS_ASSET.data, COMMENTS_ASSET.etag, 'no-cache'),
+  );
+  app.get('/_pagepin/marked.min.js', (c) =>
+    staticJs(c, MARKED_ASSET.data, MARKED_ASSET.etag, 'public, max-age=86400'),
+  );
 
   const notFound = (c: Context<AppEnv>, siteRoot?: string) => c.html(notFoundHtml(siteRoot), 404);
 

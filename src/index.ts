@@ -13,6 +13,7 @@ import { serve } from '@hono/node-server';
 import { eq } from 'drizzle-orm';
 
 import { createApp } from './app.js';
+import { mountConsoleStatic } from './console-static.js';
 import { hashPassword } from './auth/password.js';
 import { consoleBase, contentBase, loadConfig } from './config.js';
 import { createLibsqlDb } from './db/libsql.js';
@@ -73,7 +74,10 @@ async function main(): Promise<void> {
   const consoleDistUrl = new URL('../console/dist', import.meta.url);
   const consoleDist = existsSync(consoleDistUrl) ? fileURLToPath(consoleDistUrl) : undefined;
 
-  const app = await createApp({ config: cfg, db, storage }, { consoleDist, skillMd });
+  const app = await createApp(
+    { config: cfg, db, storage },
+    { consoleDist, skillMd, mountConsole: mountConsoleStatic },
+  );
 
   serve({ fetch: app.fetch, port: cfg.port }, (info) => {
     console.log(
