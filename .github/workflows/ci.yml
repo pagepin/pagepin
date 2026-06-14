@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    name: typecheck · build · e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            console/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
+
+      # ---- server: Hono + Drizzle/SQLite ----
+      - name: Install server deps
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Syntax-check injected comments.js
+        run: node --check static/comments.js
+      - name: Build server bundle
+        run: pnpm build
+
+      # ---- console: React + Vite ----
+      - name: Install console deps
+        run: pnpm -C console install --frozen-lockfile
+      - name: Build console
+        run: pnpm -C console build
+
+      # ---- e2e: Playwright (self-contained, stubs the API) ----
+      - name: Install e2e deps
+        run: pnpm -C e2e install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm -C e2e exec playwright install --with-deps chromium
+      - name: Run comments-overlay e2e
+        run: pnpm -C e2e test

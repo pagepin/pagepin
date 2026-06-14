@@ -111,8 +111,6 @@ Reviewers open the shared link, click anywhere on the page, and leave a pinned c
 
 ![pin-point comments overlay](docs/screenshot-comments.png)
 
-*(screenshot placeholder)*
-
 ## Development
 
 ```bash
