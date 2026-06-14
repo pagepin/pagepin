@@ -22,8 +22,6 @@ Deploy any HTML report or static site with one `curl`, share the link, and let r
 
 ### Docker
 
-> The `ghcr.io/pagepin/pagepin` image is not published yet — until then, build it yourself: `docker build -t ghcr.io/pagepin/pagepin .` (or run from source below).
-
 ```bash
 docker run -d --name pagepin \
   -p 8000:8000 \
@@ -130,7 +128,7 @@ pnpm test:e2e       # comments-overlay e2e — self-contained, no backend needed
 ## 中文快速开始
 
 ```bash
-# 启动（镜像发布前请先本地构建：docker build -t ghcr.io/pagepin/pagepin .）
+# 启动
 docker run -d --name pagepin \
   -p 8000:8000 \
   -v pagepin-data:/data \
