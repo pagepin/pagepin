@@ -5,9 +5,11 @@
 import type { D1Database, R2Bucket, Fetcher, ExecutionContext } from '@cloudflare/workers-types';
 
 import { createApp, type AppHandle } from './app.js';
+import { bootstrapAdmin } from './auth/admin-bootstrap.js';
 import { loadConfig } from './config.js';
 import { createD1Db } from './db/d1.js';
 import { SKILL_MD } from './generated/edge-assets.js';
+import { htmlRewriterInject } from './serving-inject.js';
 import { R2Storage } from './storage/r2.js';
 import type { AppDeps } from './types.js';
 
@@ -21,7 +23,12 @@ export interface Env {
 // 每 isolate 构一次(loadConfig 纯函数,deps 依赖注入)
 let appPromise: Promise<AppHandle> | null = null;
 function getApp(env: Env): Promise<AppHandle> {
-  return (appPromise ??= buildApp(env));
+  // 构建失败不缓存:清空 appPromise,下个请求重试干净的 build。
+  // 否则 ??= 会把 rejected promise 永久缓存,一次瞬时 D1 抖动就毒化整个 isolate 直到回收。
+  return (appPromise ??= buildApp(env).catch((e) => {
+    appPromise = null;
+    throw e;
+  }));
 }
 async function buildApp(env: Env): Promise<AppHandle> {
   const cfg = loadConfig(env as unknown as Record<string, string | undefined>);
@@ -30,8 +37,25 @@ async function buildApp(env: Env): Promise<AppHandle> {
     db: createD1Db(env.DB),
     storage: new R2Storage(env.BUCKET),
   };
-  // consoleDist/mountConsole 不传:console SPA 由 Static Assets binding 服务,worker 只管 API/serving
-  return createApp(deps, { skillMd: SKILL_MD });
+  // admin bootstrap:每 isolate 一次(buildApp 经 appPromise 记忆化);
+  // guarded —— 密码与库内哈希吻合即跳过,不每次冷启都重跑 scrypt+写库(见 admin-bootstrap.ts)。
+  // 尽力而为:provisioning 失败只记日志、不拖垮 app 构建(serving 不依赖 admin 就绪),下次冷启重试。
+  try {
+    await bootstrapAdmin(deps, { guarded: true });
+  } catch (e) {
+    console.error('admin bootstrap 失败(继续启动,下次冷启重试):', e);
+  }
+  // console SPA 走 Static Assets binding(env.ASSETS):未命中 API/serving 的 GET 转交它(host 感知,
+  //   故 wrangler run_worker_first=true 全量过 worker,再按 Host 决定 console/content)。
+  // injectHtmlStream —— >5MB HTML 用 HTMLRewriter 流式注入(Node 无此 API,故仅 Workers 注入)。
+  return createApp(deps, {
+    skillMd: SKILL_MD,
+    // env.ASSETS.fetch 用 workers-types 的 Request/Response;createApp 回调签名用全局(WebWorker lib)
+    // 的同名类型 —— 两套结构互不完全兼容(getSetCookie vs getAll),此处桥接一次。
+    serveAssets: (req) =>
+      env.ASSETS.fetch(req as unknown as Parameters<Fetcher['fetch']>[0]) as unknown as Promise<Response>,
+    injectHtmlStream: htmlRewriterInject,
+  });
 }
 
 export default {

@@ -32,6 +32,10 @@ export interface CreateAppOptions {
   consoleDist?: string;
   /** console 静态托管挂载器(Node only,见 console-static.ts);Workers 不传 */
   mountConsole?: (app: Hono<AppEnv>, consoleDist: string) => void;
+  /** console 静态资源服务器(Workers 注入 env.ASSETS.fetch);未命中 API/serving 的 GET 转交它(SPA 兜底)。 */
+  serveAssets?: (req: Request) => Response | Promise<Response>;
+  /** HTML 评论层注入策略(Workers 注入 HTMLRewriter 流式注入器,去 >5MB 上限);透传给 serving。 */
+  injectHtmlStream?: (resp: Response, tag: string) => Response;
   /** skill.md 模板原文;serve 时按 config 渲染占位符 */
   skillMd?: string;
 }
@@ -81,6 +85,21 @@ function mountNoConsoleHint(app: Hono<AppEnv>): void {
   app.get('/', (c) => c.json({ msg: 'pagepin console(前端未构建,dev 用 vite 代理)' }));
 }
 
+/** console 平面的「非 API 兜底」—— 须在 API/serving 路由之后挂(catch-all):
+ *   Node:opts.mountConsole 把 console/dist 走 serve-static(/assets/* + SPA fallback)。
+ *   Workers:opts.serveAssets 把未命中请求转交 Static Assets binding(SPA not_found 已配)。
+ *   都没有:本地后端开发,/ 仅提示。 */
+function mountConsoleFallback(app: Hono<AppEnv>, opts: CreateAppOptions): void {
+  if (opts.consoleDist && opts.mountConsole) {
+    opts.mountConsole(app, opts.consoleDist);
+  } else if (opts.serveAssets) {
+    const serveAssets = opts.serveAssets;
+    app.get('*', (c) => serveAssets(c.req.raw));
+  } else {
+    mountNoConsoleHint(app);
+  }
+}
+
 async function mountConsolePlane(
   app: Hono<AppEnv>, deps: AppDeps, opts: CreateAppOptions,
 ): Promise<void> {
@@ -101,12 +120,8 @@ async function createSingleApp(deps: AppDeps, opts: CreateAppOptions): Promise<A
   app.get('/healthz', (c) => c.text('ok'));
   await mountConsolePlane(app, deps, opts);
   app.route('/', makeCommentRoutes(deps)); // 数据平面 /api/viewer + /api/comments/*
-  app.route('/', makeServingRoutes(deps)); // /p/:handle/:slug/* + /_pagepin/*
-  if (opts.consoleDist && opts.mountConsole) {
-    opts.mountConsole(app, opts.consoleDist);
-  } else {
-    mountNoConsoleHint(app);
-  }
+  app.route('/', makeServingRoutes(deps, { injectHtmlStream: opts.injectHtmlStream })); // /p/:handle/:slug/* + /_pagepin/*
+  mountConsoleFallback(app, opts);
   return { fetch: (req) => app.fetch(req) };
 }
 
@@ -118,16 +133,12 @@ async function createDualApp(deps: AppDeps, opts: CreateAppOptions): Promise<App
   jsonOnError(content);
   content.route('/', makeAuthRoutes(deps, 'view'));
   content.route('/', makeCommentRoutes(deps)); // 须先于 serving 的通配路由
-  content.route('/', makeServingRoutes(deps)); // /:handle/:slug/* + /_pagepin/*
+  content.route('/', makeServingRoutes(deps, { injectHtmlStream: opts.injectHtmlStream })); // /:handle/:slug/* + /_pagepin/*
 
   const consoleApp = new Hono<AppEnv>();
   jsonOnError(consoleApp);
   await mountConsolePlane(consoleApp, deps, opts);
-  if (opts.consoleDist && opts.mountConsole) {
-    opts.mountConsole(consoleApp, opts.consoleDist);
-  } else {
-    mountNoConsoleHint(consoleApp);
-  }
+  mountConsoleFallback(consoleApp, opts);
 
   const consoleHost = stripPort(cfg.consoleHost!);
   const contentHost = stripPort(cfg.contentHost!);

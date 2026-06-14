@@ -14,5 +14,5 @@
     "noEmit": true
   },
   "include": ["src"],
-  "exclude": ["src/db/d1.ts", "src/storage/r2.ts", "src/worker.ts"]
+  "exclude": ["src/db/d1.ts", "src/storage/r2.ts", "src/worker.ts", "src/serving-inject.ts"]
 }

@@ -8,12 +8,15 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
 
-  // React 控制台经 Static Assets 提供;只有这些路径交给 Worker,其余(/、SPA 路由、/assets/*)走资源层。
+  // React 控制台经 Static Assets 提供(binding=ASSETS,SPA 兜底)。
+  // run_worker_first=true:所有请求先过 Worker —— 双域下 console/content 的路由必须按 Host 判定
+  //   (静态 run_worker_first 数组无法表达「content 域全归 worker」),故全量过 worker 再分流;
+  //   console 域未命中 API/serving 的 GET 由 worker 调 env.ASSETS.fetch 回源(代价:静态资源也过 worker)。
   "assets": {
     "directory": "./console/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/auth/*", "/p/*", "/_pagepin/*", "/skill.md", "/healthz"]
+    "run_worker_first": true
   },
 
   "d1_databases": [

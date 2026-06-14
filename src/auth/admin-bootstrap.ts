@@ -1,0 +1,76 @@
+/** Admin bootstrap —— 配置了 PAGEPIN_ADMIN_EMAIL + PAGEPIN_ADMIN_PASSWORD 时确保 admin 账号存在。
+ *
+ * 两个入口共用同一套 upsert(存在则刷新密码哈希 + 确保 isAdmin;不存在则建号,
+ * users_email_uq 唯一索引兜并发双建):
+ *   Node(index.ts):启动无条件跑(进程内一次;重启即刷新)。
+ *   Workers(worker.ts):首请求惰性跑(buildApp 每 isolate 一次)。guarded=true 时先用
+ *     verifyPassword 比对已有账号 —— 密码与 admin 身份都没变就跳过(省一次写库)。
+ *     ★ 不在库里另存任何密码派生标记:那会是一个比 scrypt 更易离线爆破的指纹。
+ *
+ * edge-safe:只用 scrypt(@noble/hashes)+ drizzle。 */
+
+import { eq } from 'drizzle-orm';
+
+import { users, type UserRow } from '../db/index.js';
+import type { AppDeps } from '../types.js';
+import { nowIso, uuid } from '../util.js';
+import { hashPassword, verifyPassword } from './password.js';
+
+/** admin upsert:存在则刷新密码哈希并确保 isAdmin(不动其他字段);不存在则建号。
+ * 并发双建由 users_email_uq 拦下,捕获后改 update,绝不冒重复行。
+ * existing 由调用方预取(省一次 select);仅 insert 撞唯一索引时才二次 select。 */
+async function upsertAdmin(
+  deps: AppDeps,
+  email: string,
+  password: string,
+  existing: UserRow | undefined,
+): Promise<void> {
+  const passwordHash = await hashPassword(password);
+  const promote = { passwordHash, isAdmin: true } as const;
+  if (existing) {
+    await deps.db.update(users).set(promote).where(eq(users.id, existing.id)).run();
+    return;
+  }
+  try {
+    await deps.db
+      .insert(users)
+      .values({
+        id: uuid(),
+        email,
+        passwordHash,
+        displayName: email.split('@')[0] || email,
+        isAdmin: true,
+        createdAt: nowIso(),
+      })
+      .run();
+  } catch (e) {
+    // 唯一索引兜并发同邮箱:落库失败后该邮箱已存在 → 改 update;否则真异常上抛
+    const now = await deps.db.select().from(users).where(eq(users.email, email)).get();
+    if (!now) throw e;
+    await deps.db.update(users).set(promote).where(eq(users.id, now.id)).run();
+  }
+}
+
+/** 确保 admin 存在。返回是否实际跑了 upsert(供入口打日志)。
+ * guarded=true(Workers 冷启):账号已是 admin 且配置密码与库内哈希吻合 → 跳过,不重复 scrypt+写库。 */
+export async function bootstrapAdmin(
+  deps: AppDeps,
+  opts: { guarded?: boolean } = {},
+): Promise<boolean> {
+  const cfg = deps.config;
+  if (!cfg.adminEmail || !cfg.adminPassword) return false;
+  const email = cfg.adminEmail;
+  const password = cfg.adminPassword;
+  const existing = await deps.db.select().from(users).where(eq(users.email, email)).get();
+  if (
+    opts.guarded &&
+    existing &&
+    existing.isAdmin &&
+    existing.passwordHash &&
+    (await verifyPassword(password, existing.passwordHash))
+  ) {
+    return false; // 已就绪、密码未变:跳过
+  }
+  await upsertAdmin(deps, email, password, existing);
+  return true;
+}

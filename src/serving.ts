@@ -448,8 +448,15 @@ function staticJs(
   return new Response(data, { headers });
 }
 
-export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = {}): Hono<AppEnv> {
+export interface ServingOptions {
+  /** HTML 注入策略(Workers 注入 HTMLRewriter 流式注入器,见 serving-inject.ts);
+   * 不传(Node)时 >5MB HTML 不注入、原样流出。≤5MB 一律走内置字节注入。 */
+  injectHtmlStream?: (resp: Response, tag: string) => Response;
+}
+
+export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hono<AppEnv> {
   const { config: cfg, db, storage } = deps;
+  const injectHtmlStream = opts.injectHtmlStream;
   const single = cfg.mode !== 'dual';
   // viewer 会话:双域走内容域 pp_view;单域 viewer 复用控制台 pp_session
   const plane: Plane = single ? 'session' : 'view';
@@ -648,21 +655,26 @@ export function makeServingRoutes(deps: AppDeps, _opts: { skillNote?: never } = 
     }
     if (meta === null || body === null) return notFound(c, siteRoot);
 
-    // 评论层注入:HTML 整读改写(≤5MB;超限/类型不符回落 streaming 原样输出)
+    // 评论层注入:HTML 改写后字节/长度变,存储层的 ETag/Last-Modified/Content-Length 都不再一致,一律不带
     const hitLower = hit.toLowerCase();
-    if (
+    const injectableHtml =
       canInject &&
       (hitLower.endsWith('.html') || hitLower.endsWith('.htm')) &&
-      meta.contentType.includes('html') &&
-      (meta.contentLength ?? 0) <= INJECT_MAX_BYTES
-    ) {
+      meta.contentType.includes('html');
+    if (injectableHtml && (meta.contentLength ?? 0) <= INJECT_MAX_BYTES) {
+      // ≤5MB:整读 + 字节级注入(跨运行时一致,保非 UTF-8/BOM 原样)
       const buf = new Uint8Array(await new Response(body).arrayBuffer());
       const out = injectScriptBytes(buf, injectTag(handle, slug, hit, cur.id));
-      // 改写后的字节与存储层的 ETag/Last-Modified/Content-Length 都不再一致,一律不带
       return new Response(out, {
         headers: { ...baseHeaders, 'Content-Type': meta.contentType },
       });
     }
+    if (injectableHtml && injectHtmlStream) {
+      // >5MB:HTMLRewriter 流式注入(Workers;去整读上限,不占内存)
+      const src = new Response(body, { headers: { ...baseHeaders, 'Content-Type': meta.contentType } });
+      return injectHtmlStream(src, injectTag(handle, slug, hit, cur.id));
+    }
+    // 否则(>5MB 且无流式注入器,如 Node)原样流出,不注入
 
     const headers: Record<string, string> = { ...baseHeaders, 'Content-Type': meta.contentType };
     if (meta.etag) headers['ETag'] = meta.etag;

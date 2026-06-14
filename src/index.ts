@@ -10,16 +10,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { serve } from '@hono/node-server';
-import { eq } from 'drizzle-orm';
 
 import { createApp } from './app.js';
 import { mountConsoleStatic } from './console-static.js';
-import { hashPassword } from './auth/password.js';
+import { bootstrapAdmin } from './auth/admin-bootstrap.js';
 import { consoleBase, contentBase, loadConfig } from './config.js';
 import { createLibsqlDb } from './db/libsql.js';
-import { users } from './db/schema.js';
 import { createStorage } from './storage/factory.js';
-import { nowIso, uuid } from './util.js';
 
 async function main(): Promise<void> {
   // secret:env 优先;否则持久化在 {dataDir}/secret(首启生成,0600)——
@@ -46,25 +43,8 @@ async function main(): Promise<void> {
   const storage = await createStorage(cfg);
 
   // admin bootstrap:配置了邮箱+密码则 upsert(存在则刷新密码哈希并确保 isAdmin,不动其他字段);
-  // 未配置时回落「首个注册用户为 admin」(signup 逻辑负责)。
-  if (cfg.adminEmail && cfg.adminPassword) {
-    const passwordHash = await hashPassword(cfg.adminPassword);
-    const existing = await db.select().from(users).where(eq(users.email, cfg.adminEmail)).get();
-    if (existing) {
-      await db.update(users).set({ passwordHash, isAdmin: true }).where(eq(users.id, existing.id)).run();
-    } else {
-      await db
-        .insert(users)
-        .values({
-          id: uuid(),
-          email: cfg.adminEmail,
-          passwordHash,
-          displayName: cfg.adminEmail.split('@')[0] || cfg.adminEmail,
-          isAdmin: true,
-          createdAt: nowIso(),
-        })
-        .run();
-    }
+  // 未配置时回落「首个注册用户为 admin」(signup 逻辑负责)。Node 启动无条件跑(进程内一次)。
+  if (await bootstrapAdmin({ config: cfg, db, storage })) {
     console.log(`admin 账号就绪:${cfg.adminEmail}`);
   }
 
