@@ -36,7 +36,7 @@ export function confirmDanger(opts: {
     useConfirmStore.getState().open({
       title: opts.title,
       body: opts.body,
-      confirmText: opts.confirmText ?? '确认',
+      confirmText: opts.confirmText ?? 'Confirm',
       resolve,
     });
   });
@@ -80,7 +80,7 @@ export function Confirmer() {
             className="btn-ghost !px-3.5 !py-1.5 !text-xs"
             onClick={() => settle(false)}
           >
-            取消
+            Cancel
           </button>
           <button
             type="button"

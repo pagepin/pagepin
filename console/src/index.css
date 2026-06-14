@@ -7,29 +7,29 @@
     @apply antialiased;
   }
   body {
-    @apply bg-stone-50 text-stone-800;
-    background-image: radial-gradient(rgba(31, 122, 121, 0.05) 1px, transparent 1px);
+    @apply bg-ink-50 text-ink-800;
+    background-image: radial-gradient(rgba(15, 124, 114, 0.05) 1px, transparent 1px);
     background-size: 22px 22px;
   }
   ::selection {
-    @apply bg-tide-200 text-tide-900;
+    @apply bg-tide-100 text-tide-900;
   }
 }
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-tide-400 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-field px-3.5 py-2 text-sm font-semibold transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-tide-500/40 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
     @apply btn bg-tide-600 text-white hover:bg-tide-700 active:bg-tide-800;
   }
   .btn-ghost {
-    @apply btn border border-stone-200 bg-white text-stone-600 hover:border-tide-300 hover:text-tide-700;
+    @apply btn border border-ink-200 bg-white text-ink-600 hover:border-tide-300 hover:text-tide-700;
   }
   .btn-danger-ghost {
-    @apply btn border border-stone-200 bg-white text-stone-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600;
+    @apply btn border border-ink-200 bg-white text-ink-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600;
   }
   .input {
-    @apply w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-tide-500 focus:outline-none focus:ring-2 focus:ring-tide-100;
+    @apply w-full rounded-field border border-ink-300 bg-white px-3 py-2 text-sm text-ink-800 placeholder:text-ink-400 focus:border-tide-600 focus:outline-none focus:ring-2 focus:ring-tide-600/10;
   }
 }

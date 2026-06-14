@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Search } from 'lucide-react';
+import { Loader2, Search, Terminal } from 'lucide-react';
 import { useStore } from '../store';
 import { SiteCard } from './SiteCard';
 
@@ -41,41 +41,50 @@ export function SiteList() {
   return (
     <section className="mt-10 animate-fade-up">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="shrink-0 text-sm font-semibold uppercase tracking-wider text-stone-400">
-          我的站点{sites.length > 0 && ` · ${sites.length}`}
+        <h2 className="flex shrink-0 items-baseline gap-2">
+          <span className="text-xs font-bold uppercase tracking-[0.14em] text-ink-500">
+            Your sites
+          </span>
+          {sites.length > 0 && <span className="font-mono text-xs text-ink-400">{sites.length}</span>}
         </h2>
         <div className="flex items-center gap-2">
           {sites.length > 5 && (
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-300" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
               <input
+                data-testid="site-list-search"
                 className="input !w-44 !py-1.5 !pl-8 !text-xs sm:!w-56"
-                placeholder="搜索 slug / 标题"
+                placeholder="Search slug or title"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
           )}
-          {loading && <Loader2 className="h-4 w-4 animate-spin text-stone-300" />}
+          {loading && <Loader2 className="h-4 w-4 animate-spin text-ink-400" />}
         </div>
       </div>
 
       {sites.length === 0 && !loading ? (
-        <div className="rounded-2xl border border-dashed border-stone-300 bg-white/50 px-6 py-16 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-stone-100 text-3xl">
-            🗂️
+        <div className="rounded-card border border-dashed border-ink-300 bg-white/60 px-6 py-16 text-center">
+          <div className="mx-auto flex h-[52px] w-[52px] items-center justify-center rounded-card bg-tide-50 text-tide-600">
+            <Terminal className="h-6 w-6" />
           </div>
-          <p className="mt-4 text-sm font-medium text-stone-600">这里还空着</p>
-          <p className="mt-1 text-xs text-stone-400">
-            把一个文件夹拖进上面的虚线框，几秒钟后你就有第一个链接了
+          <p className="mt-4 text-[15px] font-semibold text-ink-700">No sites yet</p>
+          <p className="mx-auto mt-1 max-w-md text-[13px] leading-relaxed text-ink-400">
+            Deploy your first page with a single <span className="font-mono text-ink-600">curl</span>{' '}
+            — you&rsquo;ll get a shareable link the moment it lands.
           </p>
+          <div className="mt-5 inline-flex items-center gap-2 rounded-field bg-ink-900 px-3.5 py-2 font-mono text-xs text-ink-200">
+            <Terminal className="h-3.5 w-3.5 text-tide-300" />
+            curl -X POST …/api/sites/my-report/deploy
+          </div>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-stone-200 bg-white/50 px-6 py-10 text-center text-xs text-stone-400">
-          没有匹配「{query.trim()}」的站点
+        <div className="rounded-card border border-dashed border-ink-200 bg-white/60 px-6 py-10 text-center text-[13px] text-ink-400">
+          No sites match &ldquo;{query.trim()}&rdquo;
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {filtered.map((site) => (
             <SiteCard
               key={site.slug}

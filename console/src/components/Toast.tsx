@@ -33,7 +33,7 @@ export function toast(message: string, kind: Kind = 'ok'): void {
   useToastStore.getState().push(kind, message);
 }
 
-export function toastError(e: unknown, fallback = '操作失败'): void {
+export function toastError(e: unknown, fallback = 'Action failed'): void {
   toast(e instanceof Error ? e.message : fallback, 'err');
 }
 

@@ -56,7 +56,7 @@ export function DropZone() {
 
   function applyCollection(collection: Collection) {
     if (collection.files.length === 0) {
-      toast('没有收集到任何文件', 'err');
+      toast('No files were collected', 'err');
       return;
     }
     if (!slugLocked) {
@@ -75,7 +75,7 @@ export function DropZone() {
       const collection = await collectFromDataTransfer(e.dataTransfer);
       applyCollection(collection);
     } catch (err) {
-      toastError(err, '读取拖入内容失败');
+      toastError(err, 'Failed to read dropped content');
     }
   }
 
@@ -94,18 +94,20 @@ export function DropZone() {
     const out: string[] = [];
     const files = stage.collection.files;
     if (!SLUG_RE.test(slug))
-      out.push('slug 需为 1-64 位小写字母 / 数字 / 中划线，且以字母或数字开头');
+      out.push(
+        'Slug must be 1–64 chars: lowercase letters, digits, or hyphens, starting with a letter or digit',
+      );
     if (files.length > limits.max_files)
-      out.push(`文件数 ${files.length} 超过上限 ${limits.max_files} 个`);
+      out.push(`${files.length} files exceeds the limit of ${limits.max_files}`);
     const maxFileBytes = limits.max_file_mb * 1024 * 1024;
     const tooBig = files.filter((f) => f.file.size > maxFileBytes);
     if (tooBig.length > 0)
       out.push(
-        `${tooBig.length} 个文件超过单文件上限 ${limits.max_file_mb} MB（如 ${tooBig[0].relPath}）`,
+        `${tooBig.length} file(s) exceed the ${limits.max_file_mb} MB per-file limit (e.g. ${tooBig[0].relPath})`,
       );
     const total = files.reduce((s, f) => s + f.file.size, 0);
     if (total > limits.max_site_mb * 1024 * 1024)
-      out.push(`总大小 ${formatBytes(total)} 超过站点上限 ${limits.max_site_mb} MB`);
+      out.push(`Total size ${formatBytes(total)} exceeds the ${limits.max_site_mb} MB site limit`);
     return out;
   }, [stage, slug, me]);
 
@@ -121,10 +123,10 @@ export function DropZone() {
       setStage({ kind: 'done', site });
       setDeployTarget(null);
       setTitle('');
-      toast('部署成功');
+      toast('Deployed');
       void refreshSites();
     } catch (err) {
-      toastError(err, '部署失败');
+      toastError(err, 'Deploy failed');
       setStage({ kind: 'ready', collection });
     }
   }
@@ -173,19 +175,20 @@ export function DropZone() {
             <div>
               <div className="flex items-center gap-2 text-tide-700">
                 <Rocket className="h-5 w-5" />
-                <span className="text-lg font-semibold">部署完成</span>
+                <span className="text-lg font-semibold">Deployed</span>
               </div>
-              <p className="mt-1 text-sm text-stone-500">
-                {stage.site.file_count} 个文件 · {formatBytes(stage.site.total_bytes)}
+              <p className="mt-1 text-sm text-ink-500">
+                {stage.site.file_count} {stage.site.file_count === 1 ? 'file' : 'files'} ·{' '}
+                {formatBytes(stage.site.total_bytes)}
                 {stage.site.title ? ` · ${stage.site.title}` : ''}
               </p>
             </div>
             <button type="button" className="btn-ghost" onClick={reset}>
               <RotateCcw className="h-4 w-4" />
-              再部署一个
+              Deploy another
             </button>
           </div>
-          <div className="mt-5 flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3">
+          <div className="mt-5 flex flex-wrap items-center gap-2 rounded-panel border border-ink-200 bg-white px-4 py-3">
             <a
               className="min-w-0 flex-1 truncate font-mono text-sm text-tide-800 underline-offset-2 hover:underline"
               href={stage.site.url}
@@ -200,12 +203,12 @@ export function DropZone() {
               className="btn-ghost !px-3 !py-1.5"
               onClick={() => {
                 void copyText(stage.site.url).then((ok) =>
-                  ok ? toast('链接已复制') : toast('复制失败', 'err'),
+                  ok ? toast('Link copied') : toast('Copy failed', 'err'),
                 );
               }}
             >
               <Copy className="h-3.5 w-3.5" />
-              复制链接
+              Copy link
             </button>
             <a
               className="btn-primary !px-3 !py-1.5"
@@ -214,7 +217,7 @@ export function DropZone() {
               rel="noreferrer"
             >
               <ExternalLink className="h-3.5 w-3.5" />
-              打开
+              Open
             </a>
           </div>
         </div>
@@ -236,7 +239,7 @@ export function DropZone() {
           className={`relative overflow-hidden rounded-2xl border-2 border-dashed transition-all duration-200 ${
             dragOver
               ? 'border-tide-500 bg-tide-50 shadow-lift'
-              : 'border-stone-300 bg-white/70 shadow-card'
+              : 'border-ink-300 bg-white/70 shadow-card'
           }`}
         >
           {stage.kind === 'idle' && (
@@ -252,15 +255,15 @@ export function DropZone() {
               >
                 <UploadCloud className="h-8 w-8" />
               </span>
-              <span className="mt-5 text-lg font-semibold text-stone-800">
-                {dragOver ? '松手即上传' : '把文件或文件夹拖到这里'}
+              <span className="mt-5 text-lg font-semibold text-ink-800">
+                {dragOver ? 'Release to upload' : 'Drop files or a folder here'}
               </span>
-              <span className="mt-1.5 text-sm text-stone-500">
-                或点击选择文件 ·{' '}
+              <span className="mt-1.5 text-sm text-ink-500">
+                or click to choose files ·{' '}
                 <span
                   role="button"
                   tabIndex={0}
-                  className="cursor-pointer font-medium text-tide-600 underline-offset-2 hover:underline"
+                  className="cursor-pointer font-semibold text-tide-600 underline-offset-2 hover:underline"
                   onClick={(e) => {
                     e.stopPropagation();
                     dirInputRef.current?.click();
@@ -272,14 +275,14 @@ export function DropZone() {
                     }
                   }}
                 >
-                  选择整个文件夹
+                  choose a whole folder
                 </span>{' '}
-                · 部署完成立刻得到分享链接
+                · get a shareable link the moment it deploys
               </span>
               {slugLocked && (
-                <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+                <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
                   <Lock className="h-3 w-3" />
-                  正在更新站点 {deployTarget}
+                  Updating site {deployTarget}
                   <span
                     role="button"
                     tabIndex={0}
@@ -300,9 +303,9 @@ export function DropZone() {
                 </span>
               )}
               {me && (
-                <span className="mt-6 text-xs text-stone-400">
-                  单文件 ≤ {me.limits.max_file_mb} MB · 站点 ≤ {me.limits.max_site_mb} MB · ≤{' '}
-                  {me.limits.max_files} 个文件
+                <span className="mt-6 text-xs text-ink-400">
+                  Single file ≤ {me.limits.max_file_mb} MB · site ≤ {me.limits.max_site_mb} MB · ≤{' '}
+                  {me.limits.max_files} files
                 </span>
               )}
             </button>
@@ -312,7 +315,7 @@ export function DropZone() {
             <div className="p-6 sm:p-8">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-tide-50 text-tide-600">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
                     {stage.collection.rootName ? (
                       <FolderUp className="h-5 w-5" />
                     ) : (
@@ -320,22 +323,24 @@ export function DropZone() {
                     )}
                   </span>
                   <div>
-                    <div className="font-semibold text-stone-800">
+                    <div className="font-semibold text-ink-800">
                       {stage.collection.rootName
-                        ? `文件夹「${stage.collection.rootName}」`
-                        : '待部署内容'}
+                        ? `Folder “${stage.collection.rootName}”`
+                        : 'Files to deploy'}
                     </div>
-                    <div className="text-sm text-stone-500">
-                      {stage.collection.files.length} 个文件 · {formatBytes(totalBytes)}
+                    <div className="text-sm text-ink-500">
+                      {stage.collection.files.length}{' '}
+                      {stage.collection.files.length === 1 ? 'file' : 'files'} ·{' '}
+                      {formatBytes(totalBytes)}
                     </div>
                   </div>
                 </div>
                 {stage.kind === 'ready' && (
                   <button
                     type="button"
-                    className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                    className="rounded-field p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
                     onClick={reset}
-                    title="清空"
+                    title="Clear"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -343,27 +348,27 @@ export function DropZone() {
               </div>
 
               {/* 文件清单（截断展示） */}
-              <div className="mt-4 max-h-36 overflow-auto rounded-lg border border-stone-200 bg-stone-50 p-3 font-mono text-xs leading-relaxed text-stone-500">
+              <div className="mt-4 max-h-36 overflow-auto rounded-field border border-ink-200 bg-ink-50 p-3 font-mono text-xs leading-relaxed text-ink-500">
                 {stage.collection.files.slice(0, 50).map((f) => (
                   <div key={f.relPath} className="truncate">
                     {f.relPath}
-                    <span className="text-stone-300"> · {formatBytes(f.file.size)}</span>
+                    <span className="text-ink-300"> · {formatBytes(f.file.size)}</span>
                   </div>
                 ))}
                 {stage.collection.files.length > 50 && (
-                  <div className="text-stone-400">
-                    …… 还有 {stage.collection.files.length - 50} 个文件
+                  <div className="text-ink-400">
+                    … and {stage.collection.files.length - 50} more files
                   </div>
                 )}
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-stone-500">
-                    slug（链接路径）{slugLocked && '· 已锁定为更新目标'}
+                  <span className="mb-1 block text-xs font-semibold text-ink-500">
+                    Slug (link path){slugLocked && ' · locked to update target'}
                   </span>
                   <input
-                    className="input font-mono disabled:bg-stone-100 disabled:text-stone-500"
+                    className="input font-mono disabled:bg-ink-100 disabled:text-ink-500"
                     value={slug}
                     disabled={slugLocked || stage.kind === 'uploading'}
                     onChange={(e) => setSlug(e.target.value.toLowerCase())}
@@ -371,33 +376,33 @@ export function DropZone() {
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-stone-500">
-                    标题（可选）
+                  <span className="mb-1 block text-xs font-semibold text-ink-500">
+                    Title (optional)
                   </span>
                   <input
                     className="input"
                     value={title}
                     disabled={stage.kind === 'uploading'}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="给这个页面起个名字"
+                    placeholder="Name this page"
                   />
                 </label>
               </div>
 
-              <div className="mt-2 truncate font-mono text-xs text-stone-400">{previewUrl}</div>
+              <div className="mt-2 truncate font-mono text-xs text-ink-400">{previewUrl}</div>
 
               {stage.kind === 'ready' && existing && !slugLocked && (
-                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
-                  slug「{slug}」已被你的站点
-                  <b>「{existing.title || existing.slug}」</b>占用:这次部署会作为它的
-                  <b>新版本</b>发布(现有 {existing.file_count} 个文件,更新于{' '}
-                  {formatRelative(existing.updated_at)};旧版本随时可回滚)。
-                  想新建独立站点的话,改一下 slug 即可。
+                <div className="mt-3 rounded-field border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
+                  Slug “{slug}” is already taken by your site{' '}
+                  <b>“{existing.title || existing.slug}”</b> — this deploy will publish as a{' '}
+                  <b>new version</b> of it (currently {existing.file_count} files, updated{' '}
+                  {formatRelative(existing.updated_at)}; older versions stay rollback-able). To
+                  create a separate site, change the slug.
                 </div>
               )}
 
               {stage.kind === 'ready' && problems.length > 0 && (
-                <ul className="mt-3 space-y-1 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+                <ul className="mt-3 space-y-1 rounded-field border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
                   {problems.map((p) => (
                     <li key={p}>{p}</li>
                   ))}
@@ -406,14 +411,14 @@ export function DropZone() {
 
               {stage.kind === 'uploading' ? (
                 <div className="mt-5">
-                  <div className="flex items-center justify-between text-sm text-stone-600">
+                  <div className="flex items-center justify-between text-sm text-ink-600">
                     <span className="flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin text-tide-600" />
-                      正在上传…
+                      Uploading…
                     </span>
                     <span className="font-mono">{stage.percent}%</span>
                   </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink-200">
                     <div
                       className="h-full rounded-full bg-tide-500 transition-[width] duration-200"
                       style={{ width: `${stage.percent}%` }}
@@ -428,7 +433,7 @@ export function DropZone() {
                   onClick={() => void deploy()}
                 >
                   <Rocket className="h-4 w-4" />
-                  {existing ? `更新站点 ${slug}` : `部署到 ${slug || '…'}`}
+                  {existing ? `Update site ${slug}` : `Deploy to ${slug || '…'}`}
                 </button>
               )}
             </div>

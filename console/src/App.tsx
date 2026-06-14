@@ -29,9 +29,9 @@ export default function App() {
   if (booting) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="flex items-center gap-2 text-stone-400">
+        <div className="flex items-center gap-2 text-ink-400">
           <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">正在进入 pagepin…</span>
+          <span className="text-sm">Loading pagepin…</span>
         </div>
       </div>
     );
@@ -40,12 +40,12 @@ export default function App() {
   if (bootError || !me) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="max-w-sm rounded-2xl border border-red-200 bg-white p-8 text-center shadow-card">
+        <div className="max-w-sm rounded-card border border-red-200 bg-white p-8 text-center shadow-card">
           <div className="text-2xl">🫥</div>
-          <p className="mt-3 text-sm font-medium text-stone-700">加载失败</p>
-          <p className="mt-1 text-xs text-stone-400">{bootError ?? '未知错误'}</p>
+          <p className="mt-3 text-sm font-semibold text-ink-700">Failed to load</p>
+          <p className="mt-1 text-xs text-ink-400">{bootError ?? 'Unknown error'}</p>
           <button type="button" className="btn-primary mt-5" onClick={() => location.reload()}>
-            重试
+            Retry
           </button>
         </div>
       </div>
@@ -65,8 +65,8 @@ export default function App() {
       )}
       <Toaster />
       <Confirmer />
-      <footer className="pb-8 pt-4 text-center text-xs text-stone-300">
-        pagepin · 静态页面托管与评审
+      <footer className="pb-8 pt-4 text-center text-xs text-ink-300">
+        pagepin · static hosting with built-in review
       </footer>
     </div>
   );

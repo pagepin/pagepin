@@ -39,7 +39,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       // 401 已在 api 层按 auth 模式跳转登录页；这里只处理其他错误
       if (e instanceof ApiError && e.status === 401) return;
-      set({ booting: false, bootError: e instanceof Error ? e.message : '加载失败' });
+      set({ booting: false, bootError: e instanceof Error ? e.message : 'Failed to load' });
     }
   },
 
