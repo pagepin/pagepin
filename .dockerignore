@@ -1,0 +1,21 @@
+# Keep the build context small — the Dockerfile COPYs only what it needs and
+# runs its own installs per stage.
+.git
+.github
+node_modules
+**/node_modules
+dist
+console/dist
+e2e
+docs
+data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.env.*
+.DS_Store
+.idea
+.vscode
+**/*.log
