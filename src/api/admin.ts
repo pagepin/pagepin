@@ -26,7 +26,7 @@ import {
   setRegistrationMode,
 } from '../instance-settings.js';
 import type { AppDeps, AppEnv } from '../types.js';
-import { nowIso, uuid } from '../util.js';
+import { nowIso, uuid, validEmail } from '../util.js';
 import type { AuthMiddleware } from './deps.js';
 
 const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
@@ -217,7 +217,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     let email: string | null = null;
     if (body && typeof body.email === 'string' && body.email.trim()) {
       email = body.email.trim();
-      if (!/.+@.+/.test(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
+      if (!validEmail(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
     }
     const isAdmin = body?.is_admin === true;
     const raw = newInviteToken();

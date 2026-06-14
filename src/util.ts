@@ -18,6 +18,12 @@ export function validSlug(slug: string): boolean {
   return SLUG_RE.test(slug);
 }
 
+/** 邮箱粗校验：@ 两侧非空、域名带点（拦下 a@b 这类）。与前端 EMAIL_RE 同义。 */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export function validEmail(email: string): boolean {
+  return EMAIL_RE.test(email);
+}
+
 /**
  * 站点内相对路径归一化;非法(穿越/绝对/空段)返回 null。
  * 上传与 serving 都必须经这一个函数 —— 存储 key 永远落在

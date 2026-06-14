@@ -19,7 +19,7 @@ import type { Config } from '../config.js';
 import { invites, users, type UserRow } from '../db/index.js';
 import { effectiveRegistrationMode } from '../instance-settings.js';
 import type { AppDeps, AppEnv } from '../types.js';
-import { nowIso, uuid } from '../util.js';
+import { nowIso, uuid, validEmail } from '../util.js';
 import { buildAuthorizeUrl, exchangeCode, OidcError, type OidcIdentity } from './oidc.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { clearLoginCookies, setLoginCookies, type Plane } from './sessions.js';
@@ -225,7 +225,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const email = (body.email ?? '').trim();
     const password = body.password ?? '';
     const displayName = (body.display_name ?? '').trim();
-    if (!/.+@.+/.test(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
+    if (!validEmail(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
     if (password.length < 8) return c.json({ detail: '密码至少 8 位' }, 422);
 
     const passwordHash = await hashPassword(password);
@@ -321,7 +321,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       return c.json({ detail: '邀请无效或已过期' }, 400);
     }
     const email = (inv.email ?? body.email ?? '').trim();
-    if (!/.+@.+/.test(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
+    if (!validEmail(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
 
     const passwordHash = await hashPassword(password);
     const now = nowIso();

@@ -1,4 +1,19 @@
-import type { AuthConfig, CollectedFile, Me, SiteOut, TokenItem, VersionsOut, Visibility } from './types';
+import type {
+  AdminOverview,
+  AdminSettings,
+  AdminUser,
+  AuthConfig,
+  CollectedFile,
+  Invite,
+  InviteCreated,
+  Me,
+  RegistrationMode,
+  SiteOut,
+  TokenItem,
+  Usage,
+  VersionsOut,
+  Visibility,
+} from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -24,7 +39,7 @@ export async function fetchAuthConfig(): Promise<AuthConfig> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     authConfig = (await res.json()) as AuthConfig;
   } catch {
-    authConfig = { mode: 'oidc', allow_signup: false };
+    authConfig = { mode: 'oidc', allow_signup: false, registration_mode: 'closed' };
   }
   return authConfig;
 }
@@ -166,7 +181,77 @@ export const api = {
 
   revokeToken: (id: string) =>
     request<{ ok: true }>(`/api/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // ---- account ----
+  updateProfile: (displayName: string | null) =>
+    request<{ display_name: string | null }>('/api/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ display_name: displayName }),
+    }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ ok: true }>('/api/me/password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
+  usage: () => request<Usage>('/api/me/usage'),
+
+  // ---- admin ----
+  adminOverview: () => request<AdminOverview>('/api/admin/overview'),
+
+  adminUsers: () => request<{ users: AdminUser[] }>('/api/admin/users'),
+
+  patchUser: (id: string, body: { is_admin?: boolean; disabled?: boolean }) =>
+    request<AdminUser>(`/api/admin/users/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  adminSettings: () => request<AdminSettings>('/api/admin/settings'),
+
+  setRegistrationMode: (mode: RegistrationMode) =>
+    request<{ registration_mode: RegistrationMode }>('/api/admin/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ registration_mode: mode }),
+    }),
+
+  listInvites: () => request<{ invites: Invite[] }>('/api/admin/invites'),
+
+  createInvite: (body: { email?: string; is_admin?: boolean }) =>
+    request<InviteCreated>('/api/admin/invites', { method: 'POST', body: JSON.stringify(body) }),
+
+  revokeInvite: (id: string) =>
+    request<{ ok: true }>(`/api/admin/invites/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };
+
+/** 邀请校验（匿名，登录前）：回显被邀邮箱 / 是否有效。永不抛错。 */
+export async function fetchInviteInfo(
+  token: string,
+): Promise<{ ok: boolean; email?: string | null; is_admin?: boolean; reason?: string }> {
+  try {
+    const res = await fetch('/api/auth/invite?token=' + encodeURIComponent(token), {
+      credentials: 'same-origin',
+    });
+    if (!res.ok) return { ok: false, reason: 'invalid' };
+    return (await res.json()) as { ok: boolean; email?: string | null; is_admin?: boolean; reason?: string };
+  } catch {
+    return { ok: false, reason: 'network' };
+  }
+}
+
+/** 接受邀请建号（登录前，无 CSRF）。成功后服务端已下发会话 Cookie。
+ *  email 仅当邀请未限定邮箱时由用户填写；限定邮箱的邀请忽略该值（服务端以邀请为准）。 */
+export function acceptInvite(
+  token: string,
+  password: string,
+  opts?: { email?: string; displayName?: string },
+): Promise<void> {
+  const body: Record<string, unknown> = { token, password };
+  if (opts?.email && opts.email.trim()) body.email = opts.email.trim();
+  if (opts?.displayName && opts.displayName.trim()) body.display_name = opts.displayName.trim();
+  return authPost('/auth/accept-invite', body);
+}
 
 export async function logout(): Promise<void> {
   try {

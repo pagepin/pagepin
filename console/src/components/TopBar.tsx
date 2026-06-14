@@ -1,8 +1,11 @@
 import { useState } from 'react';
-import { KeyRound, LogOut } from 'lucide-react';
+import { KeyRound, LogOut, Settings as SettingsIcon, Shield } from 'lucide-react';
 import { logout } from '../api';
 import { useStore } from '../store';
 import { TokenDialog } from './TokenDialog';
+
+const iconBtn =
+  'flex h-[34px] w-[34px] items-center justify-center rounded-field border border-ink-200 bg-white text-ink-600 transition-colors hover:border-tide-300 hover:text-tide-700';
 
 export function TopBar() {
   const me = useStore((s) => s.me);
@@ -24,21 +27,40 @@ export function TopBar() {
               {me.handle && <div className="font-mono text-xs text-ink-400">@{me.handle}</div>}
             </div>
             {!me.needs_handle && (
-              <button
-                type="button"
-                onClick={() => setShowTokens(true)}
-                title="API tokens (for AI & script deploys)"
-                className="flex h-[34px] w-[34px] items-center justify-center rounded-field border border-ink-200 bg-white text-ink-600 transition-colors hover:border-tide-300 hover:text-tide-700"
-              >
-                <KeyRound className="h-4 w-4" />
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowTokens(true)}
+                  title="API tokens (for AI & script deploys)"
+                  className={iconBtn}
+                >
+                  <KeyRound className="h-4 w-4" />
+                </button>
+                {me.is_admin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      location.href = '/admin';
+                    }}
+                    title="Instance admin"
+                    className={iconBtn}
+                  >
+                    <Shield className="h-4 w-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    location.href = '/settings';
+                  }}
+                  title="Account & settings"
+                  className={iconBtn}
+                >
+                  <SettingsIcon className="h-4 w-4" />
+                </button>
+              </>
             )}
-            <button
-              type="button"
-              onClick={() => void logout()}
-              title="Sign out"
-              className="flex h-[34px] w-[34px] items-center justify-center rounded-field border border-ink-200 bg-white text-ink-600 transition-colors hover:border-tide-300 hover:text-tide-700"
-            >
+            <button type="button" onClick={() => void logout()} title="Sign out" className={iconBtn}>
               <LogOut className="h-4 w-4" />
             </button>
           </div>

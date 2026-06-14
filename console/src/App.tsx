@@ -1,10 +1,14 @@
 import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useStore } from './store';
+import { AcceptInvite } from './components/AcceptInvite';
+import { Admin } from './components/Admin';
 import { Confirmer } from './components/ConfirmDialog';
 import { DropZone } from './components/DropZone';
 import { HandleSetup } from './components/HandleSetup';
 import { Login } from './components/Login';
+import { Settings } from './components/Settings';
+import { Signup } from './components/Signup';
 import { SiteList } from './components/SiteList';
 import { Toaster } from './components/Toast';
 import { TopBar } from './components/TopBar';
@@ -15,15 +19,20 @@ export default function App() {
   const bootError = useStore((s) => s.bootError);
   const init = useStore((s) => s.init);
 
-  // /login 是 SPA 内登录页：不调 /api/me（避免 401 跳转死循环）
-  const onLoginPage = location.pathname === '/login';
+  // 登录前路由（/login、/signup[?invite]）：不调 /api/me（避免 401 跳转死循环）
+  const path = location.pathname;
+  const onPreAuth = path === '/login' || path === '/signup';
 
   useEffect(() => {
-    if (!onLoginPage) void init();
-  }, [init, onLoginPage]);
+    if (!onPreAuth) void init();
+  }, [init, onPreAuth]);
 
-  if (onLoginPage) {
+  if (path === '/login') {
     return <Login />;
+  }
+  if (path === '/signup') {
+    const invite = new URLSearchParams(location.search).get('invite');
+    return invite ? <AcceptInvite token={invite} /> : <Signup />;
   }
 
   if (booting) {
@@ -49,6 +58,26 @@ export default function App() {
           </button>
         </div>
       </div>
+    );
+  }
+
+  // 登录后子路由（handle 未设时一律先走首登）。Settings/Admin 自带页头（无全局 TopBar）。
+  if (!me.needs_handle && path === '/settings') {
+    return (
+      <>
+        <Settings />
+        <Toaster />
+        <Confirmer />
+      </>
+    );
+  }
+  if (!me.needs_handle && path === '/admin' && me.is_admin) {
+    return (
+      <>
+        <Admin />
+        <Toaster />
+        <Confirmer />
+      </>
     );
   }
 
