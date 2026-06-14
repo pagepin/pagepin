@@ -1,3 +1,5 @@
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 # pagepin
 
 Self-hosted static page hosting with pin-point review comments and an AI feedback loop — **feedback that agents can actually fetch**.
@@ -122,30 +124,3 @@ pnpm test:e2e       # comments-overlay e2e — self-contained, no backend needed
 ## License
 
 [Apache-2.0](LICENSE)
-
----
-
-## 中文快速开始
-
-```bash
-# 启动
-docker run -d --name pagepin \
-  -p 8000:8000 \
-  -v pagepin-data:/data \
-  -e PAGEPIN_ADMIN_EMAIL=admin@example.com \
-  -e PAGEPIN_ADMIN_PASSWORD=change-me-please \
-  ghcr.io/pagepin/pagepin
-```
-
-1. 打开 `http://localhost:8000`，用上面设置的管理员邮箱密码登录；
-2. 首次登录设置个人 handle（出现在站点 URL 里）；
-3. 在控制台「API Token」页创建一个 token（`pp_` 开头，只显示一次）；
-4. 用 curl 部署页面：
-
-```bash
-curl -sf -X POST "http://localhost:8000/api/sites/demo/deploy" \
-  -H "Authorization: Bearer pp_<你的token>" \
-  -F "files=@page.html" -F "paths=index.html"
-```
-
-返回 JSON 中的 `url` 即可分享给同事；同事登录后可在页面上直接打点评论。完整 API 说明（多文件部署 / 公开分享 / 回滚 / 评论拉取）见实例的 `/skill.md`，可直接贴进 AI 助手的上下文让它代劳整个「部署 → 收集评论 → 修改 → 再发布」闭环。
