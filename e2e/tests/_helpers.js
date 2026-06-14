@@ -123,16 +123,24 @@ const DEFAULT_BOXES = [
   { id: 't3', left: 980, top: 360 }, { id: 't4', left: 620, top: 360 },
 ];
 
-// 常用定位器
+// 常用定位器（与新交互模型的稳定 data-pp-* 钩子对齐）
 const pin = (page, n) =>
   page.locator('.pp-anno-pin').filter({ hasText: new RegExp(`^\\s*${n}\\s*$`) });
-const header = (page) => page.locator('.pp-anno-popup .pp-anno-hd span').first();
+const bar = (page) => page.locator('[data-pp-role="bar"]');
+const act = (page, name) => page.locator(`[data-pp-act="${name}"]`);
+const popover = (page) => page.locator('[data-pp-role="popover"]');
+const composer = (page) => page.locator('[data-pp-role="composer"]');
+const list = (page) => page.locator('[data-pp-role="list"]');
+const anyPopup = (page) => page.locator('.pp-anno-popup');
 
 async function goto(page) {
   await page.goto('http://pagepin.test/');
 }
+// 命令条可见 = 评论层就绪门（旧版用 .pp-anno-toolbar 可见）
+const ready = async (page) => { await bar(page).waitFor(); };
 
 module.exports = {
   COMMENTS_JS, NOW, VIEWER, DEFAULT_BOXES,
-  mkThread, fixtureHtml, setup, pin, header, goto,
+  mkThread, fixtureHtml, setup, goto,
+  pin, bar, act, popover, composer, list, anyPopup, ready,
 };

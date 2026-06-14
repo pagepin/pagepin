@@ -371,8 +371,8 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const de = document.documentElement;
+    // 评论层占用 Esc 时让权（弹层/列表/Walk/评论模式 → pp-anno-paused / pp-anno-mode-on）
     if (de.classList.contains('pp-anno-paused') || de.classList.contains('pp-anno-mode-on')) return;
-    if (document.querySelector('.pp-anno-sidebar.pp-anno-open')) return;
     location.href = BASE;
   }, true);
   history.replaceState({ ppImg: i }, '');

@@ -3,14 +3,17 @@
  * 约束：
  *  - 宿主页面不可控：所有类名带 pp-anno 前缀、UI 挂独立容器、用户内容一律 textContent 渲染；
  *  - 身份来自 /api/viewer（pp_view 会话）：401 = 匿名访客，静默退出不留痕迹；
- *  - 锚点 = CSS 选择器 + 元素内相对偏移；"@page" = 整页评论（无 pin，仅侧边栏）；
- *    选择器失效（页面改版）降级为侧边栏「锚点丢失」项。
+ *  - 锚点 = CSS 选择器 + 元素内相对偏移；"@page" = 整页评论（无 pin，仅列表）；
+ *    选择器失效（页面改版）降级为列表「锚点丢失」项。
  *
- * 交互（v1.1）：
- *  - ⌥(Alt)+点击任意元素 = 免模式直接打点；C 切换连续评论模式；G 整页评论
- *  - j/k 在 pin 间跳转，Enter 打开当前线程，r 打开并聚焦回复
- *  - pin hover 预览；草稿未发时点外部不丢（抖动提示）；弹窗自动翻转避开视口边缘
- *  - 窗口聚焦 + 30s 轮询静默刷新；#pp-comment-<id> 深链直达
+ * 交互模型（v2，单命令条 + Review Walk）：
+ *  - 一根底部命令条是唯一全局 chrome，按状态变形：resting / comment / walk / caught-up
+ *  - 读与改都发生在 pin 处的 at-pin 弹层；Review Walk 按文档序步进未解决线程
+ *  - ⌘/⌥+点击元素 / 在图片上拖框 = 打点；C 进评论模式；点 pin = 从该处进入 Walk
+ *  - j/k 步进、r 解决并前进、Esc 退出；resolve-and-advance（Gmail archive-and-next）
+ *  - #pp-comment-<id> 深链直达并进入 Walk；窗口聚焦 + 30s 轮询静默刷新
+ *
+ * e2e 钩子：稳定的 data-pp-role / data-pp-* 属性（与展示/i18n 解耦），见各处标注。
  */
 (() => {
   'use strict';
@@ -28,27 +31,30 @@
   if (!CFG.handle || !CFG.slug || !CFG.path) return;
 
   const PAGE_SELECTOR = '@page';
-  const PALETTE = ['#c2361b', '#1f4e8c', '#1a7f4e', '#8c4a1f', '#6b2d8c', '#b3791a', '#19767d'];
-  const KIND_META = {
-    copy: { label: '文案', color: '#1f4e8c' },
-    style: { label: '样式', color: '#8c4a1f' },
-    question: { label: '提问', color: '#6b2d8c' },
-    bug: { label: 'Bug', color: '#c2361b' },
+  // 四种 kind = 评审色彩地图（agent 从 JSON 读 kind 路由修复）
+  const KIND = {
+    copy: { label: 'Copy', color: '#2f6fb0', tint: '#e8f0f9', ink: '#1f4f86' },
+    style: { label: 'Style', color: '#c07a16', tint: '#faf0db', ink: '#8a560b' },
+    question: { label: 'Question', color: '#7c4bc0', tint: '#f0eafb', ink: '#5b3596' },
+    bug: { label: 'Bug', color: '#c2361b', tint: '#fbe7e3', ink: '#94260f' },
   };
+  const KIND_KEYS = ['copy', 'style', 'question', 'bug'];
+  const NO_KIND = '#3a424b';
+  const RESOLVED_COLOR = '#aeb4ba';
+  const AVA = ['#2f6fb0', '#0f7c72', '#7c4bc0', '#c07a16', '#b14a42'];
+
   const state = {
     viewer: null,
     threads: [],
-    mode: false,
-    showResolved: false, // 页面上 pin 是否显示已解决（工具栏开关）
-    sbStatus: 'open',    // 侧边栏状态筛选：open | resolved | all（与 pin 显示解耦）
-    sbKinds: new Set(),  // 侧边栏类型筛选；空 = 不过滤
+    mode: 'rest', // rest | comment | walk
+    filter: 'open', // open | all（页面上 pin：是否显示已解决）
+    walk: { curId: null, entryTop: false, resolvedThisPass: 0 },
+    listOpen: false,
     openPopup: null,
     openThreadId: null,
-    cursor: -1,          // j/k 键盘游标（指向当前可见 pin 序号-1）
-    collapsed: false,
   };
 
-  /* ---------------- API ---------------- */
+  /* ---------------- API（保留） ---------------- */
   async function api(path, opts) {
     const res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
     if (!res.ok) {
@@ -67,22 +73,43 @@
   const patchThread = (id, resolved) => api(`/api/comments/threads/${id}`, { method: 'PATCH', body: JSON.stringify({ resolved }) });
   const deleteThread = (id) => api(`/api/comments/threads/${id}`, { method: 'DELETE' });
 
-  /* ---------------- 工具 ---------------- */
+  /* ---------------- 工具（保留 + 英文化） ---------------- */
   function el(tag, cls, text) {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
     if (text != null) n.textContent = text;
     return n;
   }
-  const colorOf = (name) => PALETTE[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length];
+  function svg(d, w) {
+    const s = `<svg width="${w || 15}" height="${w || 15}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+    const span = document.createElement('span');
+    span.className = 'pp-anno-ic';
+    span.innerHTML = s;
+    return span;
+  }
+  const ICON = {
+    msg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    play: '<path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/>',
+    filter: '<path d="M3 4h18l-7 8v6l-4 2v-8z"/>',
+    prev: '<path d="m15 18-6-6 6-6"/>',
+    next: '<path d="m9 18 6-6-6-6"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/>',
+    x: '<path d="M18 6 6 18M6 6l12 12"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    minus: '<path d="M5 12h14"/>',
+  };
+  const avatarColor = (name) => AVA[[...(name || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AVA.length];
   const initialOf = (name) => (name || '?').trim().slice(0, 1).toUpperCase();
   function fmtTime(iso) {
     const d = new Date(iso), diff = (Date.now() - d.getTime()) / 1000;
-    if (diff < 60) return '刚刚';
-    if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
-    if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    if (diff < 86400 * 14) return Math.floor(diff / 86400) + 'd ago';
     const p = (x) => String(x).padStart(2, '0');
-    return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
   function cssPath(node) {
     if (node.id) return '#' + CSS.escape(node.id);
@@ -97,237 +124,202 @@
     }
     return 'body > ' + parts.join(' > ');
   }
-  function kindChip(kind, cls) {
-    if (!kind || !KIND_META[kind]) return null;
-    const c = el('span', cls || 'pp-anno-kind', KIND_META[kind].label);
-    c.style.background = KIND_META[kind].color;
-    return c;
-  }
+  // 线程当前 kind 的色（无 kind → 中性 slate；已解决 → 灰）
+  const kindColor = (t) => (t.resolved ? RESOLVED_COLOR : (t.kind && KIND[t.kind] ? KIND[t.kind].color : NO_KIND));
   function toast(msg) {
     const t = el('div', 'pp-anno-toast', msg);
     t.dataset.ppAnno = '1';
+    t.dataset.ppRole = 'toast';
     root.appendChild(t);
     setTimeout(() => t.remove(), 2600);
   }
 
-  /* ---------------- 样式 ---------------- */
+  /* ---------------- 样式（新交互模型） ---------------- */
   const STYLE = `
-  /* 根容器必须脱流(absolute + 零高):宿主 body 若是 grid/flex,在流 div 会成为布局项,
-     把页面内容挤跳。absolute 无定位祖先时以初始包含块为基准,layer 坐标系与从前一致 */
-  .pp-anno-root{position:absolute;top:0;left:0;width:100%;height:0;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.6;color:#211f1c}
+  .pp-anno-root{position:absolute;top:0;left:0;width:100%;height:0;font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;font-size:14px;line-height:1.55;color:#11161b}
   .pp-anno-root *{box-sizing:border-box;margin:0;padding:0}
-  /* 十字光标：评论 UI 自身除外；弹窗打开期间（pp-anno-paused）整体暂停，输入时是正常光标 */
+  .pp-anno-ic{display:inline-flex}.pp-anno-ic svg{display:block}
   .pp-anno-mode-on:not(.pp-anno-paused){cursor:crosshair}
   .pp-anno-mode-on:not(.pp-anno-paused) *:not(.pp-anno-root, .pp-anno-root *){cursor:crosshair!important}
-  .pp-anno-hover-hint{outline:1.5px dashed rgba(194,54,27,.6)!important;outline-offset:2px!important}
-  /* 绑定高亮（实线 = 已锁定）：写评论时的目标元素 / 读评论时的关联元素；虚线 = 候选扫描 */
-  .pp-anno-bound{outline:2px solid rgba(194,54,27,.85)!important;outline-offset:2px!important;box-shadow:0 0 0 5px rgba(194,54,27,.12)!important}
-  .pp-anno-toolbar{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);z-index:2147483000;display:flex;align-items:center;gap:4px;background:#211f1c;border-radius:99px;padding:6px;box-shadow:0 8px 30px rgba(28,26,23,.35),0 2px 6px rgba(28,26,23,.2)}
-  .pp-anno-toolbar button{border:none;background:transparent;color:#d8d2c6;font-size:13.5px;font-family:inherit;cursor:pointer;padding:8px 14px;border-radius:99px;display:flex;align-items:center;gap:7px;white-space:nowrap;transition:background .15s,color .15s}
-  .pp-anno-toolbar button:hover{background:rgba(255,255,255,.08);color:#fff}
-  .pp-anno-toolbar button.pp-anno-active{background:#c2361b;color:#fff}
-  .pp-anno-count{background:rgba(255,255,255,.16);font-size:11.5px;padding:1px 7px;border-radius:99px}
-  .pp-anno-active .pp-anno-count{background:rgba(0,0,0,.25)}
-  .pp-anno-sep{width:1px;height:18px;background:rgba(255,255,255,.14);margin:0 2px}
-  .pp-anno-bubble{position:fixed;bottom:26px;right:26px;z-index:2147483000;width:46px;height:46px;border-radius:50%;background:#211f1c;color:#f3efe7;display:grid;place-items:center;cursor:grab;font-size:15px;box-shadow:0 8px 30px rgba(28,26,23,.35);user-select:none;touch-action:none}
-  .pp-anno-bubble:active{cursor:grabbing}
-  .pp-anno-bubble .pp-anno-bn{position:absolute;top:-4px;right:-4px;background:#c2361b;color:#fff;font-size:10.5px;min-width:18px;height:18px;border-radius:99px;display:grid;place-items:center;padding:0 4px;font-weight:700}
+  .pp-anno-hover-hint{outline:2px solid #0f7c72!important;outline-offset:2px!important;box-shadow:0 0 0 4px rgba(15,124,114,.12)!important}
+  .pp-anno-bound{outline:2px solid rgba(15,124,114,.85)!important;outline-offset:2px!important;box-shadow:0 0 0 5px rgba(15,124,114,.12)!important}
+  /* ── 命令条（唯一全局 chrome，深近黑，绝不与宿主页混淆） ── */
+  .pp-anno-bar{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:2147483000;display:flex;align-items:center;gap:3px;background:#15191c;border-radius:999px;padding:6px;box-shadow:0 14px 40px -10px rgba(17,22,27,.55),0 2px 6px rgba(17,22,27,.3);max-width:calc(100vw - 20px)}
+  .pp-anno-bar button{border:none;background:transparent;color:#cdd3d9;font:600 13px/1 'Hanken Grotesk',sans-serif;cursor:pointer;padding:8px 13px;border-radius:999px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap;transition:background .15s,color .15s}
+  .pp-anno-bar button:hover{background:rgba(255,255,255,.08);color:#fff}
+  .pp-anno-bar .pp-b-primary{background:#0f7c72;color:#fff}.pp-anno-bar .pp-b-primary:hover{background:#13988c}
+  .pp-anno-bar .pp-b-soft{background:rgba(255,255,255,.1)}.pp-anno-bar .pp-b-soft:hover{background:rgba(255,255,255,.2)}
+  .pp-anno-bar .pp-b-on{background:rgba(255,255,255,.2);color:#fff}
+  .pp-anno-count{background:rgba(0,0,0,.28);font:600 11.5px/1 'JetBrains Mono',monospace;padding:2px 7px;border-radius:999px}
+  .pp-anno-sep{width:1px;height:18px;background:rgba(255,255,255,.14);margin:0 3px}
+  .pp-anno-dot{width:8px;height:8px;border-radius:50%;background:#14958a;box-shadow:0 0 0 4px rgba(20,149,138,.3);animation:ppPulse 1.6s ease-in-out infinite}
+  @keyframes ppPulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .pp-anno-bar .pp-lab-teal{color:#7fe3d6}
+  .pp-anno-bar .pp-instr{color:#cdd3d9;font-weight:500;font-size:12.5px}
+  .pp-anno-counter{font:600 14px/1 'JetBrains Mono',monospace;color:#fff;min-width:42px;text-align:center}
+  .pp-anno-kindtag{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600}
+  .pp-anno-kindtag i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .pp-anno-rbtn{width:32px;height:32px;padding:0!important;justify-content:center}
+  .pp-anno-kbd{font:500 10px/1 'JetBrains Mono',monospace;color:#6b7480;letter-spacing:.12em}
+  /* ── pin（泪滴，kind 上色，白圈在任意宿主色上都清晰） ── */
   .pp-anno-layer{position:absolute;top:0;left:0;width:100%;height:0;z-index:2147482000}
-  /* pin 必须高于弹窗（2147482500）：否则弹窗会盖住相邻 pin，点它命中的是弹窗而非 pin，弹窗不切换 */
-  .pp-anno-pin{position:absolute;z-index:2147482600;width:32px;height:32px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700;cursor:pointer;transform:translate(-4px,-28px);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(28,26,23,.35);user-select:none;transition:transform .15s,box-shadow .15s}
-  .pp-anno-pin:hover{transform:translate(-4px,-28px) scale(1.15)}
-  /* 框选区域:pin 之下、宿主内容之上;pointer-events 关掉,不挡页面交互(入口仍是 pin) */
-  .pp-anno-region{position:absolute;z-index:2147481900;border:2px solid;border-radius:4px;pointer-events:none;box-sizing:border-box}
+  .pp-anno-pin{position:absolute;z-index:2147482600;width:30px;height:30px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font:700 12.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transform:translate(-4px,-26px);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(28,26,23,.3);user-select:none;transition:transform .15s,box-shadow .15s}
+  .pp-anno-pin:hover{transform:translate(-4px,-26px) scale(1.12)}
+  .pp-anno-pin.pp-anno-pulse{animation:ppPin .45s cubic-bezier(.2,1.6,.4,1)}
+  @keyframes ppPin{0%{transform:translate(-4px,-26px) scale(0)}60%{transform:translate(-4px,-26px) scale(1.12)}100%{transform:translate(-4px,-26px) scale(1)}}
+  .pp-anno-pin.pp-anno-resolved{filter:saturate(.4);box-shadow:0 2px 6px rgba(28,26,23,.2)}
+  .pp-anno-pin.pp-anno-current{transform:translate(-4px,-26px) scale(1.18);z-index:2147482650}
+  .pp-anno-pin.pp-anno-current:hover{transform:translate(-4px,-26px) scale(1.18)}
+  .pp-anno-region{position:absolute;z-index:2147481900;border:2px solid;border-radius:5px;pointer-events:none;box-sizing:border-box}
   .pp-anno-region.pp-anno-resolved{opacity:.35;filter:saturate(.3)}
-  .pp-anno-region.pp-anno-current{box-shadow:0 0 0 3px rgba(194,54,27,.30)}
-  .pp-anno-rubber{position:absolute;z-index:2147482700;border:2px dashed #c2361b;background:rgba(194,54,27,.08);border-radius:4px;pointer-events:none;box-sizing:border-box}
-  .pp-anno-pin.pp-anno-resolved{opacity:.45;filter:saturate(.3)}
-  .pp-anno-pin.pp-anno-current{box-shadow:0 0 0 4px rgba(194,54,27,.35),0 3px 10px rgba(28,26,23,.35)}
-  .pp-anno-pin.pp-anno-pulse{animation:ppAnnoPinPop .45s cubic-bezier(.2,1.6,.4,1)}
-  @keyframes ppAnnoPinPop{0%{transform:translate(-4px,-28px) scale(0)}100%{transform:translate(-4px,-28px) scale(1)}}
-  .pp-anno-popup{position:absolute;z-index:2147482500;width:320px;background:#fffdf9;border-radius:12px;border:1px solid #e6dfd2;box-shadow:0 14px 44px rgba(28,26,23,.22),0 3px 10px rgba(28,26,23,.12);animation:ppAnnoPop .18s cubic-bezier(.2,1.4,.4,1)}
-  @keyframes ppAnnoPop{from{opacity:0;transform:translateY(6px) scale(.97)}}
-  .pp-anno-popup.pp-anno-shaking{animation:ppAnnoShake .3s}
-  @keyframes ppAnnoShake{0%,100%{margin-left:0}25%{margin-left:-7px}75%{margin-left:7px}}
-  .pp-anno-preview{position:absolute;z-index:2147482400;max-width:260px;background:#211f1c;color:#f3efe7;border-radius:10px;padding:10px 13px;font-size:12.5px;line-height:1.55;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none;animation:ppAnnoPop .12s}
-  .pp-anno-preview .pp-anno-pv-hd{display:flex;gap:6px;align-items:center;margin-bottom:3px;color:#b8b1a3;font-size:11.5px}
-  .pp-anno-preview .pp-anno-pv-hd b{color:#f3efe7}
-  .pp-anno-hd{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #efe9dd;font-size:12.5px;color:#8a8378}
-  .pp-anno-ops{margin-left:auto;display:flex;gap:2px}
-  .pp-anno-ops button{border:none;background:none;cursor:pointer;font-size:12.5px;color:#8a8378;padding:3px 8px;border-radius:6px;font-family:inherit}
-  .pp-anno-ops button:hover{background:#f1ece2;color:#211f1c}
-  .pp-anno-ops .pp-anno-resolve{color:#1a7f4e}
-  .pp-anno-msgs{max-height:260px;overflow-y:auto;padding:6px 0}
-  .pp-anno-msg{display:flex;gap:10px;padding:9px 14px}
+  .pp-anno-rubber{position:absolute;z-index:2147482700;border:2px dashed #0f7c72;background:rgba(15,124,114,.08);border-radius:5px;pointer-events:none;box-sizing:border-box}
+  /* ── 弹层（at-pin 读/改面） ── */
+  .pp-anno-popup{position:absolute;z-index:2147482500;width:300px;background:#fff;border-radius:13px;border:1px solid #e1e4e6;box-shadow:0 22px 60px -18px rgba(17,22,27,.36),0 4px 12px rgba(17,22,27,.1);overflow:hidden;animation:ppPop .16s cubic-bezier(.2,1.3,.4,1)}
+  @keyframes ppPop{from{opacity:0;transform:translateY(6px) scale(.98)}}
+  .pp-anno-popup.pp-anno-shaking{animation:ppShake .3s}
+  @keyframes ppShake{0%,100%{margin-left:0}25%{margin-left:-7px}75%{margin-left:7px}}
+  .pp-anno-accent{height:3px}
+  .pp-anno-hd{display:flex;align-items:center;gap:7px;padding:9px 11px;border-bottom:1px solid #f0f1f2}
+  .pp-anno-step{width:22px;height:22px;border:1px solid #e7e9eb;background:#fff;border-radius:6px;display:grid;place-items:center;cursor:pointer;color:#6b7480}
+  .pp-anno-step:hover{border-color:#0f7c72;color:#0f7c72}
+  .pp-anno-counter2{font:600 11.5px/1 'JetBrains Mono',monospace;color:#6b7480;padding:0 2px}
+  .pp-anno-ops{margin-left:auto;display:flex;align-items:center;gap:2px}
+  .pp-anno-ops button{border:none;background:none;cursor:pointer;color:#9aa1a9;padding:5px;border-radius:6px;display:inline-flex;font:600 12px/1 'Hanken Grotesk',sans-serif}
+  .pp-anno-ops button:hover{background:#f1f3f4;color:#0f7c72}
+  .pp-anno-del{color:#b14a42!important}
+  .pp-anno-del.pp-anno-armed{color:#fff!important;background:#c2361b!important;padding:4px 9px!important}
+  .pp-anno-msgs{padding:5px 0;max-height:200px;overflow-y:auto}
+  .pp-anno-msg{display:flex;gap:9px;padding:8px 12px}
   .pp-anno-msg>div:last-child{flex:1;min-width:0}
-  .pp-anno-ava{width:28px;height:28px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700}
-  .pp-anno-who{font-size:12.5px;font-weight:600}
-  .pp-anno-when{font-size:11px;color:#aaa295;margin-left:6px;font-weight:400}
-  .pp-anno-fl{float:right;font-size:10.5px;color:#cfc8ba;font-variant-numeric:tabular-nums}
-  .pp-anno-txt{font-size:13.5px;line-height:1.55;margin-top:2px;word-break:break-word;white-space:pre-wrap}
-  .pp-anno-ft{padding:10px 12px 12px;border-top:1px solid #efe9dd}
-  .pp-anno-ft textarea{width:100%;border:1.5px solid #e0d9ca;border-radius:8px;padding:8px 10px;font-size:13.5px;font-family:inherit;resize:none;background:#fff;color:#211f1c;line-height:1.5}
-  .pp-anno-ft textarea:focus{outline:none;border-color:#c2361b}
+  .pp-anno-ava{width:25px;height:25px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font:700 11px/1 'Hanken Grotesk',sans-serif}
+  .pp-anno-who{font-size:12.5px;font-weight:600;color:#11161b}
+  .pp-anno-when{font-size:11px;color:#b3b9bf;margin-left:6px;font-weight:400}
+  .pp-anno-txt{font-size:13px;line-height:1.5;margin-top:2px;color:#34302b;word-break:break-word;white-space:pre-wrap}
+  .pp-anno-chips{display:flex;gap:5px;padding:8px 12px;border-top:1px solid #f0f1f2;flex-wrap:nowrap;overflow-x:auto}
+  .pp-anno-chip2{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 'Hanken Grotesk',sans-serif;padding:4px 9px;border-radius:999px;border:1px solid #e1e4e6;background:#fff;color:#6b7480;cursor:pointer;white-space:nowrap}
+  .pp-anno-chip2 i{width:6px;height:6px;border-radius:50%;display:inline-block}
+  .pp-anno-chip2.pp-anno-on{color:#fff;border-color:transparent}
+  .pp-anno-chip2.pp-anno-on i{background:#fff!important}
+  .pp-anno-ft{padding:9px 12px 11px;border-top:1px solid #f0f1f2}
+  .pp-anno-ft textarea{width:100%;border:1.5px solid #e1e4e6;border-radius:8px;padding:7px 10px;font:400 13px/1.5 'Hanken Grotesk',sans-serif;resize:none;background:#fff;color:#11161b}
+  .pp-anno-ft textarea:focus{outline:none;border-color:#0f7c72}
   .pp-anno-ft-row{display:flex;align-items:center;gap:8px;margin-top:8px}
-  .pp-anno-hint{font-size:11px;color:#b3ab9d}
-  .pp-anno-send{margin-left:auto;background:#c2361b;color:#fff;border:none;padding:6px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
-  .pp-anno-send:disabled{opacity:.4;cursor:default}
-  .pp-anno-kinds{display:flex;gap:5px;margin-bottom:8px;flex-wrap:wrap}
-  .pp-anno-kinds button{border:1px solid #e0d9ca;background:#fff;color:#8a8378;font-size:11.5px;padding:3px 11px;border-radius:99px;cursor:pointer;font-family:inherit}
-  .pp-anno-kinds button.pp-anno-kon{color:#fff;border-color:transparent}
-  .pp-anno-kind{display:inline-block;color:#fff;font-size:10.5px;padding:1px 8px;border-radius:99px;font-weight:600}
-  .pp-anno-sidebar{position:fixed;top:0;right:0;bottom:0;width:320px;z-index:2147482800;background:#fffdf9;border-left:1px solid #e6dfd2;box-shadow:-10px 0 36px rgba(28,26,23,.12);transform:translateX(100%);transition:transform .22s cubic-bezier(.3,1,.4,1);display:flex;flex-direction:column}
-  .pp-anno-sidebar.pp-anno-open{transform:translateX(0)}
-  .pp-anno-sb-hd{padding:16px 18px 12px;border-bottom:1px solid #efe9dd;display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
-  .pp-anno-sb-sub{font-size:12px;color:#8a8378;font-weight:400}
-  .pp-anno-sb-x{margin-left:auto;border:none;background:none;cursor:pointer;font-size:16px;color:#8a8378;padding:2px 6px}
-  .pp-anno-sb-filters{padding:10px 12px 8px;border-bottom:1px solid #efe9dd}
-  .pp-anno-seg{display:flex;background:#f1ece2;border-radius:8px;padding:2px;gap:2px}
-  .pp-anno-seg button{flex:1;border:none;background:transparent;font-size:12px;color:#8a8378;padding:5px 4px;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap}
-  .pp-anno-seg button.pp-anno-segon{background:#fff;color:#211f1c;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
-  .pp-anno-sb-list{flex:1;overflow-y:auto;padding:8px}
-  .pp-anno-sb-group{font-size:11px;color:#aaa295;font-weight:700;letter-spacing:.08em;padding:10px 12px 4px}
-  .pp-anno-sb-item{padding:11px 12px;border-radius:10px;cursor:pointer;margin-bottom:4px}
-  .pp-anno-sb-item:hover{background:#f4efe5}
-  .pp-anno-sb-top{display:flex;align-items:center;gap:8px}
-  .pp-anno-sb-num{width:21px;height:21px;border-radius:50% 50% 50% 3px;flex:none;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
-  .pp-anno-sb-when{font-size:11px;color:#aaa295;margin-left:auto}
-  .pp-anno-sb-link{border:none;background:none;cursor:pointer;font-size:11px;padding:2px 5px;border-radius:6px;opacity:0;transition:opacity .12s}
-  .pp-anno-sb-item:hover .pp-anno-sb-link{opacity:.65}
-  .pp-anno-sb-link:hover{opacity:1!important;background:#efe9dd}
-  .pp-anno-sb-txt{font-size:13px;color:#5d574d;margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .pp-anno-sb-meta{font-size:11px;color:#aaa295;margin-top:4px;display:flex;gap:6px;align-items:center}
-  .pp-anno-sb-item.pp-anno-resolved{opacity:.55}
-  .pp-anno-sb-item.pp-anno-resolved .pp-anno-sb-txt{text-decoration:line-through}
-  .pp-anno-sb-empty{text-align:center;color:#aaa295;font-size:13px;padding:48px 20px;line-height:2}
-  .pp-anno-toast{position:fixed;bottom:88px;left:50%;transform:translateX(-50%);z-index:2147483100;background:#211f1c;color:#f3efe7;font-size:13px;padding:9px 18px;border-radius:9px;box-shadow:0 6px 20px rgba(0,0,0,.3);animation:ppAnnoPop .2s}
-  .pp-anno-chip{position:fixed;bottom:88px;right:26px;z-index:2147483100;background:#211f1c;color:#f3efe7;font-size:12.5px;padding:10px 16px;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.3);cursor:pointer;max-width:300px;line-height:1.6;animation:ppAnnoPop .25s;transition:opacity .6s}
-  .pp-anno-chip b{color:#ffb39e}
-  .pp-anno-chip kbd{background:rgba(255,255,255,.14);border-radius:4px;padding:0 5px;font-family:inherit;font-size:11.5px}
-  @media (max-width:640px){.pp-anno-sidebar{width:100%}.pp-anno-toolbar{bottom:14px;max-width:calc(100vw - 20px);overflow-x:auto}}
+  .pp-anno-hint{font-size:11px;color:#b3b9bf}
+  .pp-anno-send{margin-left:auto;background:#0f7c72;color:#fff;border:none;padding:6px 13px;border-radius:7px;font:600 12.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .pp-anno-send:hover{background:#0b6358}.pp-anno-send:disabled{opacity:.4;cursor:default}
+  .pp-anno-ghost{background:#fff;border:1px solid #e1e4e6;color:#6b7480;padding:6px 12px;border-radius:7px;font:600 12.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer}
+  .pp-anno-ghost:hover{border-color:#0f7c72;color:#0f7c72}
+  .pp-anno-seltag{margin-left:auto;font:600 11px/1 'JetBrains Mono',monospace;color:#b3b9bf;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+  /* ── List 暗色弹层 ── */
+  .pp-anno-list{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:2147482900;width:330px;max-width:calc(100vw - 24px);background:#15191c;border-radius:13px;box-shadow:0 22px 60px -18px rgba(17,22,27,.6);overflow:hidden;animation:ppPop .16s cubic-bezier(.2,1.3,.4,1)}
+  .pp-anno-list-hd{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.08);color:#fff;font-weight:700;font-size:13.5px}
+  .pp-anno-list-hd .pp-cnt{font:600 12px/1 'JetBrains Mono',monospace;color:#9aa1a9}
+  .pp-anno-list-hd .pp-note{margin-left:auto;font-size:11px;color:#7fe3d6;font-weight:600}
+  .pp-anno-list-body{max-height:320px;overflow-y:auto;padding:6px}
+  .pp-anno-li{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;cursor:pointer}
+  .pp-anno-li:hover{background:rgba(255,255,255,.06)}
+  .pp-anno-li-num{width:19px;height:19px;border-radius:50% 50% 50% 3px;flex:none;display:grid;place-items:center;color:#fff;font:700 10.5px/1 'Hanken Grotesk',sans-serif}
+  .pp-anno-li-who{font-size:12.5px;font-weight:600;color:#fff;flex:none}
+  .pp-anno-li-kind{font-size:11.5px;font-weight:600;flex:none}
+  .pp-anno-li-txt{font-size:12px;color:#9aa1a9;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pp-anno-li-note{font-size:11px;font-weight:600}
+  .pp-anno-li-link{border:none;background:none;cursor:pointer;color:#9aa1a9;padding:3px;border-radius:6px;display:inline-flex;opacity:0}
+  .pp-anno-li:hover .pp-anno-li-link{opacity:.8}.pp-anno-li-link:hover{opacity:1!important;color:#7fe3d6}
+  .pp-anno-li.pp-anno-stale{background:rgba(176,132,35,.1)}
+  .pp-anno-empty{text-align:center;color:#9aa1a9;font-size:12.5px;padding:34px 22px;line-height:1.7}
+  /* ── caught-up / toast ── */
+  .pp-anno-caught{display:inline-flex;align-items:center;gap:7px;padding:0 6px 0 13px;color:#7fe3d6;font-weight:600;font-size:13px}
+  .pp-anno-toast{position:fixed;bottom:74px;left:50%;transform:translateX(-50%);z-index:2147483100;background:#15191c;color:#f3efe7;font-size:12.5px;font-weight:500;padding:9px 16px;border-radius:9px;box-shadow:0 10px 28px -8px rgba(15,124,114,.6);animation:ppPop .2s}
+  @media (max-width:640px){.pp-anno-bar{flex-wrap:wrap;justify-content:center}.pp-anno-list{width:calc(100vw - 24px)}}
   `;
 
   /* ---------------- UI 骨架 ---------------- */
-  let root, layer, toolbar, bubble, sidebar, btnMode, btnResolved, countBadge, bubbleBadge, sbFilters, sbList, sbSub;
+  let root, layer, bar, listEl;
 
   function buildUI() {
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
-
     root = el('div', 'pp-anno-root');
     root.dataset.ppAnno = '1';
+    root.dataset.ppReady = '1'; // e2e「层就绪」门
     layer = el('div', 'pp-anno-layer');
-
-    toolbar = el('div', 'pp-anno-toolbar');
-    btnMode = el('button', null);
-    btnMode.append('💬 评论模式 ');
-    countBadge = el('span', 'pp-anno-count', '0');
-    btnMode.appendChild(countBadge);
-    btnMode.title = '按 C 切换；⌥+点击可免模式直接评论';
-    btnMode.onclick = () => setMode(!state.mode);
-    const btnPage = el('button', null, '＋ 整页');
-    btnPage.title = '对整个页面提意见（G）';
-    btnPage.onclick = () => openComposerForPage();
-    const btnList = el('button', null, '☰ 列表');
-    btnList.onclick = () => {
-      const open = sidebar.classList.toggle('pp-anno-open');
-      if (open) renderSidebar(); // 打开时刷一次（平时高频重摆不重建侧栏）
-    };
-    btnResolved = el('button', null, '✓ 已解决');
-    btnResolved.title = '显示/隐藏已解决的评论';
-    btnResolved.onclick = () => {
-      state.showResolved = !state.showResolved;
-      btnResolved.style.color = state.showResolved ? '#7ee2a8' : '';
-      render();
-    };
-    const btnFold = el('button', null, '—');
-    btnFold.title = '收起（不挡页面）';
-    btnFold.onclick = () => setCollapsed(true);
-    toolbar.append(btnMode, btnPage, el('div', 'pp-anno-sep'), btnList, btnResolved, el('div', 'pp-anno-sep'), btnFold);
-
-    bubble = el('div', 'pp-anno-bubble', '💬');
-    bubble.dataset.ppAnno = '1';
-    bubbleBadge = el('span', 'pp-anno-bn', '0');
-    bubble.appendChild(bubbleBadge);
-    bubble.title = '点击展开 · 按住拖动换位置';
-    bubble.style.display = 'none';
-    makeBubbleDraggable();
-
-    sidebar = el('div', 'pp-anno-sidebar');
-    const sbHd = el('div', 'pp-anno-sb-hd');
-    sbHd.append('💬 本页评论 ');
-    sbSub = el('span', 'pp-anno-sb-sub', '');
-    const sbX = el('button', 'pp-anno-sb-x', '✕');
-    sbX.onclick = () => sidebar.classList.remove('pp-anno-open');
-    sbHd.append(sbSub, sbX);
-    sbFilters = el('div', 'pp-anno-sb-filters');
-    sbList = el('div', 'pp-anno-sb-list');
-    sidebar.append(sbHd, sbFilters, sbList);
-
-    root.append(layer, toolbar, bubble, sidebar);
+    bar = el('div', 'pp-anno-bar');
+    bar.dataset.ppAnno = '1';
+    bar.dataset.ppRole = 'bar';
+    root.append(layer, bar);
     document.body.appendChild(root);
-
-    try { setCollapsed(localStorage.getItem('pp-anno-collapsed') === '1'); } catch (e) { /* ignore */ }
+    renderBar();
   }
 
-  /* 折叠气泡可拖动（盖住内容时挪开），位置记忆；位移 <5px 视为点击 = 展开 */
-  function makeBubbleDraggable() {
-    try {
-      const saved = JSON.parse(localStorage.getItem('pp-anno-bubble-pos'));
-      if (saved) placeBubble(saved.x, saved.y);
-    } catch (e) { /* ignore */ }
-    function placeBubble(x, y) {
-      const m = 8, w = 46;
-      x = Math.max(m, Math.min(x, document.documentElement.clientWidth - w - m));
-      y = Math.max(m, Math.min(y, innerHeight - w - m));
-      bubble.style.left = x + 'px';
-      bubble.style.top = y + 'px';
-      bubble.style.right = 'auto';
-      bubble.style.bottom = 'auto';
-      return { x, y };
+  /* ---------------- 命令条变形 ---------------- */
+  const openCount = () => state.threads.filter((t) => !t.resolved).length;
+  const barBtn = (label, icon, cls, act, onClick, title) => {
+    const b = el('button', cls || null);
+    if (icon) b.appendChild(svg(icon, 15));
+    if (label != null) b.appendChild(document.createTextNode(label));
+    if (act) b.dataset.ppAct = act;
+    if (title) b.title = title;
+    b.onclick = onClick;
+    return b;
+  };
+
+  function renderBar() {
+    if (!bar) return;
+    bar.textContent = '';
+    bar.dataset.ppMode = state.mode;
+    if (state.mode === 'comment') {
+      const dot = el('span', 'pp-anno-dot');
+      const lab = el('span', 'pp-lab-teal pp-anno-kindtag', 'Comment mode');
+      const instr = el('span', 'pp-instr', '⌘+click an element, or drag on an image');
+      bar.append(dot, lab, instr, barBtn('Done', null, 'pp-b-soft', 'done', cancelComment));
+      return;
     }
-    bubble.addEventListener('pointerdown', (down) => {
-      down.preventDefault();
-      const r = bubble.getBoundingClientRect();
-      const ox = down.clientX - r.left, oy = down.clientY - r.top;
-      let moved = false, last = null;
-      const onMove = (e) => {
-        if (!moved && Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 5) return;
-        moved = true;
-        last = placeBubble(e.clientX - ox, e.clientY - oy);
-      };
-      const onUp = () => {
-        removeEventListener('pointermove', onMove);
-        removeEventListener('pointerup', onUp);
-        if (!moved) { setCollapsed(false); return; }
-        if (last) { try { localStorage.setItem('pp-anno-bubble-pos', JSON.stringify(last)); } catch (e) { /* ignore */ } }
-      };
-      addEventListener('pointermove', onMove);
-      addEventListener('pointerup', onUp);
-    });
+    if (state.mode === 'walk') {
+      const u = unresolved();
+      const i = u.findIndex((t) => t.id === state.walk.curId);
+      if (i < 0 || !u.length) { // caught-up 形态
+        const remaining = openCount();
+        const c = el('span', 'pp-anno-caught');
+        c.appendChild(svg(ICON.check, 15));
+        c.appendChild(document.createTextNode(remaining ? `End of queue · ${remaining} open` : 'All caught up · 0 open'));
+        bar.append(c, barBtn('Done', null, 'pp-b-soft', 'exit', exitWalk));
+        return;
+      }
+      const lead = el('span', 'pp-anno-kindtag'); lead.style.color = '#cdd3d9'; lead.style.padding = '0 4px 0 8px';
+      lead.appendChild(svg(ICON.play, 13)); lead.appendChild(document.createTextNode('Review walk'));
+      const prev = barBtn(null, ICON.prev, 'pp-b-soft pp-anno-rbtn', 'prev', () => step(-1), 'Previous (K)');
+      const counter = el('span', 'pp-anno-counter', `${i + 1}/${u.length}`);
+      const cur = u[i];
+      const tag = el('span', 'pp-anno-kindtag');
+      const m = cur.kind && KIND[cur.kind];
+      tag.style.color = m ? m.color : '#9aa1a9';
+      const ti = el('i'); ti.style.background = m ? m.color : NO_KIND; tag.append(ti, document.createTextNode(m ? m.label : 'No kind'));
+      const next = barBtn(null, ICON.next, 'pp-b-soft pp-anno-rbtn', 'next', () => step(1), 'Next (J)');
+      const rn = barBtn('Resolve & next', ICON.check, 'pp-b-primary', 'resolve-next', resolveNext);
+      const kbd = el('span', 'pp-anno-kbd', 'J K R');
+      const exit = barBtn(null, ICON.x, 'pp-anno-rbtn', 'exit', exitWalk, 'Exit (Esc)');
+      bar.append(lead, prev, counter, tag, next, el('div', 'pp-anno-sep'), rn, kbd, exit);
+      return;
+    }
+    // resting
+    const comment = barBtn('Comment', ICON.msg, 'pp-b-primary', 'comment', () => enterComment());
+    const cnt = el('span', 'pp-anno-count', String(openCount()));
+    comment.appendChild(cnt);
+    const filter = barBtn(state.filter === 'open' ? 'Open' : 'All', ICON.filter, null, 'filter', toggleFilter);
+    const whole = barBtn('Whole page', ICON.plus, null, 'whole', openComposerForPage);
+    const list = barBtn('List', ICON.list, state.listOpen ? 'pp-b-on' : 'pp-b-soft', 'list', toggleList);
+    const review = barBtn('Review', ICON.play, 'pp-b-soft', 'review', startReview);
+    bar.append(comment, filter, whole, list, el('div', 'pp-anno-sep'), review);
   }
 
-  function setCollapsed(on) {
-    state.collapsed = on;
-    toolbar.style.display = on ? 'none' : '';
-    bubble.style.display = on ? '' : 'none';
-    if (on) setMode(false);
-    try { localStorage.setItem('pp-anno-collapsed', on ? '1' : ''); } catch (e) { /* ignore */ }
-  }
+  function toggleFilter() { state.filter = state.filter === 'open' ? 'all' : 'open'; renderBar(); render(); }
 
-  /* ---------------- 锚点解析 ----------------
-   * status: ok      正常（渲染 pin）
-   *         clipped 元素被内部滚动容器裁出可视区（pin 隐藏，滚回来复现）
-   *         changed 选择器命中但内容指纹不匹配——SPA 同构换数据（pin 隐藏，防错挂）
-   *         lost    选择器找不到元素（页面改版）
-   *         page    整页评论，无锚点 */
+  /* ---------------- 锚点解析（保留） ---------------- */
   const isPage = (t) => t.selector === PAGE_SELECTOR;
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
   const fingerprint = (node) => norm(node.textContent).slice(0, 80);
-
   function pointVisible(node, cx, cy) {
-    // 锚点（视口坐标）是否落在所有 overflow 滚动祖先的可视区内
     let n = node.parentElement;
     while (n && n !== document.body) {
       const s = getComputedStyle(n);
@@ -339,7 +331,6 @@
     }
     return true;
   }
-
   function resolveAnchor(t) {
     if (isPage(t)) return { status: 'page', el: null, pos: null };
     let node = null;
@@ -353,12 +344,14 @@
     return { status: 'ok', el: node, pos };
   }
   const anchorXY = (t) => { const a = resolveAnchor(t); return a.status === 'ok' || a.status === 'clipped' ? a.pos : null; };
-  const visibleThreads = () => state.threads.filter((t) => state.showResolved || !t.resolved);
-  const pinThreads = () => visibleThreads().filter((t) => resolveAnchor(t).status === 'ok');
+  const visibleThreads = () => state.threads.filter((t) => state.filter === 'all' || !t.resolved);
+  const unresolved = () => state.threads.filter((t) => !t.resolved); // Walk 队列 = 未解决，文档序
+  const byId = (id) => state.threads.find((t) => t.id === id) || null;
 
+  /* ---------------- 渲染 pin/region（保留几何，换 kind 上色） ---------------- */
   function render() {
+    if (!layer) return;
     layer.querySelectorAll('.pp-anno-pin, .pp-anno-region').forEach((n) => n.remove());
-    // 打开中的弹窗跟随锚点重定位（内部容器滚动时）
     if (state.openPopup && state.openPopup._getPos) {
       const pp = state.openPopup._getPos();
       if (pp) positionPopup(state.openPopup, pp.x, pp.y);
@@ -370,135 +363,94 @@
       const pos = a.pos;
       n += 1;
       t._num = n;
-      // 框选线程:先铺区域框(rx/ry 即框左上角,pin 钉在角上)
+      const col = kindColor(t);
       if (t.rw != null && t.rh != null && a.el) {
         const r = a.el.getBoundingClientRect();
-        const reg = el('div', 'pp-anno-region'
-          + (t.resolved ? ' pp-anno-resolved' : '')
-          + (state.openThreadId === t.id ? ' pp-anno-current' : ''));
+        const reg = el('div', 'pp-anno-region' + (t.resolved ? ' pp-anno-resolved' : ''));
         reg.dataset.ppAnno = '1';
         reg.dataset.tid = t.id;
-        const color = colorOf(t.comments[0].author_name);
-        reg.style.borderColor = color;
-        reg.style.background = 'color-mix(in srgb, ' + color + ' 12%, transparent)';
+        reg.style.borderColor = col;
+        reg.style.background = 'color-mix(in srgb, ' + col + ' 10%, transparent)';
         reg.style.left = (r.left + scrollX + r.width * t.rx) + 'px';
         reg.style.top = (r.top + scrollY + r.height * t.ry) + 'px';
         reg.style.width = (r.width * t.rw) + 'px';
         reg.style.height = (r.height * t.rh) + 'px';
         layer.appendChild(reg);
       }
-      const pin = el('div', 'pp-anno-pin' + (t.resolved ? ' pp-anno-resolved' : ''), String(n));
+      const pin = el('div', 'pp-anno-pin' + (t.resolved ? ' pp-anno-resolved' : '')
+        + (state.openThreadId === t.id ? ' pp-anno-current' : ''));
       pin.dataset.ppAnno = '1';
+      pin.dataset.ppRole = 'marker';
       pin.dataset.tid = t.id;
       pin.style.left = pos.x + 'px';
       pin.style.top = pos.y + 'px';
-      pin.style.background = colorOf(t.comments[0].author_name);
-      pin.onclick = (e) => { e.stopPropagation(); removePreview(); openThread(t, pos); };
-      pin.onmouseenter = () => showPreview(t, pos);
-      pin.onmouseleave = removePreview;
+      pin.style.background = col;
+      if (t.resolved) { pin.textContent = ''; pin.appendChild(svg(ICON.check, 14)); }
+      else pin.textContent = String(n);
+      pin.onclick = (e) => { e.stopPropagation(); gotoPin(t.id); };
       layer.appendChild(pin);
     }
-    const open = state.threads.filter((t) => !t.resolved).length;
-    countBadge.textContent = String(open);
-    bubbleBadge.textContent = String(open);
-    bubbleBadge.style.display = open ? '' : 'none';
-    sbSub.textContent = `${open} 个待解决`;
-    // 滚动/DOM 变化触发的高频重摆只动 pin；侧栏 DOM 仅在打开时跟着刷
-    if (sidebar.classList.contains('pp-anno-open')) renderSidebar();
+    const open = openCount();
+    const cntEl = bar && bar.querySelector('.pp-anno-count');
+    if (cntEl) cntEl.textContent = String(open);
+    if (state.listOpen) renderList();
   }
 
-  function renderSidebar() {
-    // ── 筛选栏：状态分段（带计数）+ 类型 chip ──
-    sbFilters.textContent = '';
-    const nOpen = state.threads.filter((t) => !t.resolved).length;
-    const nDone = state.threads.length - nOpen;
-    const seg = el('div', 'pp-anno-seg');
-    for (const [key, label, n] of [['open', '待解决', nOpen], ['resolved', '已解决', nDone], ['all', '全部', state.threads.length]]) {
-      const b = el('button', state.sbStatus === key ? 'pp-anno-segon' : null, `${label} ${n}`);
-      b.onclick = () => { state.sbStatus = key; renderSidebar(); };
-      seg.appendChild(b);
+  /* ---------------- List 暗色弹层 ---------------- */
+  function toggleList() { state.listOpen = !state.listOpen; if (state.listOpen) renderList(); else removeList(); syncFlags(); renderBar(); }
+  function removeList() { if (listEl) { listEl.remove(); listEl = null; } }
+  function renderList() {
+    removeList();
+    listEl = el('div', 'pp-anno-list');
+    listEl.dataset.ppAnno = '1';
+    listEl.dataset.ppRole = 'list';
+    const u = unresolved();
+    const hd = el('div', 'pp-anno-list-hd');
+    hd.append(document.createTextNode('Open threads'), el('span', 'pp-cnt', String(u.length)), el('span', 'pp-note', 'document order'));
+    listEl.appendChild(hd);
+    const body = el('div', 'pp-anno-list-body');
+    if (!u.length) {
+      body.appendChild(el('div', 'pp-anno-empty', state.threads.length
+        ? 'No open threads.' : 'No comments yet. Hold ⌘ and click any element to start a thread — or use Whole page for overall notes.'));
+    } else {
+      // 文档序：先 ok-anchor 的（带号），再 page/lost/changed
+      const withNum = u.map((t) => ({ t, a: resolveAnchor(t) }));
+      withNum.sort((x, y) => (x.t._num || 999) - (y.t._num || 999));
+      for (const { t, a } of withNum) body.appendChild(listItem(t, a));
     }
-    sbFilters.appendChild(seg);
-    const usedKinds = new Set(state.threads.map((t) => t.kind).filter(Boolean));
-    if (usedKinds.size) {
-      const row = el('div', 'pp-anno-kinds');
-      row.style.margin = '8px 0 0';
-      for (const [k, m] of Object.entries(KIND_META)) {
-        if (!usedKinds.has(k)) continue;
-        const b = el('button', null, m.label);
-        if (state.sbKinds.has(k)) { b.classList.add('pp-anno-kon'); b.style.background = m.color; }
-        b.onclick = () => {
-          state.sbKinds.has(k) ? state.sbKinds.delete(k) : state.sbKinds.add(k);
-          renderSidebar();
-        };
-        row.appendChild(b);
-      }
-      sbFilters.appendChild(row);
-    }
-
-    // ── 列表：按筛选条件过滤（与页面 pin 显隐解耦）──
-    sbList.textContent = '';
-    const items = state.threads.filter((t) =>
-      (state.sbStatus === 'all' || (state.sbStatus === 'resolved') === t.resolved)
-      && (!state.sbKinds.size || state.sbKinds.has(t.kind)));
-    if (!items.length) {
-      sbList.appendChild(el('div', 'pp-anno-sb-empty',
-        state.threads.length ? '没有符合筛选条件的评论' : '还没有评论。⌥+点击页面任意元素即可发起，或点「＋ 整页」提整体意见。'));
-      return;
-    }
-    const pages = items.filter(isPage);
-    const pins = items.filter((t) => !isPage(t));
-    if (pages.length) {
-      sbList.appendChild(el('div', 'pp-anno-sb-group', '📄 整页意见'));
-      pages.forEach((t) => sbList.appendChild(sbItem(t, '📄')));
-    }
-    if (pins.length) {
-      if (pages.length) sbList.appendChild(el('div', 'pp-anno-sb-group', '📍 元素评论'));
-      pins.forEach((t) => sbList.appendChild(sbItem(t)));
-    }
+    listEl.appendChild(body);
+    root.appendChild(listEl);
   }
-
-  function sbItem(t, icon) {
+  function listItem(t, a) {
     const c0 = t.comments[0];
-    const item = el('div', 'pp-anno-sb-item' + (t.resolved ? ' pp-anno-resolved' : ''));
-    const top = el('div', 'pp-anno-sb-top');
-    const num = el('span', 'pp-anno-sb-num', icon || (t._num != null ? String(t._num) : '•'));
-    num.style.background = icon ? '#5d574d' : colorOf(c0.author_name);
-    top.append(num, el('span', 'pp-anno-who', c0.author_name), el('span', 'pp-anno-sb-when', fmtTime(c0.created_at)));
-    const link = el('button', 'pp-anno-sb-link', '🔗');
-    link.title = '复制这条评论的链接';
-    link.onclick = (e) => { e.stopPropagation(); copyThreadLink(t); }; // 不触发整行的跳转
-    top.appendChild(link);
-    const meta = el('div', 'pp-anno-sb-meta');
-    const chip = kindChip(t.kind);
-    if (chip) meta.appendChild(chip);
-    const st = resolveAnchor(t).status;
-    const note = st === 'lost' ? ' · ⚠️ 原锚点丢失'
-      : st === 'changed' ? ' · ⚠️ 页面内容已变化'
-      : st === 'clipped' ? ' · 滚动后可见' : '';
-    meta.appendChild(el('span', null,
-      `共 ${t.comments.length} 条` + (t.resolved ? ' · 已解决' : '') + note));
-    const item2 = el('div', 'pp-anno-sb-txt', c0.text);
-    item.append(top, item2, meta);
-    item.onclick = () => focusThread(t);
-    return item;
+    const m = t.kind && KIND[t.kind];
+    const stale = a.status === 'lost' || a.status === 'changed';
+    const row = el('div', 'pp-anno-li' + (stale ? ' pp-anno-stale' : ''));
+    row.dataset.ppRole = 'list-item';
+    row.dataset.tid = t.id;
+    row.dataset.ppStatus = a.status;
+    const num = el('span', 'pp-anno-li-num', isPage(t) ? '¶' : (stale ? '!' : (t._num != null ? String(t._num) : '•')));
+    num.style.background = isPage(t) ? '#5d574d' : (stale ? '#b08423' : (m ? m.color : NO_KIND));
+    if (stale) { num.style.background = '#fff8ee'; num.style.color = '#b08423'; num.style.border = '1.5px dashed #aab2bb'; }
+    const who = el('span', 'pp-anno-li-who', c0.author_name);
+    row.append(num, who);
+    if (m) { const k = el('span', 'pp-anno-li-kind', m.label); k.style.color = m.color; row.appendChild(k); }
+    const note = stale
+      ? el('span', 'pp-anno-li-note', `⚠ Anchor lost — was on ${t.selector}`)
+      : el('span', 'pp-anno-li-txt', c0.text);
+    if (stale) note.style.color = '#b08423';
+    row.appendChild(note);
+    const link = el('button', 'pp-anno-li-link');
+    link.dataset.ppRole = 'copy-link';
+    link.title = 'Copy link';
+    link.appendChild(svg(ICON.link, 13));
+    link.onclick = (e) => { e.stopPropagation(); copyThreadLink(t); };
+    row.appendChild(link);
+    row.onclick = () => { gotoPin(t.id); };
+    return row;
   }
 
-  function focusThread(t) {
-    const a = resolveAnchor(t);
-    if (!a.el || a.status === 'changed') { openThread(t, centerPos()); return; }
-    // scrollIntoView 能连带滚动内部容器（窗口 scrollTo 做不到）
-    a.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(() => {
-      const b = resolveAnchor(t);
-      openThread(t, b.pos || centerPos());
-    }, 420);
-  }
-  const centerPos = () => ({ x: scrollX + document.documentElement.clientWidth / 2 - 160, y: scrollY + innerHeight / 3 });
-
-  /* ---------------- 元素绑定高亮 ----------------
-   * 实线框标出评论关联的元素：写评论时 = 被点的目标；读评论（hover 预览 / 打开线程）= 锚点元素。
-   * popupTarget 记住弹窗的绑定，预览移开后恢复它。 */
+  /* ---------------- 弹层定位（保留） ---------------- */
   let popupTarget = null;
   function setBound(node) {
     document.querySelectorAll('.pp-anno-bound').forEach((n) => n.classList.remove('pp-anno-bound'));
@@ -508,43 +460,19 @@
     if (isPage(t)) return null;
     try { return document.querySelector(t.selector); } catch (e) { return null; }
   }
-
-  /* ---------------- hover 预览 ---------------- */
-  let previewEl = null;
-  function showPreview(t, pos) {
-    if (state.openThreadId === t.id) return;
-    removePreview();
-    const p = el('div', 'pp-anno-preview');
-    p.dataset.ppAnno = '1';
-    const hd = el('div', 'pp-anno-pv-hd');
-    const b = el('b', null, t.comments[0].author_name);
-    hd.append(b, el('span', null, fmtTime(t.comments[0].created_at)));
-    const chip = kindChip(t.kind);
-    if (chip) hd.appendChild(chip);
-    p.appendChild(hd);
-    const txt = t.comments[0].text;
-    p.appendChild(el('div', null, txt.length > 90 ? txt.slice(0, 90) + '…' : txt));
-    if (t.comments.length > 1) {
-      const more = el('div', null, `↳ ${t.comments.length - 1} 条回复`);
-      more.style.cssText = 'margin-top:4px;color:#b8b1a3;font-size:11.5px';
-      p.appendChild(more);
-    }
-    layer.appendChild(p);
-    const w = p.offsetWidth, h = p.offsetHeight;
-    p.style.left = Math.max(scrollX + 8, Math.min(pos.x - w / 2, scrollX + document.documentElement.clientWidth - w - 8)) + 'px';
-    // 默认在 pin 上方；贴近视口顶放不下时翻到 pin 下方
-    let top = pos.y - h - 40;
-    if (top < scrollY + 8) top = pos.y + 16;
-    p.style.top = top + 'px';
-    previewEl = p;
-    setBound(threadEl(t));
+  function positionPopup(p, x, y) {
+    const w = p.offsetWidth || 300, h = p.offsetHeight || 240;
+    const vw = document.documentElement.clientWidth;
+    // 侧向感知：优先放 pin 右侧，放不下翻左侧
+    let left = x + 30;
+    if (left + w > scrollX + vw - 12) left = x - w - 18;
+    p.style.left = Math.max(scrollX + 8, left) + 'px';
+    let top = y - 18;
+    if (top + h > scrollY + innerHeight - 12) top = scrollY + innerHeight - h - 12;
+    p.style.top = Math.max(scrollY + 8, top) + 'px';
   }
-  function removePreview() {
-    if (previewEl) { previewEl.remove(); previewEl = null; }
-    setBound(popupTarget); // 移开预览后恢复弹窗的绑定（无弹窗则清除）
-  }
+  const centerPos = () => ({ x: scrollX + document.documentElement.clientWidth / 2 - 150, y: scrollY + innerHeight / 3 });
 
-  /* ---------------- 弹窗 ---------------- */
   function popupHasDraft() {
     if (!state.openPopup) return false;
     const ta = state.openPopup.querySelector('textarea');
@@ -555,17 +483,11 @@
     const p = state.openPopup;
     if (!p) return;
     p.classList.remove('pp-anno-shaking');
-    void p.offsetWidth; // 重启动画
+    void p.offsetWidth;
     p.classList.add('pp-anno-shaking');
     p.querySelector('textarea')?.focus();
-    if (Date.now() - lastShakeHint > 2500) { // 光抖不说话看不懂拦截原因；提示限频防刷屏
-      lastShakeHint = Date.now();
-      toast('有未发送的内容：发布它，或按 Esc 放弃');
-    }
+    if (Date.now() - lastShakeHint > 2500) { lastShakeHint = Date.now(); toast('Unsent comment — post it, or press Esc to discard'); }
   }
-  /* 线程回复草稿随切换暂存（threadId → 文本），重开该线程时回填；
-   * Esc/发布/删除等强制关闭 = 明确放弃，清掉暂存。
-   * 新评论（composer）没有稳定 id 可挂靠，仍走抖动拦截。 */
   const draftStash = new Map();
 
   function closePopup(force) {
@@ -574,7 +496,7 @@
     const draft = ta ? ta.value.trim() : '';
     if (state.openThreadId) {
       if (force || !draft) draftStash.delete(state.openThreadId);
-      else draftStash.set(state.openThreadId, ta.value); // 切走自动暂存，不拦截
+      else draftStash.set(state.openThreadId, ta.value);
     } else if (!force && draft) {
       shakePopup();
       return false; // composer 草稿保护
@@ -585,79 +507,79 @@
     state.openThreadId = null;
     popupTarget = null;
     setBound(null);
-    layer.querySelectorAll('.pp-anno-region.pp-anno-current').forEach((n) => n.classList.remove('pp-anno-current'));
-    document.documentElement.classList.remove('pp-anno-paused');
+    layer.querySelectorAll('.pp-anno-pin.pp-anno-current').forEach((n) => n.classList.remove('pp-anno-current'));
+    syncFlags();
     return true;
   }
-  function popupShell(x, y) {
+  function popupShell(x, y, role) {
     if (!closePopup()) return null;
-    removePreview();
     const p = el('div', 'pp-anno-popup');
     p.dataset.ppAnno = '1';
+    p.dataset.ppRole = role;
     layer.appendChild(p);
     state.openPopup = p;
-    document.documentElement.classList.add('pp-anno-paused');
+    syncFlags();
     if (hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
-    // 先挂载再定位：测量实际尺寸后夹紧/翻转
     p.style.left = x + 'px';
     p.style.top = y + 'px';
     p.style.visibility = 'hidden';
     requestAnimationFrame(() => { positionPopup(p, x, y); p.style.visibility = ''; });
     return p;
   }
-  function positionPopup(p, x, y) {
-    // 水平夹紧视口；垂直超出底部时翻到锚点上方
-    const w = p.offsetWidth || 320, h = p.offsetHeight || 200;
-    const vw = document.documentElement.clientWidth;
-    p.style.left = Math.max(scrollX + 8, Math.min(x + 16, scrollX + vw - w - 16)) + 'px';
-    let top = y + 12;
-    if (top + h > scrollY + innerHeight - 12) top = y - h - 12;
-    p.style.top = Math.max(scrollY + 8, top) + 'px';
-  }
-  function footer(p, placeholder, onSubmit, withKinds) {
+
+  // 通用 footer（textarea + 提交）
+  function footer(p, placeholder, hint, btnLabel, btnIcon, onSubmit, extraLeft) {
     const ft = el('div', 'pp-anno-ft');
-    let kind = null;
-    if (withKinds) {
-      const row = el('div', 'pp-anno-kinds');
-      for (const [k, m] of Object.entries(KIND_META)) {
-        const b = el('button', null, m.label);
-        b.onclick = () => {
-          kind = kind === k ? null : k;
-          row.querySelectorAll('button').forEach((x) => { x.classList.remove('pp-anno-kon'); x.style.background = ''; });
-          if (kind) { b.classList.add('pp-anno-kon'); b.style.background = m.color; }
-        };
-        row.appendChild(b);
-      }
-      ft.appendChild(row);
-    }
     const ta = document.createElement('textarea');
-    ta.rows = 3;
+    ta.rows = 2;
     ta.placeholder = placeholder;
     const row = el('div', 'pp-anno-ft-row');
-    const send = el('button', 'pp-anno-send', '发布');
-    row.append(el('span', 'pp-anno-hint', 'Enter 发送 · Shift+Enter 换行 · Esc 放弃'), send);
+    if (extraLeft) row.appendChild(extraLeft);
+    row.appendChild(el('span', 'pp-anno-hint', hint));
+    const send = el('button', 'pp-anno-send');
+    send.dataset.ppRole = 'send';
+    if (btnIcon) send.appendChild(svg(btnIcon, 14));
+    send.appendChild(document.createTextNode(btnLabel));
+    row.appendChild(send);
     ft.append(ta, row);
     p.appendChild(ft);
     const submit = async () => {
       const text = ta.value.trim();
       if (!text) { ta.focus(); return; }
       send.disabled = true;
-      try { await onSubmit(text, kind); }
-      catch (e) { toast(e.message || '操作失败'); send.disabled = false; return; }
+      try { await onSubmit(text); } catch (e) { toast(e.message || 'Failed'); send.disabled = false; }
     };
     send.onclick = submit;
     ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); } };
     return ta;
   }
 
+  // kind chips（composer 默认 copy；thread 反映当前 kind）
+  function kindChips(selected, onPick, readonly) {
+    const wrap = el('div', 'pp-anno-chips');
+    for (const k of KIND_KEYS) {
+      const m = KIND[k];
+      const b = el('button', 'pp-anno-chip2' + (selected === k ? ' pp-anno-on' : ''));
+      b.dataset.ppKind = k;
+      const dot = el('i'); dot.style.background = m.color;
+      b.append(dot, document.createTextNode(m.label));
+      if (selected === k) b.style.background = m.color;
+      if (readonly) b.style.cursor = 'default';
+      else b.onclick = () => onPick(k, b, wrap);
+      wrap.appendChild(b);
+    }
+    return wrap;
+  }
+
+  /* ---------------- composer（评论模式打点） ---------------- */
   function openComposer(x, y, selector, rx, ry, box) {
-    const p = popupShell(x, y);
+    const p = popupShell(x, y, 'composer');
     if (!p) return;
+    const accent = el('div', 'pp-anno-accent'); accent.style.background = 'linear-gradient(90deg,#0f7c72,#14958a)';
+    p.appendChild(accent);
     if (selector !== PAGE_SELECTOR) {
       try { popupTarget = document.querySelector(selector); } catch (e) { popupTarget = null; }
       setBound(popupTarget);
-      // 跟随点必须 = 初始弹出点:框选时弹窗开在框右下角,若跟随 rx/ry(左上角),
-      // focus 引起的微滚一触发重摆,弹窗就会被吸去左上角(实测「点输入框弹窗移位」)
       const fx = box ? Math.min(1, rx + box.rw) : rx;
       const fy = box ? Math.min(1, ry + box.rh) : ry;
       p._getPos = () => {
@@ -669,7 +591,6 @@
       };
     }
     if (box && popupTarget) {
-      // 撰写期间保留虚线框预览,关闭/发布时随 _cleanup 撤掉
       const r = popupTarget.getBoundingClientRect();
       const reg = el('div', 'pp-anno-rubber');
       reg.dataset.ppAnno = '1';
@@ -680,175 +601,272 @@
       layer.appendChild(reg);
       p._cleanup = () => reg.remove();
     }
-    const hd = el('div', 'pp-anno-hd',
-      selector === PAGE_SELECTOR ? '📄 整页意见' : box ? '⬚ 区域评论' : '📍 新评论');
-    const ops = el('div', 'pp-anno-ops');
-    const xBtn = el('button', null, '✕');
-    xBtn.onclick = () => closePopup(true);
-    ops.appendChild(xBtn);
-    hd.appendChild(ops);
+    const hd = el('div', 'pp-anno-hd');
+    hd.dataset.ppRole = 'composer-head';
+    const title = el('span', 'pp-anno-who', selector === PAGE_SELECTOR ? 'Whole page' : 'New comment');
+    hd.appendChild(title);
+    if (selector !== PAGE_SELECTOR) {
+      const tag = el('span', 'pp-anno-seltag', selector);
+      hd.appendChild(tag);
+    }
     p.appendChild(hd);
-    const ta = footer(p, selector === PAGE_SELECTOR ? '对这个页面整体说点什么…' : '说点什么…', async (text, kind) => {
-      // 内容指纹：发布时快照目标元素文本，SPA 换数据后据此判定「内容已变化」
-      const anchor_text = popupTarget && selector !== PAGE_SELECTOR ? fingerprint(popupTarget) || null : null;
-      const t = await createThread({
-        path: CFG.path, selector, rx, ry,
-        rw: box ? box.rw : null, rh: box ? box.rh : null,
-        kind, anchor_text, text,
-      });
-      state.threads.push(t);
-      closePopup(true);
-      render();
-      const pin = layer.querySelector(`.pp-anno-pin[data-tid="${t.id}"]`);
-      if (pin) pin.classList.add('pp-anno-pulse');
-      else toast('已记录整页意见 ✓');
-    }, true);
+    let kind = null; // 默认无选中（design 默认 Copy，但允许无 kind 提交）
+    const chips = kindChips(kind, (k, b, wrap) => {
+      kind = kind === k ? null : k;
+      wrap.querySelectorAll('.pp-anno-chip2').forEach((x) => { x.classList.remove('pp-anno-on'); x.style.background = ''; });
+      if (kind) { b.classList.add('pp-anno-on'); b.style.background = KIND[kind].color; }
+      p.dataset.ppKind = kind || '';
+    });
+    p.appendChild(chips);
+    const cancel = el('button', 'pp-anno-ghost', 'Cancel');
+    cancel.onclick = () => { closePopup(true); };
+    const ta = footer(p, selector === PAGE_SELECTOR ? 'Say something about the whole page…' : 'Say something…',
+      box ? 'Esc to discard' : 'or drag on an image to box a region', 'Post', null, async (text) => {
+        const anchor_text = popupTarget && selector !== PAGE_SELECTOR ? fingerprint(popupTarget) || null : null;
+        const t = await createThread({
+          path: CFG.path, selector, rx, ry,
+          rw: box ? box.rw : null, rh: box ? box.rh : null, kind, anchor_text, text,
+        });
+        state.threads.push(t);
+        closePopup(true);
+        render();
+        const pin = layer.querySelector(`.pp-anno-pin[data-tid="${t.id}"]`);
+        if (pin) pin.classList.add('pp-anno-pulse');
+        else toast('Whole-page note recorded');
+      }, cancel);
     ta.focus();
   }
-  const openComposerForPage = () => openComposer(centerPos().x, centerPos().y, PAGE_SELECTOR, 0, 0);
+  const openComposerForPage = () => { setMode('rest'); openComposer(centerPos().x, centerPos().y, PAGE_SELECTOR, 0, 0); };
 
-  /** 复制评论深链（弹窗 🔗 与侧栏行共用）。http 等非安全上下文没有
-   * clipboard API，退回 execCommand。 */
+  /* ---------------- 深链复制（保留，英文化） ---------------- */
   async function copyThreadLink(t) {
     const url = location.href.split('#')[0] + '#pp-comment-' + t.id;
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch (e) {
-      const tmp = el('textarea');
-      tmp.dataset.ppAnno = '1';
-      tmp.value = url;
-      tmp.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(tmp);
-      tmp.select();
+    try { await navigator.clipboard.writeText(url); }
+    catch (e) {
+      const tmp = el('textarea'); tmp.dataset.ppAnno = '1'; tmp.value = url;
+      tmp.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(tmp); tmp.select();
       try { document.execCommand('copy'); } catch (e2) { /* ignore */ }
       tmp.remove();
     }
-    toast('链接已复制，打开即定位到这条评论');
+    toast('Link copied');
   }
 
-  function openThread(t, pos, focusReply) {
-    const p = popupShell(pos.x, pos.y);
+  /* ---------------- Review Walk + at-pin 弹层 ---------------- */
+  function enterComment() { setMode('comment'); }
+  function cancelComment() { closePopup(true); setMode('rest'); }
+  // 单点维护两个宿主级标记（imgShell Esc 据此让权，crosshair CSS 据此暂停）：
+  //  mode-on = 评论模式（无弹层时出十字光标）；paused = 弹层/列表/Walk 正占用交互
+  function syncFlags() {
+    const de = document.documentElement;
+    de.classList.toggle('pp-anno-mode-on', state.mode === 'comment');
+    de.classList.toggle('pp-anno-paused', !!state.openPopup || state.listOpen || state.mode === 'walk');
+  }
+  function setMode(m) {
+    state.mode = m;
+    if (m !== 'comment' && hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
+    syncFlags();
+    renderBar();
+  }
+
+  function startReview() {
+    if (state.listOpen) toggleList();
+    const u = unresolved();
+    state.walk.resolvedThisPass = 0;
+    if (!u.length) { setMode('walk'); state.walk.curId = null; state.walk.entryTop = true; closePopup(true); render(); renderBar(); return; }
+    state.walk.entryTop = true;
+    setMode('walk');
+    goTo(u[0].id);
+  }
+  function gotoPin(id) {
+    if (state.listOpen) toggleList();
+    const u = unresolved();
+    const i = u.findIndex((t) => t.id === id);
+    if (i < 0) { // 已解决线程（filter=all 时点了）：直接开弹层，不进队列
+      const t = byId(id); if (t) { setMode('walk'); goTo(id); }
+      return;
+    }
+    if (state.mode !== 'walk') state.walk.entryTop = (i === 0);
+    setMode('walk');
+    goTo(id);
+  }
+  function goTo(id) {
+    const t = byId(id);
+    if (!t) return;
+    state.walk.curId = id;
+    const a = resolveAnchor(t);
+    // 立即开弹层（pin 切换要跟手）；随后 scrollIntoView，弹层经 render 的 _getPos 跟随滚动
+    openPopover(t, a.pos || centerPos());
+    if (a.el) a.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    renderBar();
+    try { history.replaceState(null, '', location.pathname + location.search + '#pp-comment-' + id); } catch (e) { /* ignore */ }
+  }
+  function step(d) {
+    const u = unresolved();
+    let i = u.findIndex((t) => t.id === state.walk.curId);
+    if (i < 0) i = d > 0 ? -1 : u.length; // 当前线程不在队列（已解决）：J 从队首、K 从队尾起步
+    const ni = i + d;
+    if (ni < 0) return;
+    if (ni >= u.length) { caughtUp(); return; }
+    goTo(u[ni].id);
+  }
+  function caughtUp() {
+    state.walk.curId = null;
+    closePopup(true);
+    render();
+    renderBar();
+  }
+  function exitWalk() {
+    setMode('rest');
+    state.walk.curId = null;
+    closePopup(true);
+    render();
+    renderBar();
+  }
+  let resolveInFlight = false;
+  async function resolveNext() {
+    if (resolveInFlight) return; // 连按 R 防重复 PATCH / 双跳
+    const id = state.walk.curId;
+    const t = byId(id);
+    if (!t) { step(1); return; }
+    const u = unresolved();
+    const i = u.findIndex((x) => x.id === id);
+    resolveInFlight = true;
+    let ok = false;
+    try {
+      const updated = await patchThread(t.id, true);
+      Object.assign(t, updated);
+      state.walk.resolvedThisPass += 1;
+      ok = true;
+    } catch (e) { toast(e.message || 'Failed'); }
+    resolveInFlight = false;
+    if (!ok) return;
+    const u2 = unresolved(); // 不含 t
+    // 先把游标移到下一条再 render，避免命令条闪现一帧 caught-up
+    state.walk.curId = i >= 0 && i < u2.length ? u2[i].id : null;
+    render();
+    if (state.walk.curId) goTo(state.walk.curId);
+    else caughtUp();
+  }
+
+  function openPopover(t, pos, focusReply) {
+    const p = popupShell(pos.x, pos.y, 'popover');
     if (!p) return;
     state.openThreadId = t.id;
-    layer.querySelectorAll('.pp-anno-region').forEach((n) =>
-      n.classList.toggle('pp-anno-current', n.dataset.tid === t.id));
+    state.walk.curId = t.id;
+    p.dataset.ppThread = t.id;
+    p.dataset.ppNum = isPage(t) ? 'page' : (t._num != null ? String(t._num) : '');
     popupTarget = threadEl(t);
     setBound(popupTarget);
     p._getPos = () => resolveAnchor(t).pos;
+    layer.querySelectorAll('.pp-anno-pin').forEach((n) => n.classList.toggle('pp-anno-current', n.dataset.tid === t.id));
+    const accent = el('div', 'pp-anno-accent'); accent.style.background = kindColor(t); p.appendChild(accent);
+
+    // header: ◀ n/N ▶ + copy-link + delete + exit
     const hd = el('div', 'pp-anno-hd');
-    hd.appendChild(el('span', null, isPage(t) ? '📄 整页意见' : `#${t._num != null ? t._num : '•'}`));
-    const chip = kindChip(t.kind);
-    if (chip) hd.appendChild(chip);
-    hd.appendChild(el('span', null, `${t.comments.length} 条`));
+    const u = unresolved();
+    const i = u.findIndex((x) => x.id === t.id);
+    const prev = el('button', 'pp-anno-step'); prev.appendChild(svg(ICON.prev, 13)); prev.title = 'Previous (K)';
+    prev.dataset.ppAct = 'prev'; prev.onclick = () => step(-1);
+    const counter = el('span', 'pp-anno-counter2', i >= 0 ? `${i + 1} / ${u.length}` : '–');
+    const next = el('button', 'pp-anno-step'); next.appendChild(svg(ICON.next, 13)); next.title = 'Next (J)';
+    next.dataset.ppAct = 'next'; next.onclick = () => step(1);
+    hd.append(prev, counter, next);
     const ops = el('div', 'pp-anno-ops');
-    const linkBtn = el('button', null, '🔗');
-    linkBtn.title = '复制这条评论的链接（打开即定位）';
+    const linkBtn = el('button'); linkBtn.dataset.ppRole = 'copy-link'; linkBtn.title = 'Copy link'; linkBtn.appendChild(svg(ICON.link, 14));
     linkBtn.onclick = () => copyThreadLink(t);
     ops.appendChild(linkBtn);
-    const resolveBtn = el('button', 'pp-anno-resolve', t.resolved ? '↩ 重新打开' : '✓ 解决');
-    resolveBtn.onclick = async () => {
-      try {
-        const updated = await patchThread(t.id, !t.resolved);
-        Object.assign(t, updated);
-        closePopup(true);
-        render();
-      } catch (e) { toast(e.message || '操作失败'); }
-    };
-    ops.appendChild(resolveBtn);
     const mine = state.viewer && t.comments[0].author_sub === state.viewer.sub;
     if (mine) {
-      // 两步确认替代原生 confirm：第一次点变红色「确认删除？」，3 秒不点自动还原
-      const delBtn = el('button', null, '删除');
+      const delBtn = el('button', 'pp-anno-del', 'Delete'); delBtn.title = 'Delete';
       let disarm = null;
       delBtn.onclick = async () => {
         if (!delBtn.dataset.armed) {
-          delBtn.dataset.armed = '1';
-          delBtn.textContent = '确认删除？';
-          delBtn.style.cssText = 'color:#fff;background:#c2361b';
-          disarm = setTimeout(() => {
-            delete delBtn.dataset.armed;
-            delBtn.textContent = '删除';
-            delBtn.style.cssText = '';
-          }, 3000);
+          delBtn.dataset.armed = '1'; delBtn.textContent = 'Delete?'; delBtn.classList.add('pp-anno-armed');
+          disarm = setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = 'Delete'; delBtn.classList.remove('pp-anno-armed'); }, 3000);
           return;
         }
         clearTimeout(disarm);
         try {
           await deleteThread(t.id);
+          const wasIdx = unresolved().findIndex((x) => x.id === t.id);
           state.threads = state.threads.filter((x) => x.id !== t.id);
-          closePopup(true);
           render();
-        } catch (e) { toast(e.message || '删除失败'); }
+          const u2 = unresolved();
+          if (state.mode === 'walk' && wasIdx >= 0 && wasIdx < u2.length) goTo(u2[wasIdx].id);
+          else if (state.mode === 'walk') caughtUp();
+          else closePopup(true);
+        } catch (e) { toast(e.message || 'Delete failed'); }
       };
       ops.appendChild(delBtn);
     }
-    const xBtn = el('button', null, '✕');
-    xBtn.onclick = () => closePopup(); // 有草稿会抖动拦截
-    ops.appendChild(xBtn);
+    const exit = el('button'); exit.dataset.ppAct = 'exit'; exit.title = 'Exit (Esc)'; exit.appendChild(svg(ICON.x, 14));
+    exit.onclick = () => exitWalk();
+    ops.appendChild(exit);
     hd.appendChild(ops);
+    p.appendChild(hd);
 
+    // messages
     const msgs = el('div', 'pp-anno-msgs');
-    t.comments.forEach((c, i) => {
+    t.comments.forEach((c) => {
       const m = el('div', 'pp-anno-msg');
       const ava = el('div', 'pp-anno-ava', initialOf(c.author_name));
-      ava.style.background = colorOf(c.author_name);
+      ava.style.background = avatarColor(c.author_name);
       const right = el('div');
       const line = el('div');
       line.append(el('span', 'pp-anno-who', c.author_name), el('span', 'pp-anno-when', fmtTime(c.created_at)));
-      if (t.comments.length > 3) line.append(el('span', 'pp-anno-fl', String(i + 1))); // 楼层号：长线程才显示
       right.append(line, el('div', 'pp-anno-txt', c.text));
       m.append(ava, right);
       msgs.appendChild(m);
     });
-    p.append(hd, msgs);
-    const ta = footer(p, '回复…', async (text) => {
-      const reply = await addReply(t.id, text);
-      t.comments.push(reply);
-      ta.value = ''; // 清草稿（closePopup 会按内容决定暂存与否）
-      draftStash.delete(t.id);
-      render();
-      openThread(t, pos, true); // 焦点回到回复框，方便连续回复
-    });
+    p.appendChild(msgs);
+
+    // kind chips：只读展示线程当前 kind（高亮）。kind 在创建时由 composer 设定并持久化；
+    // 改已有线程的 kind 需后端 PATCH 端点（无该端点时不做「假可点」误导，留待阶段 4）。
+    p.appendChild(kindChips(t.kind, null, true));
+
+    // footer: reply 输入 + Resolve & next（同一按钮：有草稿先发回复，无草稿则解决并前进）
+    const ta = footer(p, 'Reply…', 'Enter to reply', 'Resolve & next', ICON.check, async () => {});
+    const sendBtn = p.querySelector('.pp-anno-send');
+    const sendReply = async () => {
+      const txt = ta.value.trim();
+      if (!txt) { void resolveNext(); return; } // 无草稿 → resolve-and-advance
+      sendBtn.disabled = true;
+      try {
+        const reply = await addReply(t.id, txt);
+        t.comments.push(reply);
+        ta.value = ''; // 先清空，避免 closePopup 把已发回复当草稿暂存
+        draftStash.delete(t.id);
+        render();
+        openPopover(byId(t.id) || t, pos, true);
+      } catch (e) { toast(e.message || 'Failed'); sendBtn.disabled = false; }
+    };
+    sendBtn.onclick = sendReply;
+    ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendReply(); } };
     const stashed = draftStash.get(t.id);
-    if (stashed) ta.value = stashed; // 回填上次切走时的草稿
+    if (stashed) ta.value = stashed;
     msgs.scrollTop = 1e5;
-    // 弹窗此刻还是 visibility:hidden（popupShell 下一帧才显示），隐藏元素 focus() 会被忽略——
-    // 排在显示那一帧之后再聚焦
-    if (focusReply) requestAnimationFrame(() => requestAnimationFrame(() => ta.focus()));
+    if (focusReply) requestAnimationFrame(() => requestAnimationFrame(() => { const f = p.querySelector('textarea'); if (f) f.focus(); }));
   }
 
-  /* ---------------- 评论模式 / 免模式打点 ---------------- */
+  /* ---------------- 评论模式 hover + 打点（保留） ---------------- */
   let hoverHint = null;
-  function setMode(on) {
-    state.mode = on;
-    document.documentElement.classList.toggle('pp-anno-mode-on', on);
-    btnMode.classList.toggle('pp-anno-active', on);
-    if (!on && hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
-  }
-
   document.addEventListener('mouseover', (e) => {
-    if (!state.mode || state.openPopup) return; // 弹窗打开期间不再高亮背后元素
+    if (state.mode !== 'comment' || state.openPopup) return;
     if (hoverHint) hoverHint.classList.remove('pp-anno-hover-hint');
     hoverHint = e.target.closest('[data-pp-anno]') ? null : e.target;
     if (hoverHint && hoverHint !== document.body) hoverHint.classList.add('pp-anno-hover-hint');
   }, true);
-
-  /* 评论模式下屏蔽浏览器原生拖拽/划选:十字光标的语义是「点哪评哪」,
-   * 但按住稍一移动,图片会触发原生拖图幽灵、文本会开始划选,打点被截胡。
-   * 与十字光标同一套豁免:弹窗打开(paused)期间不拦,评论层自身 UI 不拦。 */
   const modeArmed = (e) =>
-    state.mode &&
+    state.mode === 'comment' &&
     !document.documentElement.classList.contains('pp-anno-paused') &&
     !(e.target.closest && e.target.closest('[data-pp-anno]'));
   document.addEventListener('dragstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
   document.addEventListener('selectstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
 
-  /* ---------------- 图片框选(bbox 评论) ----------------
-   * 评论模式下在 <img> 上按住拖动 = 圈出一块区域评论;轻点(位移 < 5px)仍走点打点。
-   * rx/ry 存框左上角、rw/rh 存相对宽高(0~1),随图片缩放自适应。 */
-  let suppressNextClick = false; // 框选松手派生的 click 要吞掉,防止又开一个点评论
+  /* ---------------- 图片框选（保留几何） ---------------- */
+  let suppressNextClick = false;
   document.addEventListener('mousedown', (down) => {
-    if (!state.mode || state.openPopup || down.button !== 0) return;
+    if (state.mode !== 'comment' || state.openPopup || down.button !== 0) return;
     const img = down.target;
     if (!(img instanceof HTMLImageElement) || img.closest('[data-pp-anno]')) return;
     const r0 = img.getBoundingClientRect();
@@ -866,24 +884,20 @@
     const onMove = (e) => {
       if (!rubber) {
         if (Math.hypot(e.clientX - sx, e.clientY - sy) < 5) return;
-        rubber = el('div', 'pp-anno-rubber');
-        rubber.dataset.ppAnno = '1';
-        layer.appendChild(rubber);
+        rubber = el('div', 'pp-anno-rubber'); rubber.dataset.ppAnno = '1'; layer.appendChild(rubber);
       }
       const g = geom(e);
-      rubber.style.left = (g.x1 + scrollX) + 'px';
-      rubber.style.top = (g.y1 + scrollY) + 'px';
-      rubber.style.width = g.w + 'px';
-      rubber.style.height = g.h + 'px';
+      rubber.style.left = (g.x1 + scrollX) + 'px'; rubber.style.top = (g.y1 + scrollY) + 'px';
+      rubber.style.width = g.w + 'px'; rubber.style.height = g.h + 'px';
     };
     const onUp = (e) => {
       removeEventListener('mousemove', onMove);
       removeEventListener('mouseup', onUp);
-      if (!rubber) return;               // 轻点:不拦,后续 click 走点打点
+      if (!rubber) return;
       rubber.remove();
       suppressNextClick = true;
       const g = geom(e);
-      if (g.w < 8 || g.h < 8) return;    // 框太小视为误触,什么都不发生
+      if (g.w < 8 || g.h < 8) return;
       openComposer(g.x1 + g.w + scrollX, g.y1 + g.h + scrollY, cssPath(img),
         cl((g.x1 - r0.left) / r0.width, 0, 1), cl((g.y1 - r0.top) / r0.height, 0, 1),
         { rw: Math.min(1, g.w / r0.width), rh: Math.min(1, g.h / r0.height) });
@@ -897,93 +911,62 @@
     const r = node.getBoundingClientRect();
     const rx = r.width ? (e.clientX - r.left) / r.width : 0.5;
     const ry = r.height ? (e.clientY - r.top) / r.height : 0.5;
-    openComposer(e.pageX, e.pageY, cssPath(node),
-      Math.min(1, Math.max(0, rx)), Math.min(1, Math.max(0, ry)));
+    openComposer(e.pageX, e.pageY, cssPath(node), Math.min(1, Math.max(0, rx)), Math.min(1, Math.max(0, ry)));
   }
 
   document.addEventListener('click', (e) => {
     if (suppressNextClick) { suppressNextClick = false; e.preventDefault(); e.stopPropagation(); return; }
     if (e.target.closest('[data-pp-anno]')) return;
-    if (state.mode || e.altKey) {            // 评论模式，或任意时刻 ⌥+点击
+    if (state.mode === 'comment' || e.altKey || (e.metaKey && !e.ctrlKey)) {
       e.preventDefault();
       e.stopPropagation();
-      // 两步式:已有弹窗开着时,这次点击只负责收掉它(空稿直接关、有稿抖动拦截),
-      // 不在新位置立刻再开 —— 否则「一路点一路冒框」很乱。⌥+点击是明确意图,仍直接弹。
-      if (state.openPopup && !e.altKey) {
-        closePopup();
-        return;
-      }
+      // 两步式：composer 开着时这次点击只收掉它（空稿关、有稿抖动），⌥/⌘ 是明确意图直接弹
+      if (state.openPopup && state.openThreadId === null && !e.altKey && !e.metaKey) { closePopup(); return; }
       composeAt(e);
       return;
     }
-    closePopup();                            // 模式外点空白：关弹窗（草稿保护内置）
+    closePopup(); // 普通点空白：关弹层（草稿保护内置）
   }, true);
 
-  /* ---------------- 键盘 ---------------- */
-  function jumpPin(delta) {
-    const pins = pinThreads();
-    if (!pins.length) return;
-    state.cursor = (state.cursor + delta + pins.length) % pins.length;
-    const t = pins[state.cursor];
-    layer.querySelectorAll('.pp-anno-pin, .pp-anno-region').forEach((p) => p.classList.toggle('pp-anno-current', p.dataset.tid === t.id));
-    const pos = anchorXY(t);
-    if (pos) scrollTo({ top: pos.y - innerHeight / 2, behavior: 'smooth' });
-  }
-  function openCursor(focusReply) {
-    const pins = pinThreads();
-    if (state.cursor < 0 || state.cursor >= pins.length) return;
-    const t = pins[state.cursor];
-    const pos = anchorXY(t);
-    if (pos) openThread(t, pos, focusReply);
-  }
-
+  /* ---------------- 键盘（保留 + Walk 感知） ---------------- */
   document.addEventListener('keydown', (e) => {
     const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')
       || (document.activeElement && document.activeElement.isContentEditable);
     if (e.key === 'Escape') {
-      if (closePopup(true)) {
-        setMode(false);
-        layer.querySelectorAll('.pp-anno-current').forEach((p) => p.classList.remove('pp-anno-current'));
-        state.cursor = -1;
-      }
+      if (state.mode === 'comment') { cancelComment(); return; }
+      if (state.mode === 'walk') { if (closePopup(true)) exitWalk(); return; }
+      closePopup(true);
       return;
     }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === 'c' || e.key === 'C') setMode(!state.mode);
+    if (e.key === 'c' || e.key === 'C') { state.mode === 'comment' ? setMode('rest') : enterComment(); }
     else if (e.key === 'g' || e.key === 'G') openComposerForPage();
-    else if (e.key === 'j' || e.key === 'J') jumpPin(1);
-    else if (e.key === 'k' || e.key === 'K') jumpPin(-1);
-    else if (e.key === 'Enter' && state.cursor >= 0 && !state.openPopup) { e.preventDefault(); openCursor(false); }
-    else if (e.key === 'r' || e.key === 'R') { if (state.cursor >= 0) { e.preventDefault(); openCursor(true); } }
+    else if (state.mode === 'walk') {
+      if (e.key === 'j' || e.key === 'J') { e.preventDefault(); step(1); }
+      else if (e.key === 'k' || e.key === 'K') { e.preventDefault(); step(-1); }
+      else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); void resolveNext(); }
+    } else if (e.key === 'r' || e.key === 'R') { startReview(); }
   });
 
   addEventListener('resize', () => render());
-  addEventListener('load', () => render()); // 图片/字体加载完布局会变，pin 重摆
+  addEventListener('load', () => render());
 
-  /* ---------------- 跟随重摆：内部容器滚动 + DOM 变化 ----------------
-   * pin 用文档坐标，整页滚动天然跟随；内部 overflow 容器滚动则必须重摆。
-   * scroll 不冒泡但可捕获；rAF 节流。 */
+  /* ---------------- 跟随重摆（保留） ---------------- */
   let rafPending = false;
   function scheduleRender() {
-    if (!layer || rafPending) return; // UI 未初始化（viewer 401 等）不渲染
+    if (!layer || rafPending) return;
     rafPending = true;
     requestAnimationFrame(() => { rafPending = false; render(); });
   }
-  document.addEventListener('scroll', (e) => {
-    if (e.target !== document) scheduleRender(); // 整页滚动无需重摆
-  }, true);
-  // SPA 换内容 / 动态加载：DOM 变了就重摆（忽略评论层自身的变更，防自激）
+  document.addEventListener('scroll', (e) => { if (e.target !== document) scheduleRender(); }, true);
   new MutationObserver((muts) => {
     for (const m of muts) {
       const n = m.target.nodeType === 1 ? m.target : m.target.parentElement;
       if (n && n.closest && n.closest('[data-pp-anno]')) continue;
       if (m.type === 'attributes' && m.attributeName === 'class') {
-        // 评论层给宿主元素加/删的高亮类（绑定/悬停虚线）不算页面变化——
-        // 否则 hover pin → 加类 → 重摆销毁重建 pin → 悬停事件错乱（自激）
         const before = (m.oldValue || '').split(/\s+/).filter(Boolean);
         const after = [...m.target.classList];
-        const diff = before.filter((x) => !after.includes(x))
-          .concat(after.filter((x) => !before.includes(x)));
+        const diff = before.filter((x) => !after.includes(x)).concat(after.filter((x) => !before.includes(x)));
         if (diff.length && diff.every((cls) => cls.startsWith('pp-anno-'))) continue;
       }
       scheduleRender();
@@ -991,98 +974,63 @@
     }
   }).observe(document.body, {
     childList: true, subtree: true, characterData: true,
-    // style/class 等影响布局的属性变化也要重摆（rAF 已节流；高频动画页可接受）
-    attributes: true,
-    attributeOldValue: true,
+    attributes: true, attributeOldValue: true,
     attributeFilter: ['style', 'class', 'src', 'width', 'height', 'open', 'hidden'],
   });
 
-  /* ---------------- 静默刷新 ---------------- */
+  /* ---------------- 静默刷新（保留） ---------------- */
   async function refresh() {
     if (document.visibilityState !== 'visible') return;
-    if (state.openPopup) return;             // 正在看/写评论时不打断
+    if (state.openPopup) return;
     try {
       const data = await fetchThreads();
       const before = JSON.stringify(state.threads.map((t) => [t.id, t.comments.length, t.resolved]));
       const after = JSON.stringify(data.threads.map((t) => [t.id, t.comments.length, t.resolved]));
       if (before !== after) { state.threads = data.threads; render(); }
-    } catch (e) { /* 静默：网络抖动/会话过期都不打扰 */ }
+    } catch (e) { /* 静默 */ }
   }
   setInterval(refresh, 30000);
   addEventListener('focus', refresh);
 
-  /* ---------------- 宿主页就地换路径（图片查看器壳的 lightbox 切换） ----------------
-   * 壳在切换前派发 cancelable 的 pagepin:navigate（detail.path = 新站内路径）：
-   * composer 有未发草稿 → preventDefault 阻断切换（closePopup 已抖动提示）；
-   * 否则换路径清空线程重拉，后续新建评论自动落在新路径上。 */
+  /* ---------------- 图片查看器壳就地换路径（保留契约） ---------------- */
   addEventListener('pagepin:navigate', (e) => {
     const next = e && e.detail && e.detail.path;
     if (!next || next === CFG.path) return;
     if (!closePopup()) { e.preventDefault(); return; }
     CFG.path = next;
     state.threads = [];
-    state.cursor = -1;
+    state.walk.curId = null;
+    if (state.mode === 'walk') setMode('rest');
     render();
-    fetchThreads()
-      .then((data) => { state.threads = data.threads; render(); })
-      .catch(() => { /* 静默：30s 轮询/聚焦刷新会补 */ });
+    fetchThreads().then((data) => { state.threads = data.threads; render(); }).catch(() => { /* 静默 */ });
   });
 
-  /* ---------------- 首次引导（非阻断 chip） ---------------- */
-  function maybeChip() {
-    let seen = null;
-    try { seen = localStorage.getItem('pp-anno-coached2'); } catch (e) { /* ignore */ }
-    if (seen) return;
-    try { localStorage.setItem('pp-anno-coached2', '1'); } catch (e) { /* ignore */ }
-    const chip = el('div', 'pp-anno-chip');
-    chip.dataset.ppAnno = '1';
-    chip.innerHTML = ''; // 全静态内容，下面用 DOM 拼
-    const l1 = el('div');
-    const b = el('b', null, '这个页面可以直接评论');
-    l1.append('💬 ', b);
-    const l2 = el('div');
-    const kbd = el('kbd', null, '⌥ + 点击');
-    l2.append(kbd, ' 任意元素试试，意见会钉在那里');
-    chip.append(l1, l2);
-    chip.onclick = () => chip.remove();
-    root.appendChild(chip);
-    setTimeout(() => { chip.style.opacity = '0'; setTimeout(() => chip.remove(), 700); }, 8000);
-  }
-
-  /* ---------------- 深链 #pp-comment-<id> ---------------- */
+  /* ---------------- 深链 #pp-comment-<id>（保留 id 形态宽匹配） ---------------- */
   function maybeDeepLink() {
-    // id 形态宽匹配（UUID 等）；原 24 位 hex 正则是内部版 ObjectId 的遗留，UUID 永远匹配不上
     const m = location.hash.match(/^#pp-comment-([\w-]{8,})$/);
     if (!m) return;
     const t = state.threads.find((x) => x.id === m[1]);
     if (!t) return;
-    if (t.resolved && !state.showResolved) { state.showResolved = true; render(); }
-    setTimeout(() => focusThread(t), 300);
+    if (t.resolved && state.filter !== 'all') { state.filter = 'all'; render(); renderBar(); }
+    setTimeout(() => gotoPin(t.id), 300);
   }
 
-  /* ---------------- 启动 ---------------- */
+  /* ---------------- 启动（保留身份门控） ---------------- */
   async function boot() {
-    try {
-      state.viewer = await api('/api/viewer');
-    } catch (e) {
-      return; // 匿名访客：不渲染任何 UI
-    }
+    try { state.viewer = await api('/api/viewer'); }
+    catch (e) { return; } // 匿名访客：不渲染任何 UI
     buildUI();
     try {
       const data = await fetchThreads();
       state.threads = data.threads;
     } catch (e) {
       if (e.status === 403) { root.remove(); return; } // 站点已关评论
-      toast('评论加载失败：' + (e.message || ''));
+      toast('Failed to load comments: ' + (e.message || ''));
     }
     render();
     maybeDeepLink();
-    maybeChip();
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => void boot());
-  } else {
-    void boot();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void boot());
+  else void boot();
 })();
