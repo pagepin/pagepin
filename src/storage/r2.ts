@@ -6,6 +6,18 @@ import { NotFoundError, NotModifiedError, type ObjectMeta, type Storage } from '
 import { guessContentType } from './mime.js';
 import type { R2Bucket, R2ObjectBody } from '@cloudflare/workers-types';
 
+/** If-None-Match header → R2 etagDoesNotMatch 可接受的「裸 etag」。
+ * 处理:外层引号、W/ 弱校验前缀、逗号分隔多值(取首个,单资源 serving 已足够)。
+ * 返回 undefined 表示无法用作条件(空 / `*`),调用方退化为无条件 get。 */
+export function parseIfNoneMatch(header?: string): string | undefined {
+  if (!header) return undefined;
+  const trimmed = header.trim();
+  if (trimmed === '' || trimmed === '*') return undefined;
+  const first = trimmed.split(',')[0]?.trim() ?? '';
+  const tag = first.replace(/^W\//i, '').replace(/^"(.*)"$/, '$1');
+  return tag.length ? tag : undefined;
+}
+
 export class R2Storage implements Storage {
   private prefix: string;
   constructor(private bucket: R2Bucket, prefix = '') {
@@ -52,9 +64,13 @@ export class R2Storage implements Storage {
     key: string,
     opts?: { ifNoneMatch?: string },
   ): Promise<{ meta: ObjectMeta; body: ReadableStream<Uint8Array> }> {
+    // 浏览器按 HTTP 规范发送带引号(可能带 W/ 弱校验前缀、逗号分隔多值)的 If-None-Match,
+    // 但 R2 的 etagDoesNotMatch 只收「裸 etag」,带引号会抛 TypeError → 兜底成 500。
+    // 故在此把 header 归一化成不带引号的裸 etag;`*` 或空值则退化为无条件 get。
+    const inm = parseIfNoneMatch(opts?.ifNoneMatch);
     const obj = await this.bucket.get(
       this.k(key),
-      opts?.ifNoneMatch ? { onlyIf: { etagDoesNotMatch: opts.ifNoneMatch } } : undefined,
+      inm ? { onlyIf: { etagDoesNotMatch: inm } } : undefined,
     );
     if (!obj) throw new NotFoundError(key);
     const body = (obj as R2ObjectBody).body;

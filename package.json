@@ -21,6 +21,8 @@
     "gen:assets": "node scripts/gen-edge-assets.mjs",
     "cf:dev": "pnpm gen:assets && wrangler dev",
     "cf:deploy": "pnpm gen:assets && wrangler d1 migrations apply pagepin --remote && wrangler deploy",
+    "test": "pnpm test:unit && pnpm test:e2e",
+    "test:unit": "node --import tsx --test test/*.test.ts",
     "test:e2e": "pnpm -C e2e test"
   },
   "dependencies": {
