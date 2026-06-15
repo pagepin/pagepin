@@ -8,6 +8,12 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
 
+  // 可观测性:开 Workers Logs(dashboard 可查结构化日志/console;Free 留存 3 天、20 万 logs/天)。
+  // 小流量保持 100% 采样;噪声大了再加 "logs": { "invocation_logs": false }。
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  // 部署时上传 source map —— 生产错误栈显示原始 TS(serving-inject/host 路由)而非压缩偏移。
+  "upload_source_maps": true,
+
   // React 控制台经 Static Assets 提供(binding=ASSETS,SPA 兜底)。
   // run_worker_first=true:所有请求先过 Worker —— 双域下 console/content 的路由必须按 Host 判定
   //   (静态 run_worker_first 数组无法表达「content 域全归 worker」),故全量过 worker 再分流;
