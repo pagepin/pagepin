@@ -105,7 +105,7 @@ function loginPage(next: string): string {
     'Sign in · pagepin',
     `<div class="chip chip-teal">${LOCK_SVG}</div>
 <h1>Sign in to view</h1>
-<p class="body">Use the email your invite was sent to.</p>
+<p class="body">Sign in to your pagepin account to continue.</p>
 <form id="f" method="post" action="/auth/password">
   <input type="hidden" name="next" value="${escapeHtml(next)}">
   <label>Email<input name="email" type="email" autocomplete="username" required autofocus></label>
