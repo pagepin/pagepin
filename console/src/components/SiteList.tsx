@@ -38,6 +38,23 @@ export function SiteList() {
       )
     : sites;
 
+  // 零站点:不再摞第二个 hero 卡片(与上方 DropZone 冗余),只留一条纤细的 curl 提示,
+  // 让首屏不溢出常见笔记本视口(详见提交说明)。隐藏空的 "Your sites" 标题与搜索。
+  if (sites.length === 0 && !loading) {
+    return (
+      <section className="mt-6 animate-fade-up rounded-card border border-dashed border-ink-200 bg-white/50 px-6 py-7 text-center">
+        <p className="text-[13.5px] font-semibold text-ink-600">No sites yet</p>
+        <p className="mx-auto mt-1 max-w-md text-[12.5px] leading-relaxed text-ink-400">
+          Drop a file above, or deploy straight from your terminal:
+        </p>
+        <div className="mt-3 inline-flex items-center gap-2 rounded-field bg-ink-900 px-3.5 py-2 font-mono text-xs text-ink-200">
+          <Terminal className="h-3.5 w-3.5 text-tide-300" />
+          curl -X POST …/api/sites/my-report/deploy
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="mt-10 animate-fade-up">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -64,22 +81,7 @@ export function SiteList() {
         </div>
       </div>
 
-      {sites.length === 0 && !loading ? (
-        <div className="rounded-card border border-dashed border-ink-300 bg-white/60 px-6 py-16 text-center">
-          <div className="mx-auto flex h-[52px] w-[52px] items-center justify-center rounded-card bg-tide-50 text-tide-600">
-            <Terminal className="h-6 w-6" />
-          </div>
-          <p className="mt-4 text-[15px] font-semibold text-ink-700">No sites yet</p>
-          <p className="mx-auto mt-1 max-w-md text-[13px] leading-relaxed text-ink-400">
-            Deploy your first page with a single <span className="font-mono text-ink-600">curl</span>{' '}
-            — you&rsquo;ll get a shareable link the moment it lands.
-          </p>
-          <div className="mt-5 inline-flex items-center gap-2 rounded-field bg-ink-900 px-3.5 py-2 font-mono text-xs text-ink-200">
-            <Terminal className="h-3.5 w-3.5 text-tide-300" />
-            curl -X POST …/api/sites/my-report/deploy
-          </div>
-        </div>
-      ) : filtered.length === 0 ? (
+      {filtered.length === 0 && q ? (
         <div className="rounded-card border border-dashed border-ink-200 bg-white/60 px-6 py-10 text-center text-[13px] text-ink-400">
           No sites match &ldquo;{query.trim()}&rdquo;
         </div>

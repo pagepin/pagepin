@@ -246,7 +246,7 @@ export function DropZone() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex w-full flex-col items-center px-6 py-14 text-center focus:outline-none sm:py-20"
+              className="flex w-full flex-col items-center px-6 py-10 text-center focus:outline-none sm:py-12"
             >
               <span
                 className={`flex h-16 w-16 items-center justify-center rounded-2xl transition-colors ${

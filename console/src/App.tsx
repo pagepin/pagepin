@@ -87,7 +87,7 @@ export default function App() {
       {me.needs_handle ? (
         <HandleSetup />
       ) : (
-        <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
+        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
           <DropZone />
           <SiteList />
         </main>
