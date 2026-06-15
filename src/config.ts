@@ -1,5 +1,14 @@
 /** 环境配置 —— 全部经 env 注入;loadConfig 只读传入的 env 对象,保持 edge-safe。 */
 
+import { isSupportedSocialProvider, SOCIAL_PROVIDER_IDS } from './auth/social.js';
+
+/** 社交登录 provider(与 password/oidc 并存,独立配置)。 */
+export interface SocialProvider {
+  id: string; // 'google' | 'github'(社交注册表支持的 id)
+  clientId: string;
+  clientSecret: string;
+}
+
 export interface OidcConfig {
   issuer: string;
   clientId: string;
@@ -34,6 +43,8 @@ export interface Config {
   registrationMode?: 'open' | 'invite' | 'closed';
   adminEmail?: string;
   adminPassword?: string;
+  /** 社交登录(可与 password/oidc 同时启用);空数组 = 未配置 */
+  socialProviders: SocialProvider[];
   secret: string;
   sessionTtlH: number;
   oidc?: OidcConfig;
@@ -138,6 +149,26 @@ export function loadConfig(env: Env): Config {
     };
   }
 
+  // 社交登录:PAGEPIN_OAUTH_PROVIDERS=google,github;每家 PAGEPIN_OAUTH_<ID>_CLIENT_ID/_CLIENT_SECRET。
+  // 与 authMode 独立(可 password + 社交并存);两值齐全才启用,缺一即报错(避免半配置静默失效)。
+  const socialProviders: SocialProvider[] = [];
+  const wantProviders = (env.PAGEPIN_OAUTH_PROVIDERS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  for (const id of wantProviders) {
+    if (!isSupportedSocialProvider(id)) {
+      throw new Error(`PAGEPIN_OAUTH_PROVIDERS 含未知 provider:${id}(支持 ${SOCIAL_PROVIDER_IDS.join('/')})`);
+    }
+    const up = id.toUpperCase();
+    const clientId = env[`PAGEPIN_OAUTH_${up}_CLIENT_ID`];
+    const clientSecret = env[`PAGEPIN_OAUTH_${up}_CLIENT_SECRET`];
+    if (!clientId || !clientSecret) {
+      throw new Error(`社交登录 ${id} 需设置 PAGEPIN_OAUTH_${up}_CLIENT_ID 与 PAGEPIN_OAUTH_${up}_CLIENT_SECRET`);
+    }
+    socialProviders.push({ id, clientId, clientSecret });
+  }
+
   const secret = str(env, 'PAGEPIN_SECRET', '');
   if (!secret) {
     // Node 入口会先从 {dataDir}/secret 落盘/读取后再调本函数;走到这说明两边都没给
@@ -157,6 +188,7 @@ export function loadConfig(env: Env): Config {
     registrationMode,
     adminEmail: env.PAGEPIN_ADMIN_EMAIL || undefined,
     adminPassword: env.PAGEPIN_ADMIN_PASSWORD || undefined,
+    socialProviders,
     secret,
     sessionTtlH: num(env, 'PAGEPIN_SESSION_TTL_H', 8),
     oidc,

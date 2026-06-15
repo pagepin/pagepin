@@ -4,6 +4,8 @@ export interface AuthConfig {
   mode: 'password' | 'oidc' | 'none';
   allow_signup: boolean;
   registration_mode: RegistrationMode;
+  /** 已启用的社交登录 provider id(如 ['google','github']);缺省/空 = 无 */
+  social_providers?: string[];
 }
 
 export interface Limits {

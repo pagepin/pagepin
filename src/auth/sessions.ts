@@ -15,6 +15,7 @@ import type { Config } from '../config.js';
 export const VIEW_COOKIE = 'pp_view';
 export const SESSION_COOKIE = 'pp_session';
 export const CSRF_COOKIE = 'pp_csrf'; // 非 httpOnly:SPA 读它回填 X-CSRF-Token 头
+export const OAUTH_NONCE_COOKIE = 'pp_oauth'; // OAuth/OIDC 登录态绑定(host-only,防 login CSRF)
 
 export type Plane = 'view' | 'session';
 
@@ -84,6 +85,33 @@ export function clearLoginCookies(c: Context, plane: Plane): void {
     deleteCookie(c, SESSION_COOKIE, { path: '/' });
     deleteCookie(c, CSRF_COOKIE, { path: '/' });
   }
+}
+
+/** OAuth/OIDC 起跳:种一个 host-only 短时 nonce,并返回它(嵌进签名 state)。
+ * 回跳时要求 cookie 里的 nonce == state 内嵌 nonce —— 攻击者无法在受害者浏览器里种我们域的 cookie,
+ * 故无法把"自己发起的 state+code"塞给受害者完成登录(防 login CSRF / 会话固定)。 */
+export function setOauthNonce(c: Context, cfg: Config): string {
+  const nonce = randomHex(16);
+  setCookie(c, OAUTH_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    secure: cfg.secureCookies,
+    sameSite: 'Lax', // 回跳是顶层 GET 导航,Lax 会带上;但攻击者种不进受害者浏览器
+    maxAge: 600, // 与 state TTL 一致(10 分钟)
+    path: '/',
+  });
+  return nonce;
+}
+
+/** 回跳:取出并清除 nonce cookie,与 state 内嵌 nonce 常数时间比对。 */
+export function consumeOauthNonce(c: Context, stateNonce: unknown): boolean {
+  const cookie = getCookie(c, OAUTH_NONCE_COOKIE);
+  deleteCookie(c, OAUTH_NONCE_COOKIE, { path: '/' });
+  if (typeof cookie !== 'string' || typeof stateNonce !== 'string' || cookie.length !== stateNonce.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < cookie.length; i++) diff |= cookie.charCodeAt(i) ^ stateNonce.charCodeAt(i);
+  return diff === 0;
 }
 
 export function csrfOk(c: Context, claims: SessionClaims): boolean {

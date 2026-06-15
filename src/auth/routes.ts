@@ -22,7 +22,14 @@ import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso, uuid, validEmail } from '../util.js';
 import { buildAuthorizeUrl, exchangeCode, OidcError, type OidcIdentity } from './oidc.js';
 import { hashPassword, verifyPassword } from './password.js';
-import { clearLoginCookies, setLoginCookies, type Plane } from './sessions.js';
+import { exchangeSocialCode, socialAuthorizeUrl } from './social.js';
+import {
+  clearLoginCookies,
+  consumeOauthNonce,
+  setLoginCookies,
+  setOauthNonce,
+  type Plane,
+} from './sessions.js';
 
 const STATE_TTL = 600; // OIDC state 有效期 10 分钟
 
@@ -31,9 +38,12 @@ async function sha256Hex(s: string): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function stateEncode(secret: string, plane: Plane, nextPath: string): Promise<string> {
+async function stateEncode(
+  secret: string, plane: Plane, nextPath: string, nonce: string,
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  return sign({ pln: plane, nxt: nextPath, iat: now, exp: now + STATE_TTL }, secret, 'HS256');
+  // non = 与 host-only cookie 比对的登录态绑定 nonce(防 login CSRF)
+  return sign({ pln: plane, nxt: nextPath, non: nonce, iat: now, exp: now + STATE_TTL }, secret, 'HS256');
 }
 
 async function stateDecode(secret: string, state: string): Promise<Record<string, unknown> | null> {
@@ -44,9 +54,10 @@ async function stateDecode(secret: string, state: string): Promise<Record<string
   }
 }
 
-/** 只允许站内相对路径,防 open redirect。 */
+/** 只允许站内相对路径,防 open redirect。
+ * 拒 //evil(协议相对)、javascript:(无前导 /),以及 /\evil(浏览器把反斜杠归一成 / → //evil)。 */
 function safeNext(raw: string | null | undefined): string {
-  if (raw && raw.startsWith('/') && !raw.startsWith('//')) return raw;
+  if (raw && raw.startsWith('/') && !raw.startsWith('//') && !raw.includes('\\')) return raw;
   return '/';
 }
 
@@ -57,6 +68,17 @@ function redirectUri(c: Context, cfg: Config): string {
     return `${cfg.externalScheme}://${host}/auth/callback`;
   }
   return `${cfg.baseUrl}/auth/callback`;
+}
+
+/** 社交登录回调地址(每家一条 `/auth/social/<provider>/callback`,需在各 provider 注册)。
+ * authorize 与 token 交换必须用同一个 redirect_uri,故两处都走本函数。 */
+function socialRedirectUri(c: Context, cfg: Config, provider: string): string {
+  const path = `/auth/social/${provider}/callback`;
+  if (cfg.mode === 'dual') {
+    const host = c.req.header('host') ?? '';
+    return `${cfg.externalScheme}://${host}${path}`;
+  }
+  return `${cfg.baseUrl}${path}`;
 }
 
 /** body 双格式:JSON 或 form(urlencoded/multipart);只收 string 字段。 */
@@ -136,19 +158,32 @@ async function upsertDevUser(deps: AppDeps): Promise<UserRow> {
     .get();
 }
 
-/** OIDC upsert:按 oidc_sub 查;资料字段顺手刷新(handle 不动 —— 它是本地身份,
- * 一经确认不随 IdP 变);首个用户给 admin(与 signup 同一条「首个注册用户为 admin」规则)。
- * D1 无交互事务:改两条 await 语句;并发首登的双 admin 极小窄窗可接受(admin 可手动降级),
- * oidc_sub 唯一索引兜并发同 sub。 */
+/** 候选 email 能否安全写入:为空、或已被「别的」账号占用 → null。
+ * email 仅展示用、不按它合并账号(身份是 namespaced oidc_sub),故被占即不写,避免命中
+ * users_email_uq 唯一索引 500。selfId = 自身 id(更新时排除自己)。 */
+async function emailFreeOrNull(
+  deps: AppDeps, candidate: string | null | undefined, selfId: string | null,
+): Promise<string | null> {
+  if (!candidate) return null;
+  const owner = await deps.db.select({ id: users.id }).from(users).where(eq(users.email, candidate)).get();
+  return owner && owner.id !== selfId ? null : candidate;
+}
+
+/** OIDC / 社交登录 upsert:按 oidc_sub 查(sub 已带 provider 前缀,跨家不撞号);资料顺手刷新
+ * (handle 不动 —— 本地身份,一经确认不随 IdP 变);首个用户给 admin。
+ * D1 无交互事务:email 被他人占用即不写(不按 email 合并),insert 兜并发同 sub / email 抢占 ——
+ * 绝不让 users_email_uq 冲突冒成 500(混合 password+社交时,verified email 撞已有账号很常见)。 */
 async function upsertOidcUser(deps: AppDeps, info: OidcIdentity): Promise<UserRow> {
   const now = nowIso();
   const existing = await deps.db.select().from(users).where(eq(users.oidcSub, info.sub)).get();
   if (existing) {
+    // 新 email 可用才更新,否则保留旧值 —— 不抢别人的 email
+    const fresh = info.email ? await emailFreeOrNull(deps, info.email, existing.id) : null;
     return deps.db
       .update(users)
       .set({
         displayName: info.name || existing.displayName,
-        email: info.email || existing.email,
+        email: fresh ?? existing.email,
         lastLoginAt: now,
       })
       .where(eq(users.id, existing.id))
@@ -156,19 +191,23 @@ async function upsertOidcUser(deps: AppDeps, info: OidcIdentity): Promise<UserRo
       .get();
   }
   const n = (await deps.db.select({ n: sql<number>`count(*)` }).from(users).get())?.n ?? 0;
-  return deps.db
-    .insert(users)
-    .values({
-      id: uuid(),
-      oidcSub: info.sub,
-      displayName: info.name ?? info.preferredUsername ?? null,
-      email: info.email ?? null,
-      isAdmin: n === 0,
-      createdAt: now,
-      lastLoginAt: now,
-    })
-    .returning()
-    .get();
+  const values = {
+    id: uuid(),
+    oidcSub: info.sub,
+    displayName: info.name ?? info.preferredUsername ?? null,
+    email: await emailFreeOrNull(deps, info.email, null),
+    isAdmin: n === 0,
+    createdAt: now,
+    lastLoginAt: now,
+  };
+  try {
+    return await deps.db.insert(users).values(values).returning().get();
+  } catch (e) {
+    // 并发兜底:同 sub 抢先建 → 返回那行;email 在 check 与 insert 间被抢 → 去 email 重插(namespaced sub 仍独立)
+    const bySub = await deps.db.select().from(users).where(eq(users.oidcSub, info.sub)).get();
+    if (bySub) return bySub;
+    return deps.db.insert(users).values({ ...values, email: null }).returning().get();
+  }
 }
 
 export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
@@ -185,7 +224,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     }
 
     if (cfg.authMode === 'oidc') {
-      const state = await stateEncode(cfg.secret, plane, next);
+      const state = await stateEncode(cfg.secret, plane, next, setOauthNonce(c, cfg));
       try {
         const url = await buildAuthorizeUrl(cfg.oidc!, redirectUri(c, cfg), state);
         return c.redirect(url, 302);
@@ -267,7 +306,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const state = c.req.query('state');
     if (!code || !state) return c.json({ detail: '缺 code/state' }, 400);
     const st = await stateDecode(cfg.secret, state);
-    if (!st || st.pln !== plane) {
+    if (!st || st.pln !== plane || !consumeOauthNonce(c, st.non)) {
       return c.json({ detail: 'state 无效或过期，请重新登录' }, 400);
     }
     let info: OidcIdentity;
@@ -278,6 +317,52 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       throw e;
     }
     const user = await upsertOidcUser(deps, info);
+    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
+    await setLoginCookies(c, cfg, plane, user.id, user.handle);
+    return c.redirect(safeNext(typeof st.nxt === 'string' ? st.nxt : null), 302);
+  });
+
+  // 社交登录(与 password/oidc 并存,独立配置):起跳 + 回跳,按 :provider 路由。
+  // state = 短时 JWT{pln,nxt,non},起跳种 host-only nonce cookie、回跳比对(防 login CSRF + 带回跳路径)。
+  app.get('/auth/social/:provider', async (c) => {
+    const provider = c.req.param('provider');
+    const conf = cfg.socialProviders.find((p) => p.id === provider);
+    if (!conf) return c.json({ detail: '未启用该登录方式' }, 404);
+    const next = safeNext(c.req.query('next'));
+    const state = await stateEncode(cfg.secret, plane, next, setOauthNonce(c, cfg));
+    return c.redirect(
+      socialAuthorizeUrl(provider, conf.clientId, socialRedirectUri(c, cfg, provider), state),
+      302,
+    );
+  });
+
+  app.get('/auth/social/:provider/callback', async (c) => {
+    const provider = c.req.param('provider');
+    const conf = cfg.socialProviders.find((p) => p.id === provider);
+    if (!conf) return c.json({ detail: '未启用该登录方式' }, 404);
+    const code = c.req.query('code');
+    const state = c.req.query('state');
+    if (!code || !state) return c.json({ detail: '缺 code/state' }, 400);
+    const st = await stateDecode(cfg.secret, state);
+    if (!st || st.pln !== plane || !consumeOauthNonce(c, st.non)) {
+      return c.json({ detail: 'state 无效或过期，请重新登录' }, 400);
+    }
+    let id: { sub: string; name?: string; email?: string };
+    try {
+      id = await exchangeSocialCode(
+        provider,
+        conf.clientId,
+        conf.clientSecret,
+        code,
+        socialRedirectUri(c, cfg, provider),
+      );
+    } catch (e) {
+      if (e instanceof OidcError) return c.json({ detail: e.detail }, 502);
+      throw e;
+    }
+    // 复用 upsertOidcUser:sub 已带 provider 前缀(`google:…`/`github:…`),与 oidc_sub 唯一索引共用;
+    // email 仅 verified 才带(social.ts 已把关),不按 email 跨 provider 自动合并。
+    const user = await upsertOidcUser(deps, { sub: id.sub, name: id.name, email: id.email });
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     await setLoginCookies(c, cfg, plane, user.id, user.handle);
     return c.redirect(safeNext(typeof st.nxt === 'string' ? st.nxt : null), 302);
@@ -295,6 +380,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       mode: cfg.authMode,
       registration_mode: mode,
       allow_signup: mode === 'open', // 兼容旧字段
+      social_providers: cfg.socialProviders.map((p) => p.id), // console 据此渲染社交登录按钮
     });
   });
 
