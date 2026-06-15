@@ -31,6 +31,13 @@
 
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "pagepin" }],
 
+  // 双域 custom domains 绑同一 Worker(zone 须在本账号);custom_domain=true 自动建 DNS + 边缘证书。
+  // 按 Host 分流:pagepin.ai→控制台/API,pagepin.page→内容(见 app.ts 外层 host 路由)。
+  "routes": [
+    { "pattern": "pagepin.ai", "custom_domain": true },
+    { "pattern": "pagepin.page", "custom_domain": true }
+  ],
+
   // 明文配置(loadConfig 直接消费;config.ts 已是纯函数,Workers 传 env 即可)。
   "vars": {
     "PAGEPIN_BASE_URL": "https://pagepin.ai",
