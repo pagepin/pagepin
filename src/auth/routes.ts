@@ -15,6 +15,7 @@ import { Hono } from 'hono';
 import { sign, verify as jwtVerify } from 'hono/jwt';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
+import { escapeHtml, gateDoc, LOCK_SVG } from '../brand-gate.js';
 import type { Config } from '../config.js';
 import { invites, users, type UserRow } from '../db/index.js';
 import { effectiveRegistrationMode } from '../instance-settings.js';
@@ -96,44 +97,41 @@ async function readBody(c: Context): Promise<{ body: Record<string, string>; isJ
   return { body, isJson: false };
 }
 
-function escHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-/** 双域内容平面的 password 登录页:自包含、无外部资源(被托管站点域上不能引控制台资产)。 */
+/** 双域内容平面的 password 登录页:复用 brand-gate 品牌壳(与私有门页同一视觉),自包含、
+ * 无控制台资产依赖。提交走内联 fetch → JSON,失败行内报错(不再把 401 的 {detail} 甩成裸 JSON 页);
+ * 成功跳回 next。JS 不可用时 <form> 仍原生 POST 兜底(成功 302 回跳,失败退化为旧的 JSON 页)。 */
 function loginPage(next: string): string {
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>登录 - pagepin</title>
-<style>
-  body{font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f6f8;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-  form{background:#fff;padding:32px 36px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);width:320px}
-  h1{font-size:18px;margin:0 0 20px;color:#222}
-  label{display:block;font-size:13px;color:#555;margin-bottom:14px}
-  input{display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:8px 10px;border:1px solid #d0d4da;border-radius:6px;font-size:14px}
-  button{width:100%;padding:9px 0;border:0;border-radius:6px;background:#3b82f6;color:#fff;font-size:14px;cursor:pointer}
-  button:hover{background:#2f6fe0}
-  p.tip{font-size:12px;color:#999;margin:14px 0 0;text-align:center}
-</style>
-</head>
-<body>
-<form method="post" action="/auth/password">
-  <h1>登录后查看此页面</h1>
-  <input type="hidden" name="next" value="${escHtml(next)}">
-  <label>邮箱<input name="email" type="email" autocomplete="username" required></label>
-  <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
-  <button type="submit">登录</button>
-  <p class="tip">登录后自动跳回原页面</p>
+  return gateDoc(
+    'Sign in · pagepin',
+    `<div class="chip chip-teal">${LOCK_SVG}</div>
+<h1>Sign in to view</h1>
+<p class="body">Use the email your invite was sent to.</p>
+<form id="f" method="post" action="/auth/password">
+  <input type="hidden" name="next" value="${escapeHtml(next)}">
+  <label>Email<input name="email" type="email" autocomplete="username" required autofocus></label>
+  <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+  <div id="err" class="err" hidden></div>
+  <button type="submit" class="btn btn-primary">Sign in</button>
 </form>
-</body>
-</html>`;
+<div class="foot">Hosted on <span class="mono">pagepin</span></div>
+<script>
+(function(){
+  var f=document.getElementById('f'),err=document.getElementById('err'),btn=f.querySelector('button');
+  f.addEventListener('submit',function(e){
+    e.preventDefault();err.hidden=true;btn.disabled=true;btn.textContent='Signing in\\u2026';
+    var p={};new FormData(f).forEach(function(v,k){p[k]=v;});
+    fetch('/auth/password',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(p)})
+      .then(function(r){return r.json().catch(function(){return {};}).then(function(j){return {ok:r.ok,j:j};});})
+      .then(function(res){
+        if(res.ok){window.location.href=p.next||'/';return;}
+        err.textContent=(res.j&&res.j.detail)||'Sign-in failed';err.hidden=false;
+        btn.disabled=false;btn.textContent='Sign in';
+      })
+      .catch(function(){err.textContent='Network error, please retry';err.hidden=false;btn.disabled=false;btn.textContent='Sign in';});
+  });
+})();
+</script>`,
+  );
 }
 
 /** none 模式:upsert 开发用户(每次登录刷新 last_login_at)。 */

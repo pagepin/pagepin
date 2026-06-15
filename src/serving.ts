@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 import { extOf, relHref } from './autoindex.js';
+import { CLOCK_SVG, escapeHtml, FONTS, gateDoc, LOCK_SVG } from './brand-gate.js';
 import { COMMENTS_JS, MARKED_JS } from './generated/edge-assets.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
@@ -53,16 +54,6 @@ function staticAsset(js: string): StaticAsset {
 }
 const COMMENTS_ASSET = staticAsset(COMMENTS_JS);
 const MARKED_ASSET = staticAsset(MARKED_JS);
-
-/** html.escape(quote=True) 等价 */
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#x27;');
-}
 
 function injectTag(handle: string, slug: string, rel: string, versionId: string): string {
   const attrs = (
@@ -105,40 +96,7 @@ function injectScriptBytes(buf: Uint8Array, tag: string): Uint8Array<ArrayBuffer
 const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif']);
 const MD_EXTS = new Set(['.md', '.markdown']);
 
-// ---- 品牌字体 + 访问门页(登录墙 / 已过期 / 404),pagepin 品牌壳,无评论层 ----
-const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">`;
-
-/** 居中卡片 + 点阵底纹的品牌门页外壳。 */
-function gateDoc(title: string, inner: string): string {
-  return `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${FONTS}<title>${title}</title>
-<style>
-*{box-sizing:border-box}
-body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;
-  font-family:'Hanken Grotesk',system-ui,sans-serif;color:#11161b;background:#ECEEEF;
-  background-image:radial-gradient(rgba(15,124,114,.05) 1px,transparent 1px);background-size:22px 22px}
-.card{width:100%;max-width:380px;background:#fff;border:1px solid #e7e9eb;border-radius:16px;
-  padding:28px 30px;box-shadow:0 18px 44px -26px rgba(17,22,27,.3)}
-.chip{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;margin-bottom:18px}
-.chip-teal{background:#e6f4f2;color:#0b6358}.chip-amber{background:#fef6e7;color:#b06a08}
-h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em}
-.body{margin:8px 0 0;font-size:13.5px;line-height:1.6;color:#6b7480}
-.mono{font-family:'JetBrains Mono',monospace}.teal{color:#0f7c72}
-.btn{display:flex;align-items:center;justify-content:center;width:100%;margin-top:18px;padding:10px;
-  border-radius:9px;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer}
-.btn-primary{background:#0f7c72;color:#fff}.btn-primary:hover{background:#0b6358}
-.btn-ghost{background:#fff;border:1px solid #e1e4e6;color:#3a424b}.btn-ghost:hover{border-color:#0f7c72;color:#0f7c72}
-.row{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12.5px;color:#9aa1a9}
-.avatar{width:22px;height:22px;border-radius:999px;background:#0f7c72;color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700}
-.foot{margin-top:16px;font-size:11px;color:#c3c8cd}
-</style></head>
-<body><div class="card">${inner}</div></body></html>`;
-}
-
-const LOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
-const CLOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
+// ---- 访问门页(登录墙 / 已过期 / 404):品牌壳来自 brand-gate.ts,无评论层 ----
 
 /** 私有页登录墙:命名 slug + 站长 + 「Sign in to view」(→ /auth/login?next=)。 */
 function loginWallHtml(slug: string, ownerName: string, loginHref: string): string {
