@@ -23,8 +23,8 @@
     {
       "binding": "DB",
       "database_name": "pagepin",
-      // 占位 UUID(本地 wrangler dev 不校验远端);正式部署用 `wrangler d1 create pagepin` 的真值替换
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // 真值(`wrangler d1 create pagepin`,2026-06,账号 fivesmallq@gmail.com,region APAC)
+      "database_id": "764db0a3-c162-4956-8ffb-2c94eb8c9a50",
       "migrations_dir": "drizzle"
     }
   ],
