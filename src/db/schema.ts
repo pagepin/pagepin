@@ -65,6 +65,10 @@ export const sites = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     deletedAt: text('deleted_at'), // 软删后同名 slug 可复用(唯一索引只约束未删行)
+    // 管理员下架(可逆):非空 = serving 一律 451(对所有访问者,含站长/匿名公开),
+    // 重新部署也不解除 —— 与软删互不影响(软删进墓碑,下架仍可恢复)。滥用处置开关。
+    suspendedAt: text('suspended_at'),
+    suspendedReason: text('suspended_reason'),
   },
   (t) => [
     uniqueIndex('sites_handle_slug_uq').on(t.ownerHandle, t.slug).where(sql`deleted_at IS NULL`),

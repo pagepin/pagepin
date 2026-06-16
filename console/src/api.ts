@@ -1,6 +1,7 @@
 import type {
   AdminOverview,
   AdminSettings,
+  AdminSite,
   AdminUser,
   AuthConfig,
   CollectedFile,
@@ -228,6 +229,21 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ registration_mode: mode }),
     }),
+
+  // ---- admin: site moderation ----
+  adminSites: () => request<{ sites: AdminSite[] }>('/api/admin/sites'),
+
+  suspendSite: (id: string, reason?: string) =>
+    request<AdminSite>(`/api/admin/sites/${encodeURIComponent(id)}/suspend`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+
+  unsuspendSite: (id: string) =>
+    request<AdminSite>(`/api/admin/sites/${encodeURIComponent(id)}/unsuspend`, { method: 'POST' }),
+
+  adminDeleteSite: (id: string) =>
+    request<{ ok: true }>(`/api/admin/sites/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   listInvites: () => request<{ invites: Invite[] }>('/api/admin/invites'),
 

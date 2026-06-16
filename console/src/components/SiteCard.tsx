@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Ban,
   ChevronRight,
   Clock,
   Copy,
@@ -191,7 +192,15 @@ export function SiteCard({
             {site.unresolved_comments}
           </span>
         )}
-        {isPublicLive ? (
+        {site.suspended ? (
+          <span
+            title="Disabled by an administrator — returns 451 to everyone"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600 ring-1 ring-red-200"
+          >
+            <Ban className="h-3 w-3" />
+            Disabled
+          </span>
+        ) : isPublicLive ? (
           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-tide-50 px-2.5 py-1 text-xs font-semibold text-tide-700 ring-1 ring-tide-200">
             <Globe2 className="h-3 w-3" />
             Public · {remaining}
@@ -240,6 +249,18 @@ export function SiteCard({
 
       {!expanded ? null : (
         <div className="px-5 pb-5">
+          {site.suspended && (
+            <div className="mb-3 rounded-panel border border-red-200 bg-red-50 p-3 text-xs">
+              <div className="font-semibold text-red-700">
+                This page has been disabled by an administrator.
+              </div>
+              <div className="mt-0.5 leading-relaxed text-red-600">
+                It returns 451 to all visitors and redeploys won&rsquo;t restore it.
+                {site.suspended_reason ? ` Reason: ${site.suspended_reason}.` : ''} Contact the
+                instance operator to appeal.
+              </div>
+            </div>
+          )}
           {/* URL 行 */}
           <div className="flex items-center gap-1.5 rounded-field border border-ink-200 bg-ink-50 px-2.5 py-1.5">
             <a

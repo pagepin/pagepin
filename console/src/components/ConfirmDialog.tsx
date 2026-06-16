@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { create } from 'zustand';
 import { AlertTriangle } from 'lucide-react';
@@ -7,20 +7,22 @@ interface ConfirmRequest {
   title: string;
   body?: string;
   confirmText: string;
-  resolve: (ok: boolean) => void;
+  /** 设置时渲染一个单行输入（如下架原因）；其值随确认一起回传。 */
+  input?: { label?: string; placeholder?: string };
+  resolve: (r: { ok: boolean; value: string }) => void;
 }
 
 interface ConfirmState {
   req: ConfirmRequest | null;
   open: (r: ConfirmRequest) => void;
-  settle: (ok: boolean) => void;
+  settle: (ok: boolean, value?: string) => void;
 }
 
 const useConfirmStore = create<ConfirmState>((set, get) => ({
   req: null,
   open: (req) => set({ req }),
-  settle: (ok) => {
-    get().req?.resolve(ok);
+  settle: (ok, value = '') => {
+    get().req?.resolve({ ok, value });
     set({ req: null });
   },
 }));
@@ -37,7 +39,26 @@ export function confirmDanger(opts: {
       title: opts.title,
       body: opts.body,
       confirmText: opts.confirmText ?? 'Confirm',
-      resolve,
+      resolve: (r) => resolve(r.ok),
+    });
+  });
+}
+
+/** 同 confirmDanger，但带一个可选的单行输入（如下架原因）；返回 { ok, reason }。 */
+export function confirmWithReason(opts: {
+  title: string;
+  body?: string;
+  confirmText?: string;
+  label?: string;
+  placeholder?: string;
+}): Promise<{ ok: boolean; reason: string }> {
+  return new Promise((resolve) => {
+    useConfirmStore.getState().open({
+      title: opts.title,
+      body: opts.body,
+      confirmText: opts.confirmText ?? 'Confirm',
+      input: { label: opts.label, placeholder: opts.placeholder },
+      resolve: (r) => resolve({ ok: r.ok, reason: r.value.trim() }),
     });
   });
 }
@@ -46,8 +67,10 @@ export function confirmDanger(opts: {
 export function Confirmer() {
   const req = useConfirmStore((s) => s.req);
   const settle = useConfirmStore((s) => s.settle);
+  const [value, setValue] = useState('');
 
   useEffect(() => {
+    setValue(''); // 每次打开重置输入
     if (!req) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && settle(false);
     window.addEventListener('keydown', onKey);
@@ -74,6 +97,24 @@ export function Confirmer() {
             {req.body && <p className="mt-1 text-xs leading-relaxed text-ink-500">{req.body}</p>}
           </div>
         </div>
+        {req.input && (
+          <div className="mt-3">
+            {req.input.label && (
+              <label className="mb-1 block text-xs font-medium text-ink-500">
+                {req.input.label}
+              </label>
+            )}
+            <input
+              type="text"
+              autoFocus
+              value={value}
+              placeholder={req.input.placeholder}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && settle(true, value)}
+              className="input !text-xs"
+            />
+          </div>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
@@ -84,9 +125,9 @@ export function Confirmer() {
           </button>
           <button
             type="button"
-            autoFocus
+            autoFocus={!req.input}
             className="rounded-field bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
-            onClick={() => settle(true)}
+            onClick={() => settle(true, value)}
           >
             {req.confirmText}
           </button>

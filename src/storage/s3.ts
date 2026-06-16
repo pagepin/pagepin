@@ -1,5 +1,9 @@
 /** S3 兼容驱动(SigV4 自实现,WebCrypto,edge-safe)—— R2 / MinIO / OSS / S3 通吃。
  * 不引 AWS SDK:本驱动只需要 PUT/GET/HEAD/COPY 四个动作,签名 ~100 行。
+ *
+ * 注:不实现可选的 list/deletePrefix(需 ListObjectsV2 + DeleteObjects 的 XML 解析)。
+ * 故站点删除/下架时存储回收对 BYO-S3 跳过(purgeSiteStorage 尽力而为);官方服务走 R2 驱动可回收,
+ * 自托管走 fs 驱动也可回收。S3 自托管者可用桶生命周期规则清理 sites/ 前缀。
  */
 
 import { NotFoundError, NotModifiedError, type ObjectMeta, type Storage } from './index.js';

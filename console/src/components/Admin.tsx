@@ -1,23 +1,30 @@
 import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
+  Ban,
   Check,
   Copy,
   Database,
+  ExternalLink,
+  Globe2,
   HardDrive,
   Loader2,
+  Lock,
   Mail,
   Plus,
+  RotateCcw,
   Shield,
+  Trash2,
   Users as UsersIcon,
 } from 'lucide-react';
 import { api } from '../api';
-import { confirmDanger } from './ConfirmDialog';
+import { confirmDanger, confirmWithReason } from './ConfirmDialog';
 import { copyText, formatBytes, formatRelative } from '../lib/format';
 import { useStore } from '../store';
 import type {
   AdminOverview,
   AdminSettings,
+  AdminSite,
   AdminUser,
   Invite,
   InviteCreated,
@@ -101,6 +108,8 @@ export function Admin() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [sites, setSites] = useState<AdminSite[] | null>(null);
+  const [busySite, setBusySite] = useState<string | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteAdmin, setInviteAdmin] = useState(false);
@@ -113,6 +122,7 @@ export function Admin() {
     api.adminOverview().then(setOverview).catch((e) => toastError(e, 'Failed to load overview'));
     api.adminSettings().then(setSettings).catch((e) => toastError(e, 'Failed to load settings'));
     api.adminUsers().then((r) => setUsers(r.users)).catch((e) => toastError(e, 'Failed to load users'));
+    api.adminSites().then((r) => setSites(r.sites)).catch((e) => toastError(e, 'Failed to load sites'));
     api.listInvites().then((r) => setInvites(r.invites)).catch(() => {});
   }, []);
 
@@ -189,6 +199,59 @@ export function Admin() {
       if (!ok) return;
     }
     patchUser(u, { disabled: !u.disabled }, u.disabled ? 'User re-enabled' : 'User disabled');
+  };
+
+  const replaceSite = (u: AdminSite) =>
+    setSites((prev) => (prev ?? []).map((x) => (x.id === u.id ? u : x)));
+
+  const suspendSite = async (s: AdminSite) => {
+    const { ok, reason } = await confirmWithReason({
+      title: `Disable “${s.slug}”?`,
+      body: "The page returns 451 to everyone immediately — owner, public links, all of it. Redeploys won't bring it back; you can re-enable it here anytime.",
+      confirmText: 'Disable page',
+      label: 'Reason (optional — shown to the owner)',
+      placeholder: 'e.g. phishing page reported via abuse@',
+    });
+    if (!ok) return;
+    setBusySite(s.id);
+    api
+      .suspendSite(s.id, reason || undefined)
+      .then((u) => {
+        replaceSite(u);
+        toast('Page disabled');
+      })
+      .catch((e) => toastError(e, 'Could not disable'))
+      .finally(() => setBusySite(null));
+  };
+
+  const unsuspendSite = (s: AdminSite) => {
+    setBusySite(s.id);
+    api
+      .unsuspendSite(s.id)
+      .then((u) => {
+        replaceSite(u);
+        toast('Page re-enabled');
+      })
+      .catch((e) => toastError(e, 'Could not re-enable'))
+      .finally(() => setBusySite(null));
+  };
+
+  const deleteSiteAdmin = async (s: AdminSite) => {
+    const ok = await confirmDanger({
+      title: `Delete “${s.slug}” (@${s.owner_handle})?`,
+      body: 'Removes the site and purges its stored files. The owner loses it and the link dies. This cannot be undone.',
+      confirmText: 'Delete site',
+    });
+    if (!ok) return;
+    setBusySite(s.id);
+    api
+      .adminDeleteSite(s.id)
+      .then(() => {
+        setSites((prev) => (prev ?? []).filter((x) => x.id !== s.id));
+        toast('Site deleted');
+      })
+      .catch((e) => toastError(e, 'Delete failed'))
+      .finally(() => setBusySite(null));
   };
 
   return (
@@ -473,6 +536,98 @@ export function Admin() {
                       onClick={() => void toggleDisabled(u)}
                     >
                       {u.disabled ? 'Enable' : 'Disable'}
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+
+        {/* Sites — moderation */}
+        <Card>
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm font-bold text-ink-800">Sites</h2>
+            <span className="text-xs text-ink-400">{sites ? `${sites.length} total` : ''}</span>
+          </div>
+          <p className="mt-1 text-xs text-ink-400">
+            Disable a page to make it return 451 to everyone (reversible). Delete also purges its
+            stored files.
+          </p>
+          <div className="mt-3 divide-y divide-ink-100 border-t border-ink-100">
+            {sites === null ? (
+              <div className="flex items-center gap-2 py-4 text-xs text-ink-400">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+              </div>
+            ) : sites.length === 0 ? (
+              <div className="py-4 text-xs text-ink-400">No sites yet.</div>
+            ) : (
+              sites.map((s) => (
+                <div key={s.id} className="flex flex-wrap items-center gap-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`truncate font-mono text-sm font-semibold ${s.suspended ? 'text-ink-400 line-through' : 'text-ink-700'}`}
+                      >
+                        {s.slug}
+                      </span>
+                      {s.suspended ? (
+                        <span className="rounded-chip border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">
+                          disabled
+                        </span>
+                      ) : s.visibility === 'public' ? (
+                        <span className="inline-flex items-center gap-1 rounded-chip border border-tide-200 bg-tide-50 px-2 py-0.5 text-xs font-medium text-tide-700">
+                          <Globe2 className="h-3 w-3" /> public
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-chip border border-ink-200 bg-ink-100 px-2 py-0.5 text-xs font-medium text-ink-500">
+                          <Lock className="h-3 w-3" /> private
+                        </span>
+                      )}
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open page"
+                        className="text-ink-300 hover:text-tide-700"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    </div>
+                    <div className="truncate text-xs text-ink-400">
+                      @{s.owner_handle} · {s.file_count} {s.file_count === 1 ? 'file' : 'files'} ·{' '}
+                      {formatBytes(s.total_bytes)} · updated {formatRelative(s.updated_at)}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {busySite === s.id && <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-400" />}
+                    {s.suspended ? (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-chip px-2 py-1 text-xs text-tide-600 hover:bg-tide-50 disabled:opacity-40"
+                        disabled={busySite === s.id}
+                        onClick={() => unsuspendSite(s)}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" /> Re-enable
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-chip px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-40"
+                        disabled={busySite === s.id}
+                        onClick={() => void suspendSite(s)}
+                      >
+                        <Ban className="h-3.5 w-3.5" /> Disable
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-chip px-2 py-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                      disabled={busySite === s.id}
+                      onClick={() => void deleteSiteAdmin(s)}
+                      title="Delete site & purge files"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>
