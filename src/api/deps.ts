@@ -49,6 +49,9 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
       .where(and(eq(apiTokens.tokenHash, h), isNull(apiTokens.revokedAt)))
       .get();
     if (!rec) return c.json({ detail: 'token 无效或已吊销' }, 401);
+    if (rec.expiresAt && Date.parse(rec.expiresAt) <= Date.now()) {
+      return c.json({ detail: 'token 已过期，请重新登录获取' }, 401);
+    }
     const user = await db.select().from(users).where(eq(users.id, rec.userId)).get();
     if (!user) return c.json({ detail: 'token 对应用户不存在' }, 401);
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);

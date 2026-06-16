@@ -9,7 +9,7 @@ import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Context, MiddlewareHandler } from 'hono';
 
-import { apiTokens, type ApiTokenRow, type UserRow } from '../db/index.js';
+import { apiTokens, type ApiTokenRow, type Db, type UserRow } from '../db/index.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso, uuid } from '../util.js';
 
@@ -35,6 +35,32 @@ async function sha256Hex(s: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** 铸一个新 PAT 并落库,返回完整记录(含一次性明文 .token)。
+ * POST /api/tokens 与设备授权(api/device.ts)共用,保证认证路径完全一致。
+ * expiresAt:ISO 字符串则到期即拒;null(默认)= 不过期(普通 PAT)。 */
+export async function mintToken(
+  db: Db,
+  userId: string,
+  name: string,
+  expiresAt: string | null = null,
+): Promise<ApiTokenRow> {
+  const raw = newRawToken();
+  const rec: ApiTokenRow = {
+    id: uuid(),
+    userId,
+    name,
+    token: raw,
+    tokenHash: await sha256Hex(raw),
+    prefix: raw.slice(0, 15),
+    createdAt: nowIso(),
+    lastUsedAt: null,
+    expiresAt,
+    revokedAt: null,
+  };
+  await db.insert(apiTokens).values(rec).run();
+  return rec;
+}
+
 function out(t: ApiTokenRow) {
   return {
     id: t.id,
@@ -43,6 +69,7 @@ function out(t: ApiTokenRow) {
     prefix: t.prefix,
     created_at: t.createdAt,
     last_used_at: t.lastUsedAt,
+    expires_at: t.expiresAt, // null = 不过期;设备授权铸的 token 有到期时间
   };
 }
 
@@ -93,19 +120,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       return c.json({ detail: `token 数量已达上限（${MAX_TOKENS_PER_USER}），请先吊销不用的` }, 409);
     }
 
-    const raw = newRawToken();
-    const rec: ApiTokenRow = {
-      id: uuid(),
-      userId: user.id,
-      name,
-      token: raw,
-      tokenHash: await sha256Hex(raw),
-      prefix: raw.slice(0, 15),
-      createdAt: nowIso(),
-      lastUsedAt: null,
-      revokedAt: null,
-    };
-    await db.insert(apiTokens).values(rec).run();
+    const rec = await mintToken(db, user.id, name);
     console.log(`token created handle=${user.handle} name=${name} prefix=${rec.prefix}`);
     return c.json(out(rec));
   });

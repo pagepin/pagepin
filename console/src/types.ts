@@ -83,6 +83,8 @@ export interface TokenItem {
   prefix: string;
   created_at: string;
   last_used_at: string | null;
+  /** 非空 = 到期时间(设备登录铸的 token 有);null = 不过期 */
+  expires_at: string | null;
 }
 
 export interface AdminUser {

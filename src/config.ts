@@ -54,6 +54,8 @@ export interface Config {
   maxSiteMb: number;
   maxFiles: number;
   publicMaxHours: number;
+  /** 设备授权(/api/device)铸出的 token 的有效期(天);0 = 不过期。普通 PAT 不受此限。 */
+  deviceTokenTtlDays: number;
   secureCookies: boolean;
 }
 
@@ -198,6 +200,7 @@ export function loadConfig(env: Env): Config {
     maxSiteMb: num(env, 'PAGEPIN_MAX_SITE_MB', 200),
     maxFiles: num(env, 'PAGEPIN_MAX_FILES', 2000),
     publicMaxHours: num(env, 'PAGEPIN_PUBLIC_MAX_HOURS', 168),
+    deviceTokenTtlDays: num(env, 'PAGEPIN_DEVICE_TOKEN_TTL_DAYS', 90),
     secureCookies:
       mode === 'dual' ? externalScheme === 'https' : baseUrl.startsWith('https://'),
   };

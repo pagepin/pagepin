@@ -182,6 +182,19 @@ export const api = {
   revokeToken: (id: string) =>
     request<{ ok: true }>(`/api/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  // ---- device authorization (OAuth2 device grant) ----
+  approveDevice: (userCode: string) =>
+    request<{ ok: boolean; token_name?: string }>('/api/device/approve', {
+      method: 'POST',
+      body: JSON.stringify({ user_code: userCode }),
+    }),
+
+  denyDevice: (userCode: string) =>
+    request<{ ok: boolean }>('/api/device/deny', {
+      method: 'POST',
+      body: JSON.stringify({ user_code: userCode }),
+    }),
+
   // ---- account ----
   updateProfile: (displayName: string | null) =>
     request<{ display_name: string | null }>('/api/me', {
