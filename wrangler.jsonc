@@ -8,9 +8,13 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
 
-  // 可观测性:开 Workers Logs(dashboard 可查结构化日志/console;Free 留存 3 天、20 万 logs/天)。
-  // 小流量保持 100% 采样;噪声大了再加 "logs": { "invocation_logs": false }。
-  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  // 可观测性:Workers Logs + 自动 Traces(链路追踪),均 100% 采样(小流量)。
+  // dashboard 可查结构化日志/console + 每请求 trace;两者共用事件配额(Paid 含 1000 万/月)。
+  // 注:traces 自 2026-03 起随 Workers 用量计费;量大了把对应 head_sampling_rate 调低。
+  "observability": {
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 1 }
+  },
   // 部署时上传 source map —— 生产错误栈显示原始 TS(serving-inject/host 路由)而非压缩偏移。
   "upload_source_maps": true,
 
