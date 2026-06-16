@@ -7,13 +7,34 @@ pagepin 是静态页面托管服务。部署后得到 `{{CONTENT_BASE}}/<handle>
 
 ## 认证
 
-所有请求带 PAT(让用户在 {{CONSOLE_BASE}} 控制台「API Token」里创建后给你):
+每个请求带 PAT。从 `$PAGEPIN_TOKEN` 或文件 `~/.config/pagepin/token` 取 —— **不要在对话里内联明文,也不要回显它。** 先导出一次,后面的调用都用 `"$PP_TOKEN"`:
+
+```bash
+PP_TOKEN=${PAGEPIN_TOKEN:-$(cat ~/.config/pagepin/token 2>/dev/null)}
+```
 
 ```
-Authorization: Bearer pp_xxxxxxxxxxxx...
+Authorization: Bearer $PP_TOKEN
 ```
 
-验证 token / 查询自己的 handle 与配额:`GET {{CONSOLE_BASE}}/api/me`
+两处都没有 token 时,走下面的「首次登录」拿一个 —— **不要**让用户把 token 贴进来。验证 token / 查询自己的 handle 与配额:`GET {{CONSOLE_BASE}}/api/me`。
+
+## 首次登录(还没有 token)
+
+通过浏览器登录拿 token,而不是粘贴(OAuth 2.0 设备流程):
+
+1. `POST {{CONSOLE_BASE}}/api/device/code` → 返回 `user_code`、`verification_uri_complete`、`device_code`、`interval`、`expires_in`。
+2. 告诉用户:打开 `verification_uri_complete`,确认页面上的 `user_code` 与工具显示的一致。
+3. 按 `interval` 秒轮询 `POST {{CONSOLE_BASE}}/api/device/token`,body `{"device_code":"..."}`。每次返回 `{"status":"pending"}`(继续轮询)、`{"status":"denied"}` 或 `{"status":"expired"}`(停止),或 `{"status":"approved","token":"pp_..."}`。
+4. 批准后保存 token,绝不回显到对话。**个人机**上落盘持久化,下次免再登录:
+
+```bash
+mkdir -p ~/.config/pagepin && printf '%s' "$TOKEN" > ~/.config/pagepin/token && chmod 600 ~/.config/pagepin/token
+```
+
+**临时 / 共享环境**(CI、sandbox、不属于你的机器)**不要落盘** —— 只在本次会话用(`export PAGEPIN_TOKEN="$TOKEN"`),下次重新走一遍。
+
+设备登录铸的 token 会过期(默认 90 天),也可随时在控制台吊销。
 
 ## 部署 / 更新(同一个接口:每次调用 = 原子发布一个新版本)
 
