@@ -18,6 +18,7 @@ import { createMiddleware } from 'hono/factory';
 
 import { makeAdminRoutes } from './api/admin.js';
 import { makeAuthMiddleware } from './api/deps.js';
+import { makeDeviceRoutes } from './api/device.js';
 import { makeMeRoutes } from './api/me.js';
 import { makeSiteRoutes } from './api/sites.js';
 import { makeTokenRoutes } from './api/tokens.js';
@@ -108,6 +109,7 @@ async function mountConsolePlane(
   app.route('/', makeMeRoutes(deps, mw));
   app.route('/', makeSiteRoutes(deps, mw));
   app.route('/', makeTokenRoutes(deps, mw));
+  app.route('/', makeDeviceRoutes(deps, mw)); // OAuth2 设备授权(/api/device/*):AI/CLI 经浏览器登录换 token
   app.route('/', makeAdminRoutes(deps, mw));
   if (opts.skillMd) mountSkillMd(app, deps, opts.skillMd);
 }

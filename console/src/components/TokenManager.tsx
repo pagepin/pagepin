@@ -6,9 +6,11 @@ import { copyText, formatRelative } from '../lib/format';
 import type { TokenItem } from '../types';
 import { toast, toastError } from './Toast';
 
-/** A ready-to-paste, one-line instruction for an agent (skill.md link + plaintext token). */
-function aiPrompt(token: string): string {
-  return `Read ${location.origin}/skill.md and follow it to deploy/update pages with the pagepin API. My token: ${token}`;
+/** A ready-to-paste, one-line instruction for an agent.
+ * Deliberately TOKEN-FREE: the agent gets the token from $PAGEPIN_TOKEN / ~/.config/pagepin/token,
+ * or via browser device-login (see skill.md) — so the secret never lands in a chat transcript. */
+function aiPrompt(): string {
+  return `Read ${location.origin}/skill.md and follow it to deploy/update pages with pagepin.`;
 }
 
 /** API token 列表 + 创建 + 复制/轮换/吊销 —— 不带任何外框，供 TokenDialog 与 Settings 复用。 */
@@ -91,11 +93,12 @@ export function TokenManager() {
       <p className="text-xs leading-relaxed text-ink-400">
         Deploy credentials for agents &amp; CI, scoped to your sites. The{' '}
         <Sparkles className="inline h-3 w-3 -translate-y-px text-tide-500" /> button copies a
-        ready-to-paste prompt with the{' '}
+        ready-to-paste prompt linking the{' '}
         <a href="/skill.md" target="_blank" rel="noreferrer" className="text-tide-600 underline">
           skill guide
-        </a>{' '}
-        link and the token.
+        </a>
+        . The token stays out of it — the agent reads it from a local file or via browser login, so it
+        never lands in a chat.
       </p>
 
       <div className="mt-4 flex gap-2">
@@ -132,23 +135,24 @@ export function TokenManager() {
                 </div>
                 <div className="text-xs text-ink-300">
                   {t.last_used_at ? `Last used ${formatRelative(t.last_used_at)}` : 'Never used'}
+                  {t.expires_at ? ` · expires ${new Date(t.expires_at).toLocaleDateString()}` : ''}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  title="Copy AI-ready prompt (token-free)"
+                  className="rounded-chip p-2 text-tide-500 hover:bg-tide-50 hover:text-tide-700"
+                  onClick={() => copy(aiPrompt(), `${t.id}:prompt`)}
+                >
+                  {copied === `${t.id}:prompt` ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                </button>
                 {t.token && (
                   <>
-                    <button
-                      type="button"
-                      title="Copy AI-ready prompt"
-                      className="rounded-chip p-2 text-tide-500 hover:bg-tide-50 hover:text-tide-700"
-                      onClick={() => copy(aiPrompt(t.token!), `${t.id}:prompt`)}
-                    >
-                      {copied === `${t.id}:prompt` ? (
-                        <Check className="h-3.5 w-3.5" />
-                      ) : (
-                        <Sparkles className="h-3.5 w-3.5" />
-                      )}
-                    </button>
                     <button
                       type="button"
                       title="Copy token"

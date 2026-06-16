@@ -7,13 +7,34 @@ pagepin is a static-page hosting service. After a deploy you get `{{CONTENT_BASE
 
 ## Authentication
 
-Every request carries a PAT (have the user create one under "API Token" in the {{CONSOLE_BASE}} console, then give it to you):
+Every request carries a PAT. Read it from `$PAGEPIN_TOKEN`, or the file `~/.config/pagepin/token` — **never accept the token inline in chat and never print it.** Export it once and use `"$PP_TOKEN"` in the calls below:
+
+```bash
+PP_TOKEN=${PAGEPIN_TOKEN:-$(cat ~/.config/pagepin/token 2>/dev/null)}
+```
 
 ```
-Authorization: Bearer pp_xxxxxxxxxxxx...
+Authorization: Bearer $PP_TOKEN
 ```
 
-Verify a token / look up your own handle and quota: `GET {{CONSOLE_BASE}}/api/me`
+If neither source has a token, get one via "First-time login" below — do **not** ask the user to paste a token. Verify the token / look up your handle and quota: `GET {{CONSOLE_BASE}}/api/me`.
+
+## First-time login (no token yet)
+
+Get a token through the browser instead of pasting one (OAuth 2.0 device flow):
+
+1. `POST {{CONSOLE_BASE}}/api/device/code` → returns `user_code`, `verification_uri_complete`, `device_code`, `interval`, `expires_in`.
+2. Tell the user: open `verification_uri_complete` and confirm the `user_code` matches.
+3. Poll `POST {{CONSOLE_BASE}}/api/device/token` with `{"device_code":"..."}` every `interval` seconds. Each response is `{"status":"pending"}` (keep polling), `{"status":"denied"}` or `{"status":"expired"}` (stop), or `{"status":"approved","token":"pp_..."}`.
+4. On approval, store the token — never echo it to the chat. On a personal machine, persist it so you stay logged in next time:
+
+```bash
+mkdir -p ~/.config/pagepin && printf '%s' "$TOKEN" > ~/.config/pagepin/token && chmod 600 ~/.config/pagepin/token
+```
+
+In an **ephemeral or shared environment** (CI, sandbox, a machine that isn't yours), do **not** write the file — keep the token only for this session (`export PAGEPIN_TOKEN="$TOKEN"`) and re-run this flow next time.
+
+Device-login tokens expire (default 90 days) and can be revoked anytime in the console.
 
 ## Deploy / update (one endpoint; each call = one atomic new version)
 

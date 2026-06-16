@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useStore } from './store';
 import { AcceptInvite } from './components/AcceptInvite';
+import { Activate } from './components/Activate';
 import { Admin } from './components/Admin';
 import { Confirmer } from './components/ConfirmDialog';
 import { DropZone } from './components/DropZone';
@@ -58,6 +59,16 @@ export default function App() {
           </button>
         </div>
       </div>
+    );
+  }
+
+  // 设备授权确认（/activate）：登录态已确立即可批准,不强制先设 handle（铸 token 不依赖 handle）。
+  if (path === '/activate') {
+    return (
+      <>
+        <Activate />
+        <Toaster />
+      </>
     );
   }
 

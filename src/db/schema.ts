@@ -1,8 +1,9 @@
 /** Drizzle SQLite schema —— 内嵌列表落 JSON 文本列。
  *
- * 发布原子性:better-sqlite3 事务里 push 新 version + 切 current_version_id,
+ * 发布原子性:事务里 push 新 version + 切 current_version_id,
  * 重发布不露半成品、回滚 = current_version_id 指回旧 version(与 Mongo 单文档更新同语义)。
- * ★ 改表结构必须同步 ddl.ts(启动建表的唯一事实源)。
+ * ★ 改表结构后跑 `pnpm drizzle-kit generate` 生成迁移;libSQL 启动自动应用(见 db/libsql.ts),
+ *   D1 用 `wrangler d1 migrations apply pagepin --remote`(见 package.json 的 cf:deploy)。
  */
 
 import { sql } from 'drizzle-orm';
@@ -110,6 +111,7 @@ export const apiTokens = sqliteTable(
     prefix: text('prefix').notNull(), // 明文前 15 位(pp_ + 12 hex),日志审计用
     createdAt: text('created_at').notNull(),
     lastUsedAt: text('last_used_at'),
+    expiresAt: text('expires_at'), // 非空 = 到期即拒(设备授权铸的 token 用;普通 PAT 为 null = 不过期)
     revokedAt: text('revoked_at'), // 软吊销;命中即拒
   },
   (t) => [
@@ -141,11 +143,38 @@ export const instanceSettings = sqliteTable('instance_settings', {
   value: text('value').notNull(),
 });
 
+/** 设备授权(OAuth2 Device Authorization Grant, RFC 8628)—— AI/CLI 经浏览器登录换 token,免在对话里贴明文。
+ *
+ * deviceCode:高熵密钥,只 /api/device/code 返给发起方,/api/device/token 凭它轮询。
+ * userCode:短码,展示给人在 /activate 里确认(浏览器复用控制台会话授权)。
+ * token:批准时铸的明文 PAT(同时落 api_tokens 真凭证),仅经 /api/device/token 取走一次后即删行。
+ * 浏览器侧永远拿不到明文 token —— 它只走「发起方轮询」这条路。 */
+export const deviceAuths = sqliteTable(
+  'device_auths',
+  {
+    id: text('id').primaryKey(),
+    deviceCode: text('device_code').notNull(), // 发起方密钥(轮询用)
+    userCode: text('user_code').notNull(), // 展示给人确认的短码
+    status: text('status').notNull().default('pending'), // pending | approved | denied
+    userId: text('user_id'), // 批准后绑定的用户
+    token: text('token'), // 批准时铸的明文 PAT;取走一次后置空/删行
+    tokenName: text('token_name'), // 铸出 token 的名字(便于在 token 列表里识别)
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at').notNull(), // ISO;过期即作废
+    approvedAt: text('approved_at'),
+  },
+  (t) => [
+    uniqueIndex('device_code_uq').on(t.deviceCode),
+    index('device_user_code_idx').on(t.userCode),
+  ],
+);
+
 export type UserRow = typeof users.$inferSelect;
 export type SiteRow = typeof sites.$inferSelect;
 export type CommentThreadRow = typeof commentThreads.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
+export type DeviceAuthRow = typeof deviceAuths.$inferSelect;
 
 /** site.versions 里找当前版本(对应 Site.current_version())。 */
 export function currentVersion(site: SiteRow): SiteVersion | null {
