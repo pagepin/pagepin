@@ -1,0 +1,5 @@
+---
+category: E · Tideline (mobile)
+---
+
+Redesign E — the phone / narrow form factor none of the desktop concepts cover. A Maps-style draggable BOTTOM SHEET docks the ~5 review threads to the bottom edge (detents: PEEK to glance, HALF to read, FULL for the list) while the hosted page renders untouched at its true mobile width above it — the same no-reflow fidelity guarantee as desktop v2, moved to the bottom edge where a phone has room. Creation is an always-visible "+ Note" bubble in the right thumb corner; tapping it lights up the commentable elements (no hover on a phone) and a coarse tap snaps to the nearest anchor, never a silent whole-page note. Tapping a pin or a list row flies the page so the element parks in the live clear zone above the sheet with a glow-ring; resolve is the explicit Check (+ undo). Shown inside a phone device frame; on a ≥768px device with a pointer it converges to the desktop drawer. Chosen by a diverge→judge→critique workflow (92/100) and hardened against 20 adversarial first-timer / thumb-physics / fidelity findings.

@@ -1,0 +1,14 @@
+{
+  "name": "pagepin-comments",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Comment-overlay design bundle: current overlay baseline + interaction redesign concepts. Not part of the app.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "esbuild": "^0.24.2"
+  }
+}

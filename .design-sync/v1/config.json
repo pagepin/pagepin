@@ -1,0 +1,11 @@
+{
+  "projectId": "29bfd5ab-5744-4ab5-b994-66fdb5914495",
+  "pkg": "pagepin-console-v1",
+  "globalName": "Pagepin",
+  "shape": "package",
+  "entry": ".design-sync/v1/dist/index.js",
+  "cssEntry": "dist/_ds_bundle.css",
+  "runtimeFontPrefixes": ["Hanken Grotesk", "JetBrains Mono"],
+  "docsDir": "groups",
+  "readmeHeader": "conventions.md"
+}

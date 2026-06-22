@@ -1,0 +1,11 @@
+{
+  "projectId": "3bdd6e2c-299f-46ba-9365-cce98727ae7c",
+  "pkg": "pagepin-comments",
+  "globalName": "PagepinComments",
+  "shape": "package",
+  "entry": ".design-sync/comments/dist/index.js",
+  "cssEntry": "dist/_ds_bundle.css",
+  "runtimeFontPrefixes": ["Hanken Grotesk", "JetBrains Mono"],
+  "docsDir": "groups",
+  "readmeHeader": "conventions.md"
+}

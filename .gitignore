@@ -27,3 +27,16 @@ e2e/.playwright/
 .idea/
 .vscode/
 .DS_Store
+.ds-sync/
+ds-bundle/
+ds-bundle-v1/
+ds-bundle-comments/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+.design-sync/v1/node_modules/
+.design-sync/v1/dist/
+.design-sync/comments/node_modules/
+.design-sync/comments/dist/
+.design-sync/comments/.specs.json
+.design-sync/comments/src/comments-source.generated.js

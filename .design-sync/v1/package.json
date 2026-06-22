@@ -1,0 +1,14 @@
+{
+  "name": "pagepin-console-v1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Build tooling + dist entry for the pagepin design-sync v1 bundle (prebundle of the real console screens). Not part of the app.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "esbuild": "^0.24.2"
+  }
+}
