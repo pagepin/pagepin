@@ -23,6 +23,7 @@ import {
   type ThreadComment,
   type UserRow,
 } from '../db/index.js';
+import { purgeSiteStorage } from '../storage/index.js';
 import { guessContentType } from '../storage/mime.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { normalizeSitePath, nowIso, uuid, validSlug } from '../util.js';
@@ -39,12 +40,26 @@ function siteOut(deps: AppDeps, site: SiteRow, unresolved: number) {
     spa_fallback: site.spaFallback,
     comments_enabled: site.commentsEnabled,
     unresolved_comments: unresolved,
+    // 管理员下架状态(站长在控制台看到「Suspended」徽标 + 原因,理解为何 451)
+    suspended: site.suspendedAt !== null,
+    suspended_reason: site.suspendedReason,
     file_count: cur ? cur.file_count : 0,
     total_bytes: cur ? cur.total_bytes : 0,
     version_count: site.versions.length,
     created_at: site.createdAt,
     updated_at: site.updatedAt,
   };
+}
+
+/** 客户端 IP(审计用):Cloudflare 必带 cf-connecting-ip;自托管经反代取 x-forwarded-for 首跳;
+ * 裸 Node 无反代则取不到(记 '-')。纯 header 读取,edge-safe。 */
+function clientIp(c: Context<AppEnv>): string {
+  return (
+    c.req.header('cf-connecting-ip') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    c.req.header('x-real-ip') ||
+    '-'
+  );
 }
 
 async function unresolvedCount(db: Db, siteId: string): Promise<number> {
@@ -199,6 +214,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         createdAt: created,
         updatedAt: created,
         deletedAt: null,
+        suspendedAt: null,
+        suspendedReason: null,
       };
       await db.insert(sites).values(site).run();
     }
@@ -290,8 +307,11 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         .get();
       if (wrote) break;
     }
+    // 部署审计线(→ stdout / Workers Logs):谁、从哪、用什么凭证上传了什么。
+    // 配合执法/滥用追溯与日志留存;ua 用 JSON 包裹避免空格破坏日志切分。
     console.log(
-      `deploy handle=${handle} slug=${slug} vid=${vid} files=${files.length} bytes=${total}`,
+      `deploy handle=${handle} slug=${slug} vid=${vid} files=${files.length} bytes=${total} ` +
+        `user=${user.id} via=${c.get('authVia')} ip=${clientIp(c)} ua=${JSON.stringify(c.req.header('user-agent') ?? '-')}`,
     );
     const updated = await ownedSite(db, user.id, slug);
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
@@ -357,6 +377,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     const now = nowIso();
     await db.update(sites).set({ deletedAt: now, updatedAt: now }).where(eq(sites.id, site.id)).run();
+    // 软删后回收存储(尽力而为;同名 slug 复用是新建,不与已删行的 storage 冲突)
+    await purgeSiteStorage(storage, site.ownerId, site.slug);
     return c.json({ ok: true });
   });
 

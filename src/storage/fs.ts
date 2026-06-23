@@ -1,7 +1,7 @@
 /** 本地文件系统驱动(Node only)—— 自托管默认存储,`docker run -v data:/data` 即跑。 */
 
 import { createReadStream, createWriteStream } from 'node:fs';
-import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -56,6 +56,11 @@ export class FsStorage implements Storage {
     } catch {
       return false;
     }
+  }
+
+  async deletePrefix(prefix: string): Promise<void> {
+    // fileFor 已做穿越/越界防御;recursive+force 下目录不存在不报错。
+    await rm(this.fileFor(prefix), { recursive: true, force: true });
   }
 
   async list(prefix: string): Promise<string[]> {

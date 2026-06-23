@@ -60,6 +60,19 @@ export class R2Storage implements Storage {
     return out.sort();
   }
 
+  /** 删除前缀下全部对象(站点删除/下架回收)。分页列举,每批 ≤1000 一次性 delete;
+   * 不设 list 的 2000 封顶 —— 回收要清干净,翻到没有 cursor 为止。 */
+  async deletePrefix(prefix: string): Promise<void> {
+    const full = this.k(prefix);
+    let cursor: string | undefined;
+    do {
+      const res = await this.bucket.list({ prefix: full, cursor, limit: 1000 });
+      const keys = res.objects.map((o) => o.key);
+      if (keys.length) await this.bucket.delete(keys);
+      cursor = res.truncated ? res.cursor : undefined;
+    } while (cursor);
+  }
+
   async open(
     key: string,
     opts?: { ifNoneMatch?: string },

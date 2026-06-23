@@ -125,6 +125,18 @@ function linkExpiredHtml(ownerHandle: string, closedAgo: string, loginHref: stri
   );
 }
 
+/** 管理员下架(滥用处置):对所有访问者返回 451 Unavailable For Legal Reasons。
+ * 中立措辞,不复述被举报内容;站长在控制台看到下架状态与原因。 */
+function takedownHtml(): string {
+  return gateDoc(
+    'Unavailable · pagepin',
+    `<div class="chip chip-amber">${LOCK_SVG}</div>
+<h1>This page has been disabled</h1>
+<p class="body">This page is no longer available. It was disabled by an administrator following a policy or abuse review. If you believe this is a mistake, contact the site owner or the instance operator.</p>
+<div class="foot">Hosted on <span class="mono">pagepin</span></div>`,
+  );
+}
+
 /** 404:JetBrains-Mono 数字 + 可选「Go to site root →」。 */
 function notFoundHtml(siteRoot?: string): string {
   return gateDoc(
@@ -488,6 +500,10 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
       .get();
     if (!site || site.currentVersionId === null) return notFound(c);
+    // 管理员下架:先于任何内容/会话判定,对所有访问者(站长/匿名公开都含)一律 451,且不读存储
+    if (site.suspendedAt !== null) {
+      return c.html(takedownHtml(), 451, { 'Cache-Control': 'no-store, private' });
+    }
 
     const siteRoot = `${prefix}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}/`;
     const now = new Date();

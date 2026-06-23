@@ -9,7 +9,7 @@ import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 
-import { consoleBase } from '../config.js';
+import { consoleBase, siteUrl } from '../config.js';
 import {
   currentVersion,
   invites,
@@ -19,6 +19,7 @@ import {
   type SiteRow,
   type UserRow,
 } from '../db/index.js';
+import { purgeSiteStorage } from '../storage/index.js';
 import {
   effectiveRegistrationMode,
   isRegistrationMode,
@@ -90,8 +91,30 @@ function inviteOut(inv: InviteRow, nowMs: number) {
   };
 }
 
+function adminSiteOut(cfg: AppDeps['config'], s: SiteRow, owner: UserRow | undefined) {
+  const cur = currentVersion(s);
+  return {
+    id: s.id,
+    slug: s.slug,
+    title: s.title,
+    owner_id: s.ownerId,
+    owner_handle: s.ownerHandle,
+    owner_email: owner?.email ?? null,
+    url: siteUrl(cfg, s.ownerHandle, s.slug),
+    visibility: s.visibility,
+    suspended: s.suspendedAt !== null,
+    suspended_at: s.suspendedAt,
+    suspended_reason: s.suspendedReason,
+    file_count: cur ? cur.file_count : 0,
+    total_bytes: cur ? cur.total_bytes : 0,
+    version_count: s.versions.length,
+    created_at: s.createdAt,
+    updated_at: s.updatedAt,
+  };
+}
+
 export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> {
-  const { db, config: cfg } = deps;
+  const { db, config: cfg, storage } = deps;
   const r = new Hono<AppEnv>().basePath('/api/admin');
 
   // ---- 概览统计卡 ----
@@ -165,6 +188,80 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const allSites = await db.select().from(sites).where(isNull(sites.deletedAt)).all();
     const usage = ownerUsage(allSites).get(target.id) ?? { count: 0, bytes: 0 };
     return c.json(userOut({ ...target, isAdmin: resAdmin, disabled: resDisabled }, usage));
+  });
+
+  // ---- 站点审核(列出全实例站点 / 下架 / 恢复 / 强删) ----
+  // 下架=可逆,serving 返回 451;强删=软删 + 回收存储(尽力而为)。下架/强删均留审计线。
+  r.get('/sites', mw.adminUser, async (c) => {
+    const rows = await db
+      .select()
+      .from(sites)
+      .where(isNull(sites.deletedAt))
+      .orderBy(desc(sites.updatedAt))
+      .all();
+    const us = await db.select().from(users).all();
+    const umap = new Map(us.map((u) => [u.id, u]));
+    return c.json({ sites: rows.map((s) => adminSiteOut(cfg, s, umap.get(s.ownerId))) });
+  });
+
+  /** id 定位未删站点;不存在返回 null(调用方回 404)。 */
+  async function liveSite(id: string): Promise<SiteRow | null> {
+    return (
+      (await db.select().from(sites).where(and(eq(sites.id, id), isNull(sites.deletedAt))).get()) ??
+      null
+    );
+  }
+
+  async function siteOutById(c: Context<AppEnv>, id: string): Promise<Response> {
+    const fresh = await db
+      .select()
+      .from(sites)
+      .where(and(eq(sites.id, id), isNull(sites.deletedAt)))
+      .get();
+    if (!fresh) return c.json({ detail: '站点不存在' }, 404);
+    const owner = await db.select().from(users).where(eq(users.id, fresh.ownerId)).get();
+    return c.json(adminSiteOut(cfg, fresh, owner ?? undefined));
+  }
+
+  r.post('/sites/:id/suspend', mw.adminMutatingUser, async (c) => {
+    const body = await readJson<{ reason?: unknown }>(c);
+    const reason =
+      body && typeof body.reason === 'string' && body.reason.trim()
+        ? body.reason.trim().slice(0, 500)
+        : null;
+    const site = await liveSite(c.req.param('id'));
+    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    const now = nowIso();
+    // 已下架则保留首次下架时间,仅更新原因(幂等)
+    await db
+      .update(sites)
+      .set({ suspendedAt: site.suspendedAt ?? now, suspendedReason: reason, updatedAt: now })
+      .where(eq(sites.id, site.id))
+      .run();
+    console.log(`admin-suspend site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`);
+    return siteOutById(c, site.id);
+  });
+
+  r.post('/sites/:id/unsuspend', mw.adminMutatingUser, async (c) => {
+    const site = await liveSite(c.req.param('id'));
+    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    await db
+      .update(sites)
+      .set({ suspendedAt: null, suspendedReason: null, updatedAt: nowIso() })
+      .where(eq(sites.id, site.id))
+      .run();
+    console.log(`admin-unsuspend site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`);
+    return siteOutById(c, site.id);
+  });
+
+  r.delete('/sites/:id', mw.adminMutatingUser, async (c) => {
+    const site = await liveSite(c.req.param('id'));
+    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    const now = nowIso();
+    await db.update(sites).set({ deletedAt: now, updatedAt: now }).where(eq(sites.id, site.id)).run();
+    await purgeSiteStorage(storage, site.ownerId, site.slug);
+    console.log(`admin-delete site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`);
+    return c.json({ ok: true });
   });
 
   // ---- 实例设置:注册模式 ----

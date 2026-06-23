@@ -56,6 +56,9 @@ export interface SiteOut {
   comments_enabled: boolean;
   /** 当前未解决的评论线程数 */
   unresolved_comments: number;
+  /** 被管理员下架(serving 返回 451);站长只能看不能自行解除 */
+  suspended: boolean;
+  suspended_reason: string | null;
   file_count: number;
   total_bytes: number;
   version_count: number;
@@ -98,6 +101,25 @@ export interface AdminUser {
   last_login_at: string | null;
   site_count: number;
   storage_bytes: number;
+}
+
+export interface AdminSite {
+  id: string;
+  slug: string;
+  title: string | null;
+  owner_id: string;
+  owner_handle: string;
+  owner_email: string | null;
+  url: string;
+  visibility: Visibility;
+  suspended: boolean;
+  suspended_at: string | null;
+  suspended_reason: string | null;
+  file_count: number;
+  total_bytes: number;
+  version_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AdminOverview {
