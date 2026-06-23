@@ -1,8 +1,8 @@
 // @ts-check
 // pagepin:navigate(图片查看器壳的 lightbox 就地切换)与评论层的契约:
-// 切路径 → 重拉线程、后续新建评论落在新路径;composer 有草稿 → preventDefault 阻断。
+// 切路径 → 重拉线程、后续新建评论落在新路径;草稿未发 → preventDefault 阻断。
 const { test, expect } = require('@playwright/test');
-const { setup, goto, composer, anyPopup, ready } = require('./_helpers');
+const { setup, goto, draft, ready } = require('./_helpers');
 
 const SVG = encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#9ab"/></svg>',
@@ -21,6 +21,9 @@ const navigateTo = (page, path) =>
     path,
   );
 
+const draftTa = (page) => page.locator('[data-pp-role="draft"] textarea');
+const draftSend = (page) => page.locator('[data-pp-role="draft"] [data-pp-role="send"]');
+
 test('切路径:按新 path 重拉线程,之后新建的评论落在新路径', async ({ page }) => {
   let created = null;
   await setup(page, { html: IMG_HTML, onCreate: (b) => { created = b; } });
@@ -34,27 +37,27 @@ test('切路径:按新 path 重拉线程,之后新建的评论落在新路径', 
 
   await page.keyboard.press('c');
   await page.mouse.click(300, 270);
-  await expect(composer(page)).toBeVisible();
-  await page.fill('.pp-anno-popup textarea', '新图上的意见');
-  await page.click('.pp-anno-send');
+  await expect(draft(page)).toBeVisible();
+  await draftTa(page).fill('新图上的意见');
+  await draftSend(page).click();
   await expect.poll(() => created && created.path).toBe('b.png');
 });
 
-test('composer 有未发草稿:切换被 preventDefault 阻断,弹层仍在;放弃草稿后放行', async ({ page }) => {
+test('草稿有未发内容:切换被 preventDefault 阻断,草稿仍在;放弃草稿后放行', async ({ page }) => {
   await setup(page, { html: IMG_HTML });
   await goto(page);
   await ready(page);
   await page.keyboard.press('c');
   await page.mouse.click(300, 270);
-  await expect(composer(page)).toBeVisible();
-  await page.fill('.pp-anno-popup textarea', '还没写完的草稿');
+  await expect(draft(page)).toBeVisible();
+  await draftTa(page).fill('还没写完的草稿');
 
   const blocked = await navigateTo(page, 'b.png');
   expect(blocked).toBe(false); // preventDefault → dispatchEvent 返回 false
-  await expect(composer(page)).toBeVisible(); // 草稿弹层没被关
+  await expect(draft(page)).toBeVisible(); // 草稿没被关
 
   await page.keyboard.press('Escape'); // 明确放弃草稿
-  await expect(anyPopup(page)).toHaveCount(0);
+  await expect(draft(page)).toHaveCount(0);
   const proceeded = await navigateTo(page, 'b.png');
   expect(proceeded).toBe(true);
 });
