@@ -5,6 +5,14 @@
 // 用 page.route stub 掉 /api/viewer 与 /api/comments，不依赖后端进程或数据库。
 // comments.js 从自身 <script data-*> 读配置、从 /api/viewer 取身份、从
 // /api/comments/{handle}/{slug} 取线程，全部可拦截。
+//
+// v3 交互模型（右侧浮动抽屉 + 常驻 j/k + 发光相机）：
+//   - 唯一全局 chrome = 右侧抽屉 [data-pp-role="drawer"]，默认展开（评审者一进来就看到评论）；
+//     收起为右缘 tab [data-pp-role="tab"]。
+//   - 读与改都在抽屉里的线程卡 [data-pp-role="card"]（data-tid / data-pp-num / data-pp-status /
+//     聚焦时 data-pp-focused="1" 就地展开）；不再有 at-pin 弹层。
+//   - 新建草稿落在抽屉里 [data-pp-role="draft"]。
+//   - 锚点遮挡：抽屉占右侧 ~320px，落在其下的元素 pin 会被盖住 —— 测试锚点统一放抽屉左侧。
 const path = require('path');
 const fs = require('fs');
 
@@ -122,31 +130,32 @@ async function setup(page, opts = {}) {
     route.fulfill({ contentType: 'text/html; charset=utf-8', body: html || fixtureHtml(boxes) }));
 }
 
-// 默认布局：3 在右、4 在其左、1/2 在上方，相互不重叠（贴近真实 demo 页面布局）。
+// 默认布局：四个锚点都在抽屉左侧（x≤510，不被右侧 320px 抽屉遮挡）、都在首屏内（top≤450）、互不重叠。
 const DEFAULT_BOXES = [
   { id: 't1', left: 80, top: 80 }, { id: 't2', left: 340, top: 80 },
-  { id: 't3', left: 980, top: 360 }, { id: 't4', left: 620, top: 360 },
+  { id: 't3', left: 80, top: 380 }, { id: 't4', left: 340, top: 380 },
 ];
 
-// 常用定位器（与新交互模型的稳定 data-pp-* 钩子对齐）
+// 常用定位器（与 v3 抽屉模型的稳定 data-pp-* 钩子对齐）
 const pin = (page, n) =>
   page.locator('.pp-anno-pin').filter({ hasText: new RegExp(`^\\s*${n}\\s*$`) });
-const bar = (page) => page.locator('[data-pp-role="bar"]');
+const drawer = (page) => page.locator('[data-pp-role="drawer"]');
+const tab = (page) => page.locator('[data-pp-role="tab"]');
 const act = (page, name) => page.locator(`[data-pp-act="${name}"]`);
-const popover = (page) => page.locator('[data-pp-role="popover"]');
-const composer = (page) => page.locator('[data-pp-role="composer"]');
-const list = (page) => page.locator('[data-pp-role="list"]');
-const anyPopup = (page) => page.locator('.pp-anno-popup');
-const collapsed = (page) => page.locator('[data-pp-role="collapsed"]');
+// 线程卡：全部 / 按编号 / 当前聚焦展开的那张
+const cards = (page) => page.locator('[data-pp-role="card"]');
+const card = (page, n) => page.locator(`[data-pp-role="card"][data-pp-num="${n}"]`);
+const focusedCard = (page) => page.locator('[data-pp-role="card"][data-pp-focused="1"]');
+const draft = (page) => page.locator('[data-pp-role="draft"]');
 
 async function goto(page) {
   await page.goto('http://pagepin.test/');
 }
-// 命令条可见 = 评论层就绪门（旧版用 .pp-anno-toolbar 可见）
-const ready = async (page) => { await bar(page).waitFor(); };
+// 抽屉可见 = 评论层就绪门
+const ready = async (page) => { await drawer(page).waitFor(); };
 
 module.exports = {
   COMMENTS_JS, NOW, VIEWER, DEFAULT_BOXES,
   mkThread, fixtureHtml, setup, goto,
-  pin, bar, act, popover, composer, list, anyPopup, collapsed, ready,
+  pin, drawer, tab, act, cards, card, focusedCard, draft, ready,
 };

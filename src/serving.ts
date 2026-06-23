@@ -319,7 +319,7 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
   // × 在有未发草稿时拦下导航,评论层的点击外部处理会抖动提示,不丢稿。
   const closeA = document.getElementById('pp-close');
   closeA.addEventListener('click', (e) => {
-    const ta = document.querySelector('.pp-anno-popup textarea');
+    const ta = document.querySelector('[data-pp-role="draft"] textarea, [data-pp-role="reply"] textarea');
     if (ta && ta.value.trim()) e.preventDefault();
   });
   document.addEventListener('keydown', (e) => {

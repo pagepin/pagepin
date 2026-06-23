@@ -3,15 +3,17 @@
  * 约束：
  *  - 宿主页面不可控：所有类名带 pp-anno 前缀、UI 挂独立容器、用户内容一律 textContent 渲染；
  *  - 身份来自 /api/viewer（pp_view 会话）：401 = 匿名访客，静默退出不留痕迹；
- *  - 锚点 = CSS 选择器 + 元素内相对偏移；"@page" = 整页评论（无 pin，仅列表）；
- *    选择器失效（页面改版）降级为列表「锚点丢失」项。
+ *  - 锚点 = CSS 选择器 + 元素内相对偏移；"@page" = 整页评论（无 pin，仅抽屉卡片）；
+ *    选择器失效（页面改版）降级为抽屉里的「锚点丢失」卡片（不丢评论）。
  *
- * 交互模型（v2，单命令条 + Review Walk）：
- *  - 一根底部命令条是唯一全局 chrome，按状态变形：resting / comment / walk / caught-up
- *  - 读与改都发生在 pin 处的 at-pin 弹层；Review Walk 按文档序步进未解决线程
- *  - ⌘/⌥+点击元素 / 在图片上拖框 = 打点；C 进评论模式；点 pin = 从该处进入 Walk
- *  - j/k 步进、r 解决并前进、Esc 退出；resolve-and-advance（Gmail archive-and-next）
- *  - #pp-comment-<id> 深链直达并进入 Walk；窗口聚焦 + 30s 轮询静默刷新
+ * 交互模型（v3，右侧浮动抽屉 + 常驻 j/k + 发光相机）：
+ *  - 右侧一根浮动抽屉是唯一全局 chrome：页面满宽渲染、零回流（抽屉 fixed 覆盖，不预留宽度）；
+ *    前导 16px 羽化成透明，窄屏（≤1366）自动收起为右缘 tab，宽屏（≥1536）自动展开。
+ *  - 读与改都在抽屉内的线程卡：聚焦卡就地展开（评论流 + 回复 + kind + 解决/重开/删除）。
+ *  - 导航即「常驻 j/k + 发光相机」：聚焦元素套发光环并把视口滚到取景位；点 pin = 聚焦该卡。
+ *  - C 进评论模式（十字光标）：点元素 / 在图片上拖框 = 打点，草稿落在抽屉里；
+ *    r 解决并前进（Gmail archive-and-next）、\ 收起抽屉、Esc 退出。
+ *  - #pp-comment-<id> 深链直达并聚焦；窗口聚焦 + 30s 轮询静默刷新。
  *
  * e2e 钩子：稳定的 data-pp-role / data-pp-* 属性（与展示/i18n 解耦），见各处标注。
  */
@@ -43,36 +45,45 @@
   const RESOLVED_COLOR = '#aeb4ba';
   const AVA = ['#2f6fb0', '#0f7c72', '#7c4bc0', '#c07a16', '#b14a42'];
 
+  // 抽屉尺寸 + 宽度感知自动收起（占用宽度依赖：96px@1280 / 53px@1366 / 16px@1440[羽化吃掉] / 0@≥1536）。
+  const DRAWER_W = 320;
+  const NARROW_MAX = 1366;
+  const WIDE_MIN = 1536;
+  const widthBucket = (w) => (w <= NARROW_MAX ? 'narrow' : w >= WIDE_MIN ? 'wide' : 'mid');
+
   const state = {
     viewer: null,
     threads: [],
-    mode: 'rest', // rest | comment | walk
-    filter: 'open', // open | all（页面上 pin：是否显示已解决）
-    walk: { curId: null, entryTop: false, resolvedThisPass: 0 },
-    listOpen: false,
-    openPopup: null,
-    openThreadId: null,
-    collapsed: false, // 命令条是否收起为 dot（rest 态的临时让位子态）
-    collapseCorner: 'tl', // tl|tr|bl|br，dot 停靠角落
+    filter: 'open', // open | all（抽屉与 pin：是否显示已解决）
+    focusedId: null, // 当前在抽屉里展开的线程
+    mode: 'rest', // rest | comment（十字光标打点模式）
+    railOpen: true, // 抽屉是否展开
+    draft: null, // { selector, rx, ry, box, kind, _cleanup } 新建草稿
+    replyStash: new Map(), // threadId -> 未发送回复草稿
+    autoHint: false, // 窄屏自动收起的一次性提示
   };
 
-  // 收起态偏好持久化（全局共享：所有站点同一收起/角落偏好）
-  const COLLAPSE_KEY = 'pp-anno-collapse';
-  function loadCollapse() {
+  // 收起态偏好持久化（全局共享：所有站点同一手动收起偏好；窄屏自动收起不写盘）
+  const RAIL_KEY = 'pp-anno-rail';
+  function loadRail() {
+    let manual = null;
     try {
-      const v = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '{}');
-      if (v && typeof v === 'object') {
-        if (typeof v.corner === 'string' && /^[tb][lr]$/.test(v.corner)) state.collapseCorner = v.corner;
-        if (v.on === true) state.collapsed = true;
-      }
+      const v = JSON.parse(localStorage.getItem(RAIL_KEY) || '{}');
+      if (v && typeof v === 'object' && typeof v.open === 'boolean') manual = v.open;
     } catch (e) { /* localStorage 不可用：忽略 */ }
+    // 手动偏好优先；无偏好时默认展开（评审者一进来就看到评论）。
+    // 窄屏不在「初始」隐藏（1280–1366 是笔记本主力分辨率，初始藏掉=看不到评论）；
+    // 只有用户「主动把窗口从更宽缩进窄屏」这个 crossing 才自动收起（见 onResizeWidth）。
+    state.railOpen = manual != null ? manual : true;
+    lastBucket = typeof window === 'undefined' ? 'wide' : widthBucket(window.innerWidth);
   }
-  function persistCollapse() {
-    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify({ on: state.collapsed, corner: state.collapseCorner })); }
+  function persistRail() {
+    try { localStorage.setItem(RAIL_KEY, JSON.stringify({ open: state.railOpen })); }
     catch (e) { /* 忽略 */ }
   }
+  let lastBucket = 'wide';
 
-  /* ---------------- API（保留） ---------------- */
+  /* ---------------- API（逐字保留） ---------------- */
   async function api(path, opts) {
     const res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
     if (!res.ok) {
@@ -91,7 +102,7 @@
   const patchThread = (id, body) => api(`/api/comments/threads/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
   const deleteThread = (id) => api(`/api/comments/threads/${id}`, { method: 'DELETE' });
 
-  /* ---------------- 工具（保留 + 英文化） ---------------- */
+  /* ---------------- 工具（保留） ---------------- */
   function el(tag, cls, text) {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -106,18 +117,17 @@
     return span;
   }
   const ICON = {
+    cmd: '<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 0 0 3-3z"/>',
     msg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
-    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-    play: '<path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/>',
-    filter: '<path d="M3 4h18l-7 8v6l-4 2v-8z"/>',
-    prev: '<path d="m15 18-6-6 6-6"/>',
-    next: '<path d="m9 18 6-6-6-6"/>',
+    arrowR: '<path d="M5 12h14M12 5l7 7-7 7"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
+    checks: '<path d="m18 7-8 8-4-4M22 10l-7.5 7.5L13 16"/>',
     link: '<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/>',
-    x: '<path d="M18 6 6 18M6 6l12 12"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
-    minus: '<path d="M5 12h14"/>',
-    minimize: '<path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>',
+    reply: '<path d="M9 17l-5-5 5-5M4 12h11a5 5 0 0 1 5 5v1"/>',
+    undo: '<path d="M3 7v6h6M3 13a9 9 0 1 0 3-7.7L3 8"/>',
+    x: '<path d="M18 6 6 18M6 6l12 12"/>',
+    enter: '<path d="M9 10l-5 5 5 5M20 4v7a4 4 0 0 1-4 4H4"/>',
   };
   const avatarColor = (name) => AVA[[...(name || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AVA.length];
   const initialOf = (name) => (name || '?').trim().slice(0, 1).toUpperCase();
@@ -143,6 +153,7 @@
     }
     return 'body > ' + parts.join(' > ');
   }
+  const anchorLabel = (sel) => (sel === PAGE_SELECTOR ? '@page' : sel.replace(/^#/, ''));
   // 线程当前 kind 的色（无 kind → 中性 slate；已解决 → 灰）
   const kindColor = (t) => (t.resolved ? RESOLVED_COLOR : (t.kind && KIND[t.kind] ? KIND[t.kind].color : NO_KIND));
   function toast(msg) {
@@ -153,7 +164,7 @@
     setTimeout(() => t.remove(), 2600);
   }
 
-  /* ---------------- 样式（新交互模型） ---------------- */
+  /* ---------------- 样式（抽屉模型） ---------------- */
   const STYLE = `
   .pp-anno-root{position:absolute;top:0;left:0;width:100%;height:0;font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;font-size:14px;line-height:1.55;color:#11161b;transform:none;filter:none}
   .pp-anno-root *{box-sizing:border-box;margin:0;padding:0}
@@ -162,113 +173,133 @@
   .pp-anno-mode-on:not(.pp-anno-paused) *:not(.pp-anno-root, .pp-anno-root *){cursor:crosshair!important}
   .pp-anno-hover-hint{outline:2px solid #0f7c72!important;outline-offset:2px!important;box-shadow:0 0 0 4px rgba(15,124,114,.12)!important}
   .pp-anno-bound{outline:2px solid rgba(15,124,114,.85)!important;outline-offset:2px!important;box-shadow:0 0 0 5px rgba(15,124,114,.12)!important}
-  /* ── 命令条（唯一全局 chrome，深近黑，绝不与宿主页混淆） ── */
-  .pp-anno-bar{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:2147483000;display:flex;align-items:center;gap:3px;background:#15191c;border-radius:999px;padding:6px;box-shadow:0 14px 40px -10px rgba(17,22,27,.55),0 2px 6px rgba(17,22,27,.3);max-width:calc(100vw - 20px)}
-  .pp-anno-bar button{border:none;background:transparent;color:#cdd3d9;font:600 13px/1 'Hanken Grotesk',sans-serif;cursor:pointer;padding:8px 13px;border-radius:999px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap;transition:background .15s,color .15s}
-  .pp-anno-bar button:hover{background:rgba(255,255,255,.08);color:#fff}
-  .pp-anno-bar .pp-b-primary{background:#0f7c72;color:#fff}.pp-anno-bar .pp-b-primary:hover{background:#13988c}
-  .pp-anno-bar .pp-b-soft{background:rgba(255,255,255,.1)}.pp-anno-bar .pp-b-soft:hover{background:rgba(255,255,255,.2)}
-  .pp-anno-bar .pp-b-on{background:rgba(255,255,255,.2);color:#fff}
-  .pp-anno-count{background:rgba(0,0,0,.28);font:600 11.5px/1 'JetBrains Mono',monospace;padding:2px 7px;border-radius:999px}
-  .pp-anno-sep{width:1px;height:18px;background:rgba(255,255,255,.14);margin:0 3px}
-  .pp-anno-dot{width:8px;height:8px;border-radius:50%;background:#14958a;box-shadow:0 0 0 4px rgba(20,149,138,.3);animation:ppPulse 1.6s ease-in-out infinite}
-  @keyframes ppPulse{0%,100%{opacity:1}50%{opacity:.45}}
-  .pp-anno-bar .pp-lab-teal{color:#7fe3d6}
-  .pp-anno-bar .pp-instr{color:#cdd3d9;font-weight:500;font-size:12.5px}
-  .pp-anno-counter{font:600 14px/1 'JetBrains Mono',monospace;color:#fff;min-width:42px;text-align:center}
-  .pp-anno-kindtag{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600}
-  .pp-anno-kindtag i{width:7px;height:7px;border-radius:50%;display:inline-block}
-  .pp-anno-rbtn{width:32px;height:32px;padding:0!important;justify-content:center}
-  .pp-anno-kbd{font:500 10px/1 'JetBrains Mono',monospace;color:#6b7480;letter-spacing:.12em}
   /* ── pin（泪滴，kind 上色，白圈在任意宿主色上都清晰） ── */
   .pp-anno-layer{position:absolute;top:0;left:0;width:100%;height:0;z-index:2147482000;transform:none;filter:none}
-  .pp-anno-pin{position:absolute;z-index:2147482600;width:30px;height:30px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font:700 12.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transform:translate(-4px,-26px);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(28,26,23,.3);user-select:none;transition:transform .15s,box-shadow .15s}
-  .pp-anno-pin:hover{transform:translate(-4px,-26px) scale(1.12)}
+  .pp-anno-pin{position:absolute;z-index:2147482600;width:28px;height:28px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font:700 12px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transform:translate(-4px,-24px);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(28,26,23,.3);user-select:none;transition:transform .15s,box-shadow .15s}
+  .pp-anno-pin:hover{transform:translate(-4px,-24px) scale(1.12)}
   .pp-anno-pin.pp-anno-pulse{animation:ppPin .45s cubic-bezier(.2,1.6,.4,1)}
-  @keyframes ppPin{0%{transform:translate(-4px,-26px) scale(0)}60%{transform:translate(-4px,-26px) scale(1.12)}100%{transform:translate(-4px,-26px) scale(1)}}
+  @keyframes ppPin{0%{transform:translate(-4px,-24px) scale(0)}60%{transform:translate(-4px,-24px) scale(1.12)}100%{transform:translate(-4px,-24px) scale(1)}}
   .pp-anno-pin.pp-anno-resolved{filter:saturate(.4);box-shadow:0 2px 6px rgba(28,26,23,.2)}
-  .pp-anno-pin.pp-anno-current{transform:translate(-4px,-26px) scale(1.18);z-index:2147482650}
-  .pp-anno-pin.pp-anno-current:hover{transform:translate(-4px,-26px) scale(1.18)}
+  .pp-anno-pin.pp-anno-current{transform:translate(-4px,-24px) scale(1.16);z-index:2147482650;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 3px 12px rgba(28,26,23,.4)}
+  .pp-anno-pin.pp-anno-current:hover{transform:translate(-4px,-24px) scale(1.16)}
   .pp-anno-region{position:absolute;z-index:2147481900;border:2px solid;border-radius:5px;pointer-events:none;box-sizing:border-box}
   .pp-anno-region.pp-anno-resolved{opacity:.35;filter:saturate(.3)}
   .pp-anno-rubber{position:absolute;z-index:2147482700;border:2px dashed #0f7c72;background:rgba(15,124,114,.08);border-radius:5px;pointer-events:none;box-sizing:border-box}
-  /* ── 弹层（at-pin 读/改面） ── */
-  .pp-anno-popup{position:absolute;z-index:2147482500;width:300px;background:#fff;border-radius:13px;border:1px solid #e1e4e6;box-shadow:0 22px 60px -18px rgba(17,22,27,.36),0 4px 12px rgba(17,22,27,.1);overflow:hidden;animation:ppPop .16s cubic-bezier(.2,1.3,.4,1)}
-  @keyframes ppPop{from{opacity:0;transform:translateY(6px) scale(.98)}}
-  .pp-anno-popup.pp-anno-shaking{animation:ppShake .3s}
-  @keyframes ppShake{0%,100%{margin-left:0}25%{margin-left:-7px}75%{margin-left:7px}}
-  .pp-anno-accent{height:3px}
-  .pp-anno-hd{display:flex;align-items:center;gap:7px;padding:9px 11px;border-bottom:1px solid #f0f1f2}
-  .pp-anno-step{width:22px;height:22px;border:1px solid #e7e9eb;background:#fff;border-radius:6px;display:grid;place-items:center;cursor:pointer;color:#6b7480}
-  .pp-anno-step:hover{border-color:#0f7c72;color:#0f7c72}
-  .pp-anno-counter2{font:600 11.5px/1 'JetBrains Mono',monospace;color:#6b7480;padding:0 2px}
-  .pp-anno-ops{margin-left:auto;display:flex;align-items:center;gap:2px}
-  .pp-anno-ops button{border:none;background:none;cursor:pointer;color:#9aa1a9;padding:5px;border-radius:6px;display:inline-flex;font:600 12px/1 'Hanken Grotesk',sans-serif}
-  .pp-anno-ops button:hover{background:#f1f3f4;color:#0f7c72}
-  .pp-anno-del{color:#b14a42!important}
-  .pp-anno-del.pp-anno-armed{color:#fff!important;background:#c2361b!important;padding:4px 9px!important}
-  .pp-anno-msgs{padding:5px 0;max-height:200px;overflow-y:auto}
-  .pp-anno-msg{display:flex;gap:9px;padding:8px 12px}
+  /* ── 发光相机：聚焦元素套发光环（不可交互） ── */
+  .pp-anno-glow{position:absolute;z-index:2147481950;border-radius:8px;pointer-events:none;box-sizing:border-box;animation:ppBloom .6s cubic-bezier(.2,.8,.3,1) both}
+  @keyframes ppBloom{0%{opacity:0;transform:scale(1.04)}40%{opacity:1}100%{opacity:.95;transform:scale(1)}}
+  /* ── 右侧浮动抽屉（唯一全局 chrome；fixed 覆盖、绝不预留宽度=零回流；前导 16px 羽化透明） ── */
+  .pp-anno-drawer{position:fixed;top:0;right:0;height:100%;width:${DRAWER_W}px;z-index:2147483000;display:flex;flex-direction:column;
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    background:linear-gradient(to right,rgba(255,255,255,0) 0,rgba(255,255,255,.97) 16px);
+    box-shadow:-10px 0 34px -20px rgba(17,22,27,.45);
+    transition:transform .3s cubic-bezier(.2,.8,.3,1)}
+  .pp-anno-drawer.pp-anno-closed{transform:translateX(${DRAWER_W}px)}
+  .pp-anno-drawer *{font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif}
+  .pp-anno-dwh{flex:none;border-bottom:1px solid #eef0f1;padding:11px 13px 9px 18px}
+  .pp-anno-dwh-top{display:flex;align-items:center;justify-content:space-between}
+  .pp-anno-brand{display:inline-flex;align-items:center;gap:7px;font:800 13px/1 'Hanken Grotesk',sans-serif;letter-spacing:-.01em;color:#11161b}
+  .pp-anno-brand i{display:grid;place-items:center;width:20px;height:20px;border-radius:6px;background:#11161b;color:#fff}
+  .pp-anno-brand i svg{width:12px;height:12px}
+  .pp-anno-dwh-collapse{border:none;background:transparent;cursor:pointer;color:#9aa1a9;width:24px;height:24px;border-radius:6px;display:grid;place-items:center}
+  .pp-anno-dwh-collapse:hover{background:#f1f3f4;color:#11161b}
+  .pp-anno-dwh-meta{display:flex;align-items:center;justify-content:space-between;margin-top:9px;gap:8px}
+  .pp-anno-dwh-sub{font-size:11px;color:#8a929b}
+  .pp-anno-seg{display:inline-flex;align-items:center;border:1px solid #e1e4e6;border-radius:7px;padding:2px;gap:2px}
+  .pp-anno-seg button{border:none;background:transparent;cursor:pointer;font:600 10.5px/1 'Hanken Grotesk',sans-serif;color:#8a929b;padding:3px 8px;border-radius:5px}
+  .pp-anno-seg button.pp-anno-on{background:#11161b;color:#fff}
+  .pp-anno-dwh-acts{display:flex;gap:6px;margin-top:10px}
+  .pp-anno-cbtn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;cursor:pointer;border-radius:8px;background:#0f7c72;color:#fff;font:600 12px/1 'Hanken Grotesk',sans-serif;padding:8px 10px}
+  .pp-anno-cbtn:hover{background:#0b6358}
+  .pp-anno-cbtn.pp-anno-on{background:#11161b}
+  .pp-anno-wbtn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px dashed #cdd3d9;cursor:pointer;border-radius:8px;background:#fff;color:#6b7480;font:600 12px/1 'Hanken Grotesk',sans-serif;padding:8px 11px}
+  .pp-anno-wbtn:hover{border-color:#0f7c72;color:#0f7c72;background:#f3faf8}
+  /* 列表自己滚动，但隐藏其滚动条 —— 避免与宿主页滚动条并排（注入面板不是文档，不再起第二条滚动条）。
+     滚轮/触控板/拖动照常可滚；底部用 dwhint::before 渐隐提示还有内容。 */
+  .pp-anno-dwlist{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px 10px 10px 18px;scrollbar-width:none;-ms-overflow-style:none;overscroll-behavior:contain}
+  .pp-anno-dwlist::-webkit-scrollbar{width:0;height:0}
+  .pp-anno-dwhint{position:relative;flex:none;border-top:1px solid #eef0f1;background:#f8f9fa;padding:7px 13px 7px 18px;display:flex;flex-wrap:wrap;gap:4px 9px;align-items:center}
+  .pp-anno-dwhint::before{content:"";position:absolute;left:0;right:0;top:-22px;height:22px;pointer-events:none;background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.97))}
+  .pp-anno-kpair{display:inline-flex;align-items:center;gap:4px;font:500 10px/1 'JetBrains Mono',monospace;color:#8a929b}
+  .pp-anno-kpair kbd{font:700 9.5px/1 'JetBrains Mono',monospace;color:#3a424b;border:1px solid #dfe2e4;background:#fff;border-radius:4px;padding:2px 4px;box-shadow:0 1px 0 #e7e9eb}
+  /* ── 线程卡 ── */
+  .pp-anno-card{position:relative;margin-bottom:8px;border:1px solid #e7e9eb;border-radius:11px;background:#fff;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(17,22,27,.04);transition:box-shadow .24s cubic-bezier(.2,.8,.3,1),border-color .2s,opacity .2s;animation:ppCard .2s cubic-bezier(.2,1.3,.4,1)}
+  @keyframes ppCard{from{opacity:0;transform:translateY(6px) scale(.98)}}
+  .pp-anno-card:hover{border-color:#d7dadd}
+  .pp-anno-card.pp-anno-focused{cursor:default;border-color:#d7dadd;box-shadow:0 2px 8px rgba(17,22,27,.06),0 14px 30px -12px rgba(17,22,27,.14)}
+  .pp-anno-card.pp-anno-dim{opacity:.66}
+  .pp-anno-card-rail{position:absolute;top:0;bottom:0;left:0;width:3px}
+  .pp-anno-card-bd{padding:9px 10px 9px 12px}
+  .pp-anno-card-hd{display:flex;align-items:center;gap:8px}
+  .pp-anno-num{flex:none;width:20px;height:20px;border-radius:50% 50% 50% 3px;display:grid;place-items:center;color:#fff;font:700 10.5px/1 'Hanken Grotesk',sans-serif}
+  .pp-anno-ava{flex:none;border-radius:50%;display:grid;place-items:center;color:#fff;font:700 11px/1 'Hanken Grotesk',sans-serif}
+  .pp-anno-who{font-size:12.5px;font-weight:600;color:#11161b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+  .pp-anno-when{font-size:10.5px;color:#b3b9bf;font-weight:400}
+  .pp-anno-anchor{font:600 10px/1 'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+  .pp-anno-stalebadge{font:600 10px/1 'Hanken Grotesk',sans-serif;color:#b08423}
+  .pp-anno-card-acts{margin-left:auto;display:flex;align-items:center;gap:2px;flex:none}
+  .pp-anno-iconbtn{border:none;background:none;cursor:pointer;color:#9aa1a9;padding:5px;border-radius:6px;display:inline-flex}
+  .pp-anno-iconbtn:hover{background:#f1f3f4;color:#0f7c72}
+  .pp-anno-resolvebtn{border:1px solid #e1e4e6;background:#fff;cursor:pointer;color:#9aa1a9;width:24px;height:24px;border-radius:7px;display:grid;place-items:center}
+  .pp-anno-resolvebtn:hover{border-color:#0f7c72;color:#0f7c72}
+  .pp-anno-donechip{flex:none;display:inline-flex;align-items:center;gap:4px;font:700 9.5px/1 'Hanken Grotesk',sans-serif;text-transform:uppercase;letter-spacing:.04em;color:#8a929b;background:#eef0f1;border-radius:999px;padding:3px 7px}
+  .pp-anno-snippet{margin-top:6px;font-size:12px;line-height:1.45;color:#5c636b;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+  .pp-anno-card-ft{margin-top:7px;display:flex;align-items:center;gap:9px;font-size:10.5px;color:#b3b9bf}
+  .pp-anno-kindlab{display:inline-flex;align-items:center;gap:4px;font-weight:600}
+  .pp-anno-kindlab i{width:6px;height:6px;border-radius:50%;display:inline-block}
+  /* 聚焦卡展开区 */
+  .pp-anno-resolved-banner{display:flex;align-items:center;gap:6px;background:#f4f6f7;padding:6px 11px;font:700 10px/1 'Hanken Grotesk',sans-serif;text-transform:uppercase;letter-spacing:.05em;color:#8a929b}
+  .pp-anno-msgs{margin-top:9px;display:flex;flex-direction:column;gap:9px}
+  .pp-anno-msg{display:flex;gap:8px}
   .pp-anno-msg>div:last-child{flex:1;min-width:0}
-  .pp-anno-ava{width:25px;height:25px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font:700 11px/1 'Hanken Grotesk',sans-serif}
-  .pp-anno-who{font-size:12.5px;font-weight:600;color:#11161b}
-  .pp-anno-when{font-size:11px;color:#b3b9bf;margin-left:6px;font-weight:400}
-  .pp-anno-txt{font-size:13px;line-height:1.5;margin-top:2px;color:#34302b;word-break:break-word;white-space:pre-wrap}
-  .pp-anno-chips{display:flex;gap:5px;padding:8px 12px;border-top:1px solid #f0f1f2;flex-wrap:nowrap;overflow-x:auto}
-  .pp-anno-chip2{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 'Hanken Grotesk',sans-serif;padding:4px 9px;border-radius:999px;border:1px solid #e1e4e6;background:#fff;color:#6b7480;cursor:pointer;white-space:nowrap}
+  .pp-anno-msg-line{display:flex;align-items:center;gap:6px}
+  .pp-anno-txt{font-size:12.5px;line-height:1.5;margin-top:2px;color:#34302b;word-break:break-word;white-space:pre-wrap}
+  .pp-anno-chips{display:flex;gap:5px;margin-top:9px;flex-wrap:wrap}
+  .pp-anno-chip2{display:inline-flex;align-items:center;gap:5px;font:600 10.5px/1 'Hanken Grotesk',sans-serif;padding:4px 8px;border-radius:999px;border:1px solid #e1e4e6;background:#fff;color:#8a929b;cursor:pointer;white-space:nowrap}
   .pp-anno-chip2 i{width:6px;height:6px;border-radius:50%;display:inline-block}
   .pp-anno-chip2.pp-anno-on{color:#fff;border-color:transparent}
   .pp-anno-chip2.pp-anno-on i{background:#fff!important}
-  .pp-anno-ft{padding:9px 12px 11px;border-top:1px solid #f0f1f2}
-  .pp-anno-ft textarea{width:100%;border:1.5px solid #e1e4e6;border-radius:8px;padding:7px 10px;font:400 13px/1.5 'Hanken Grotesk',sans-serif;resize:none;background:#fff;color:#11161b}
-  .pp-anno-ft textarea:focus{outline:none;border-color:#0f7c72}
-  .pp-anno-ft-row{display:flex;align-items:center;gap:8px;margin-top:8px}
-  .pp-anno-hint{font-size:11px;color:#b3b9bf}
-  .pp-anno-send{margin-left:auto;background:#0f7c72;color:#fff;border:none;padding:6px 13px;border-radius:7px;font:600 12.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .pp-anno-replyarea{margin-top:9px}
+  .pp-anno-replybtn{width:100%;display:flex;align-items:center;gap:7px;border:1px dashed #e1e4e6;background:#fff;cursor:pointer;border-radius:8px;padding:8px 10px;font:500 12px/1 'Hanken Grotesk',sans-serif;color:#9aa1a9}
+  .pp-anno-replybtn:hover{border-color:#0f7c72;color:#0f7c72}
+  .pp-anno-replybtn kbd{margin-left:auto;font:700 9px/1 'JetBrains Mono',monospace;color:#9aa1a9;border:1px solid #e1e4e6;background:#fff;border-radius:4px;padding:1px 4px}
+  .pp-anno-ta-wrap{border:1.5px solid #cdd3d9;border-radius:9px;background:#fafbfb;padding:6px;transition:border-color .15s}
+  .pp-anno-ta-wrap:focus-within{border-color:#0f7c72;background:#fff}
+  .pp-anno-ta-wrap textarea{width:100%;border:none;background:transparent;resize:none;font:400 12.5px/1.5 'Hanken Grotesk',sans-serif;color:#11161b;outline:none}
+  .pp-anno-ta-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .pp-anno-hint{font-size:10.5px;color:#b3b9bf}
+  .pp-anno-send{margin-left:auto;background:#0f7c72;color:#fff;border:none;padding:6px 12px;border-radius:7px;font:600 11.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
   .pp-anno-send:hover{background:#0b6358}.pp-anno-send:disabled{opacity:.4;cursor:default}
-  .pp-anno-ghost{background:#fff;border:1px solid #e1e4e6;color:#6b7480;padding:6px 12px;border-radius:7px;font:600 12.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer}
+  .pp-anno-ghost{background:#fff;border:1px solid #e1e4e6;color:#8a929b;padding:6px 11px;border-radius:7px;font:600 11.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer}
   .pp-anno-ghost:hover{border-color:#0f7c72;color:#0f7c72}
-  .pp-anno-seltag{margin-left:auto;font:600 11px/1 'JetBrains Mono',monospace;color:#b3b9bf;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
-  /* ── List 暗色弹层 ── */
-  .pp-anno-list{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:2147482900;width:330px;max-width:calc(100vw - 24px);background:#15191c;border-radius:13px;box-shadow:0 22px 60px -18px rgba(17,22,27,.6);overflow:hidden;animation:ppPop .16s cubic-bezier(.2,1.3,.4,1)}
-  .pp-anno-list-hd{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.08);color:#fff;font-weight:700;font-size:13.5px}
-  .pp-anno-list-hd .pp-cnt{font:600 12px/1 'JetBrains Mono',monospace;color:#9aa1a9}
-  .pp-anno-list-hd .pp-note{margin-left:auto;font-size:11px;color:#7fe3d6;font-weight:600}
-  .pp-anno-list-body{max-height:320px;overflow-y:auto;padding:6px}
-  .pp-anno-li{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;cursor:pointer}
-  .pp-anno-li:hover{background:rgba(255,255,255,.06)}
-  .pp-anno-li-num{width:19px;height:19px;border-radius:50% 50% 50% 3px;flex:none;display:grid;place-items:center;color:#fff;font:700 10.5px/1 'Hanken Grotesk',sans-serif}
-  .pp-anno-li-who{font-size:12.5px;font-weight:600;color:#fff;flex:none}
-  .pp-anno-li-kind{font-size:11.5px;font-weight:600;flex:none}
-  .pp-anno-li-txt{font-size:12px;color:#9aa1a9;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pp-anno-li-note{font-size:11px;font-weight:600}
-  .pp-anno-li-link{border:none;background:none;cursor:pointer;color:#9aa1a9;padding:3px;border-radius:6px;display:inline-flex;opacity:0}
-  .pp-anno-li:hover .pp-anno-li-link{opacity:.8}.pp-anno-li-link:hover{opacity:1!important;color:#7fe3d6}
-  .pp-anno-li.pp-anno-stale{background:rgba(176,132,35,.1)}
-  .pp-anno-empty{text-align:center;color:#9aa1a9;font-size:12.5px;padding:34px 22px;line-height:1.7}
-  /* ── caught-up / toast ── */
-  .pp-anno-caught{display:inline-flex;align-items:center;gap:7px;padding:0 6px 0 13px;color:#7fe3d6;font-weight:600;font-size:13px}
-  .pp-anno-toast{position:fixed;bottom:74px;left:50%;transform:translateX(-50%);z-index:2147483100;background:#15191c;color:#f3efe7;font-size:12.5px;font-weight:500;padding:9px 16px;border-radius:9px;box-shadow:0 10px 28px -8px rgba(15,124,114,.6);animation:ppPop .2s}
-  /* ── 收起态（命令条第 5 形态：tuck 成一颗 pin teardrop，同 bar 的暗色 chrome） ── */
-  .pp-anno-collapsed{position:fixed;width:48px;height:48px;z-index:2147483001;display:grid;place-items:center;background:#15191c;color:#e7ebee;box-shadow:0 14px 40px -10px rgba(17,22,27,.55),0 2px 6px rgba(17,22,27,.3);cursor:grab;user-select:none;pointer-events:auto;touch-action:none;transition:transform .16s,box-shadow .16s;animation:ppDotIn .18s cubic-bezier(.2,1.3,.4,1)}
-  .pp-anno-collapsed:hover{transform:scale(1.07);box-shadow:0 18px 48px -10px rgba(17,22,27,.6),0 2px 8px rgba(17,22,27,.35)}
-  .pp-anno-collapsed:focus-visible{outline:2px solid #7fe3d6;outline-offset:3px}
-  .pp-anno-collapsed.pp-anno-zero{color:#7fe3d6}
-  .pp-anno-collapsed.pp-anno-dragging{cursor:grabbing;transition:none;animation:none}
-  .pp-anno-collapsed .pp-anno-ic svg{width:21px;height:21px}
-  @keyframes ppDotIn{from{opacity:0;transform:scale(.4)}}
-  .pp-anno-cn{position:absolute;top:-5px;right:-5px;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:#14958a;color:#fff;font:600 11px/19px 'JetBrains Mono',monospace;text-align:center;box-shadow:0 0 0 2px #15191c}
-  .pp-anno-bar.pp-anno-barin{animation:ppBarIn .18s cubic-bezier(.2,1.3,.4,1)}
-  @keyframes ppBarIn{from{opacity:0;transform:translateX(-50%) scale(.9)}}
-  @media (max-width:640px){.pp-anno-bar{flex-wrap:wrap;justify-content:center}.pp-anno-list{width:calc(100vw - 24px)}}
-  @media (prefers-reduced-motion:reduce){.pp-anno-root *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
-  @media print{.pp-anno-root{display:none!important}}
+  .pp-anno-del{color:#b14a42!important}
+  .pp-anno-del.pp-anno-armed{color:#fff!important;background:#c2361b!important;padding:5px 8px!important}
+  /* 草稿卡 */
+  .pp-anno-draft{border:2px solid #0f7c72;box-shadow:0 14px 30px -12px rgba(17,22,27,.18)}
+  .pp-anno-draft.pp-anno-shaking{animation:ppShake .3s}
+  @keyframes ppShake{0%,100%{margin-left:0}25%{margin-left:-7px}75%{margin-left:7px}}
+  .pp-anno-seltag{margin-left:auto;font:600 10px/1 'JetBrains Mono',monospace;color:#8a929b;background:#f1f3f4;border-radius:6px;padding:3px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+  /* 空态 */
+  .pp-anno-empty{text-align:center;color:#9aa1a9;font-size:12px;padding:30px 18px;line-height:1.7}
+  /* ── 收起 tab（抽屉第 2 形态：右缘竖条） ── */
+  .pp-anno-tab{position:fixed;top:50%;right:0;transform:translateY(-50%);z-index:2147483000;display:flex;align-items:center;gap:6px;border:1px solid #e1e4e6;border-right:none;background:#fff;color:#3a424b;cursor:pointer;padding:13px 8px;border-radius:11px 0 0 11px;box-shadow:-6px 0 20px -12px rgba(17,22,27,.4);font:700 11px/1 'Hanken Grotesk',sans-serif;writing-mode:vertical-rl;animation:ppTabIn .2s cubic-bezier(.2,1.3,.4,1)}
+  .pp-anno-tab:hover{transform:translateY(-50%) translateX(-2px)}
+  .pp-anno-tab:focus-visible{outline:2px solid #0f7c72;outline-offset:2px}
+  .pp-anno-tab .pp-anno-ic{transform:rotate(90deg)}
+  .pp-anno-tab .pp-anno-tabdot{writing-mode:horizontal-tb;background:#14958a;color:#fff;border-radius:999px;min-width:16px;height:16px;font:700 9.5px/16px 'JetBrains Mono',monospace;text-align:center;padding:0 4px}
+  @keyframes ppTabIn{from{opacity:0;transform:translateY(-50%) translateX(10px)}}
+  /* ── toast ── */
+  .pp-anno-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:2147483100;background:#15191c;color:#f3efe7;font-size:12.5px;font-weight:500;padding:9px 16px;border-radius:9px;box-shadow:0 10px 28px -8px rgba(15,124,114,.6);animation:ppPop .2s;display:inline-flex;align-items:center;gap:7px}
+  .pp-anno-toast .pp-anno-ic{color:#7fe3d6}
+  @keyframes ppPop{from{opacity:0;transform:translateX(-50%) translateY(6px)}}
+  .pp-anno-aimhint{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:2147483100;background:rgba(17,22,27,.92);color:#fff;font:500 12px/1 'Hanken Grotesk',sans-serif;padding:9px 14px;border-radius:9px;box-shadow:0 10px 28px -10px rgba(17,22,27,.5);animation:ppPop .2s}
+  @media (max-width:520px){.pp-anno-drawer{width:100vw}.pp-anno-drawer.pp-anno-closed{transform:translateX(100vw)}}
+  @media (prefers-reduced-motion:reduce){.pp-anno-root *,.pp-anno-drawer,.pp-anno-drawer *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+  @media print{.pp-anno-root,.pp-anno-drawer,.pp-anno-tab{display:none!important}}
   `;
 
   /* ---------------- UI 骨架 ---------------- */
-  let root, layer, bar, listEl, dotEl;
-  let draggingDot = false;
-  let dragActive = false; // 拖拽 session 进行中（防重入；区别于 draggingDot=已移动）
+  let root, layer, drawer, listEl, tabEl;
 
   function buildUI() {
     const style = document.createElement('style');
@@ -278,191 +309,25 @@
     root.dataset.ppAnno = '1';
     root.dataset.ppReady = '1'; // e2e「层就绪」门
     layer = el('div', 'pp-anno-layer');
-    bar = el('div', 'pp-anno-bar');
-    bar.dataset.ppAnno = '1';
-    bar.dataset.ppRole = 'bar';
-    dotEl = el('div', 'pp-anno-collapsed');
-    dotEl.dataset.ppAnno = '1';
-    dotEl.dataset.ppRole = 'collapsed';
-    dotEl.tabIndex = 0;
-    dotEl.setAttribute('role', 'button');
-    dotEl.setAttribute('aria-label', 'Open comments'); // 可访问名仅由 aria-label 提供（不设 title，避免重复读）
-    dotEl.style.display = 'none';
-    bindCollapseDrag();
-    loadCollapse(); // 先确定收起态，使 bar 永不以可见态插入 DOM（消除恢复时的一帧闪条）
-    if (state.collapsed) bar.style.display = 'none';
-    root.append(layer, bar, dotEl);
+
+    drawer = el('aside', 'pp-anno-drawer');
+    drawer.dataset.ppAnno = '1';
+    drawer.dataset.ppRole = 'drawer';
+    if (!state.railOpen) drawer.classList.add('pp-anno-closed');
+
+    tabEl = el('button', 'pp-anno-tab');
+    tabEl.dataset.ppAnno = '1';
+    tabEl.dataset.ppRole = 'tab';
+    tabEl.setAttribute('aria-label', 'Open review drawer');
+    tabEl.onclick = () => setRail(true);
+    tabEl.style.display = state.railOpen ? 'none' : '';
+
+    root.append(layer, drawer, tabEl);
     document.body.appendChild(root);
-    renderBar();
-    // 从上次会话恢复收起态：把 dot 摆到记忆的角落
-    if (state.collapsed) { renderCollapse(); dotEl.style.display = ''; }
+    renderDrawer();
   }
 
-  /* ---------------- 命令条变形 ---------------- */
-  const openCount = () => state.threads.filter((t) => !t.resolved).length;
-  const barBtn = (label, icon, cls, act, onClick, title) => {
-    const b = el('button', cls || null);
-    if (icon) b.appendChild(svg(icon, 15));
-    if (label != null) b.appendChild(document.createTextNode(label));
-    if (act) b.dataset.ppAct = act;
-    if (title) b.title = title;
-    b.onclick = onClick;
-    return b;
-  };
-
-  function renderBar() {
-    if (!bar) return;
-    bar.textContent = '';
-    bar.dataset.ppMode = state.mode;
-    if (state.mode === 'comment') {
-      const dot = el('span', 'pp-anno-dot');
-      const lab = el('span', 'pp-lab-teal pp-anno-kindtag', 'Comment mode');
-      const instr = el('span', 'pp-instr', '⌘+click an element, or drag on an image');
-      bar.append(dot, lab, instr, barBtn('Done', null, 'pp-b-soft', 'done', cancelComment));
-      return;
-    }
-    if (state.mode === 'walk') {
-      const u = unresolved();
-      const i = u.findIndex((t) => t.id === state.walk.curId);
-      if (i < 0 || !u.length) { // caught-up 形态
-        const remaining = openCount();
-        const c = el('span', 'pp-anno-caught');
-        c.appendChild(svg(ICON.check, 15));
-        c.appendChild(document.createTextNode(remaining ? `End of queue · ${remaining} open` : 'All caught up · 0 open'));
-        bar.append(c, barBtn('Done', null, 'pp-b-soft', 'exit', exitWalk));
-        return;
-      }
-      const lead = el('span', 'pp-anno-kindtag'); lead.style.color = '#cdd3d9'; lead.style.padding = '0 4px 0 8px';
-      lead.appendChild(svg(ICON.play, 13)); lead.appendChild(document.createTextNode('Review walk'));
-      const prev = barBtn(null, ICON.prev, 'pp-b-soft pp-anno-rbtn', 'prev', () => step(-1), 'Previous (K)');
-      const counter = el('span', 'pp-anno-counter', `${i + 1}/${u.length}`);
-      const cur = u[i];
-      const tag = el('span', 'pp-anno-kindtag');
-      const m = cur.kind && KIND[cur.kind];
-      tag.style.color = m ? m.color : '#9aa1a9';
-      const ti = el('i'); ti.style.background = m ? m.color : NO_KIND; tag.append(ti, document.createTextNode(m ? m.label : 'No kind'));
-      const next = barBtn(null, ICON.next, 'pp-b-soft pp-anno-rbtn', 'next', () => step(1), 'Next (J)');
-      const rn = barBtn('Resolve & next', ICON.check, 'pp-b-primary', 'resolve-next', resolveNext);
-      const kbd = el('span', 'pp-anno-kbd', 'J K R');
-      const exit = barBtn(null, ICON.x, 'pp-anno-rbtn', 'exit', exitWalk, 'Exit (Esc)');
-      bar.append(lead, prev, counter, tag, next, el('div', 'pp-anno-sep'), rn, kbd, exit);
-      return;
-    }
-    // resting
-    const comment = barBtn('Comment', ICON.msg, 'pp-b-primary', 'comment', () => enterComment());
-    const cnt = el('span', 'pp-anno-count', String(openCount()));
-    comment.appendChild(cnt);
-    const filter = barBtn(state.filter === 'open' ? 'Open' : 'All', ICON.filter, null, 'filter', toggleFilter);
-    const whole = barBtn('Whole page', ICON.plus, null, 'whole', openComposerForPage);
-    const list = barBtn('List', ICON.list, state.listOpen ? 'pp-b-on' : 'pp-b-soft', 'list', toggleList);
-    const review = barBtn('Review', ICON.play, 'pp-b-soft', 'review', startReview);
-    // Tuck：纯图标，最右、分隔线之后，与动作隔开，绝不抢 Comment / Review
-    const collapse = barBtn(null, ICON.minimize, 'pp-anno-rbtn', 'collapse', () => setCollapsed(true), 'Tuck away');
-    bar.append(comment, filter, whole, list, el('div', 'pp-anno-sep'), review, el('div', 'pp-anno-sep'), collapse);
-  }
-
-  function toggleFilter() { state.filter = state.filter === 'open' ? 'all' : 'open'; renderBar(); render(); }
-
-  /* ---------------- 收起态（命令条第 5 形态：tuck → dot → restore） ---------------- */
-  // teardrop 尖角按所停角落镜像，始终朝向页面内侧
-  const TEARDROP = { tl: '50% 50% 6px 50%', tr: '50% 50% 50% 6px', bl: '50% 6px 50% 50%', br: '6px 50% 50% 50%' };
-  const CORNER_GAP = 18;
-
-  function placeCollapse() {
-    if (!dotEl) return;
-    const c = state.collapseCorner;
-    dotEl.style.top = dotEl.style.bottom = dotEl.style.left = dotEl.style.right = '';
-    dotEl.style[c[0] === 't' ? 'top' : 'bottom'] = CORNER_GAP + 'px';
-    dotEl.style[c[1] === 'l' ? 'left' : 'right'] = CORNER_GAP + 'px';
-    dotEl.style.borderRadius = TEARDROP[c] || TEARDROP.tl;
-  }
-  function paintCollapse() {
-    if (!dotEl) return;
-    dotEl.textContent = '';
-    dotEl.appendChild(svg(ICON.msg, 21));
-    const open = openCount();
-    dotEl.classList.toggle('pp-anno-zero', open === 0); // 零未解决 = 安静 teal dot，无数字
-    dotEl.setAttribute('aria-label', open > 0 ? `Open comments (${open} unresolved)` : 'Open comments (all resolved)');
-    if (open > 0) {
-      const cn = el('span', 'pp-anno-cn', String(open));
-      cn.dataset.ppRole = 'collapsed-count';
-      dotEl.appendChild(cn);
-    }
-  }
-  function renderCollapse() { placeCollapse(); paintCollapse(); }
-
-  function setCollapsed(on) {
-    if (on === state.collapsed) return;
-    if (!on) { if (closePopup()) expand(); return; } // 恢复前也清弹层（对称草稿保护；收起态通常无弹层）
-    if (!closePopup()) return; // composer 有未发草稿：shake 提示，不收起（草稿不丢）
-    if (state.listOpen) toggleList();
-    state.collapsed = true;
-    persistCollapse();
-    bar.style.display = 'none';
-    renderCollapse();
-    dotEl.style.display = '';
-  }
-  // 展开 = 离开收起态：任何交互（进 comment/walk、开任何弹层）前都先 expand
-  function expand() {
-    if (!state.collapsed) return;
-    const refocus = document.activeElement === dotEl; // 键盘从 dot 触发：展开后把焦点带进命令条
-    state.collapsed = false;
-    persistCollapse();
-    dotEl.style.display = 'none';
-    bar.style.display = '';
-    bar.classList.remove('pp-anno-barin'); void bar.offsetWidth; bar.classList.add('pp-anno-barin');
-    renderBar();
-    if (refocus) { const b = bar.querySelector('button'); if (b) b.focus(); }
-  }
-  function bindCollapseDrag() {
-    // 键盘可达：Enter/Space 恢复命令条（拖拽进行中忽略键盘，避免冲突）
-    dotEl.addEventListener('keydown', (e) => {
-      if (draggingDot) return;
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(false); }
-    });
-    // 拖拽用 Pointer Events + setPointerCapture：跨 iframe / 移出窗口都能收到 up（mouseup 会丢），并顺带支持触屏
-    dotEl.addEventListener('pointerdown', (down) => {
-      if (down.pointerType === 'mouse' && down.button !== 0) return; // 鼠标只响应左键
-      if (dragActive) return; // 防重入：同一时刻只允许一个拖拽 session
-      dragActive = true;
-      down.preventDefault();
-      down.stopPropagation();
-      try { dotEl.setPointerCapture(down.pointerId); } catch (e) { /* 不支持则退化 */ }
-      const r = dotEl.getBoundingClientRect();
-      const offX = down.clientX - r.left, offY = down.clientY - r.top;
-      let moved = false;
-      const onMove = (e) => {
-        if (!moved) {
-          if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 5) return;
-          moved = true; draggingDot = true; dotEl.classList.add('pp-anno-dragging');
-        }
-        dotEl.style.top = (e.clientY - offY) + 'px';
-        dotEl.style.left = (e.clientX - offX) + 'px';
-        dotEl.style.right = dotEl.style.bottom = 'auto';
-      };
-      const onUp = (e) => {
-        dotEl.removeEventListener('pointermove', onMove);
-        dotEl.removeEventListener('pointerup', onUp);
-        dotEl.removeEventListener('pointercancel', onUp);
-        try { dotEl.releasePointerCapture(down.pointerId); } catch (e) { /* ignore */ }
-        try {
-          if (!moved) { setCollapsed(false); return; } // 没拖动 = 点击/轻触 → 恢复
-          // 吸附到最近角
-          state.collapseCorner = (e.clientY < innerHeight / 2 ? 't' : 'b') + (e.clientX < innerWidth / 2 ? 'l' : 'r');
-          persistCollapse();
-          placeCollapse();
-        } finally { // 无论吸附是否抛错/手势是否被取消，都复位标记，避免 dot 卡死
-          draggingDot = false; dragActive = false;
-          dotEl.classList.remove('pp-anno-dragging');
-        }
-      };
-      dotEl.addEventListener('pointermove', onMove);
-      dotEl.addEventListener('pointerup', onUp);
-      dotEl.addEventListener('pointercancel', onUp); // 系统取消手势（如来电、四指切换）兜底复位
-    });
-  }
-
-  /* ---------------- 锚点解析（保留） ---------------- */
+  /* ---------------- 锚点解析（逐字保留） ---------------- */
   const isPage = (t) => t.selector === PAGE_SELECTOR;
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
   const fingerprint = (node) => norm(node.textContent).slice(0, 80);
@@ -492,20 +357,31 @@
   }
   const anchorXY = (t) => { const a = resolveAnchor(t); return a.status === 'ok' || a.status === 'clipped' ? a.pos : null; };
   const visibleThreads = () => state.threads.filter((t) => state.filter === 'all' || !t.resolved);
-  const unresolved = () => state.threads.filter((t) => !t.resolved); // Walk 队列 = 未解决，文档序
+  const unresolved = () => state.threads.filter((t) => !t.resolved);
   const byId = (id) => state.threads.find((t) => t.id === id) || null;
 
-  /* ---------------- 渲染 pin/region（保留几何，换 kind 上色） ---------------- */
+  /* ---------------- 排序：ok 锚点按页面纵向位置（文档序），page/lost/changed 垫后 ---------------- */
+  function orderedVisible() {
+    const items = visibleThreads().map((t) => ({ t, a: resolveAnchor(t) }));
+    const rank = (s) => (s === 'ok' || s === 'clipped' ? 0 : s === 'page' ? 1 : 2);
+    items.sort((x, y) => {
+      const rx = rank(x.a.status), ry = rank(y.a.status);
+      if (rx !== ry) return rx - ry;
+      if (rx === 0) return (x.a.pos.y - y.a.pos.y) || (x.a.pos.x - y.a.pos.x);
+      return 0;
+    });
+    return items;
+  }
+
+  /* ---------------- 渲染 pin / region / 发光环（保留几何） ---------------- */
   function render() {
     if (!layer) return;
-    layer.querySelectorAll('.pp-anno-pin, .pp-anno-region').forEach((n) => n.remove());
-    if (state.openPopup && state.openPopup._getPos) {
-      const pp = state.openPopup._getPos();
-      if (pp) positionPopup(state.openPopup, pp.x, pp.y);
-    }
+    layer.querySelectorAll('.pp-anno-pin, .pp-anno-region, .pp-anno-glow').forEach((n) => n.remove());
+    const ordered = orderedVisible();
     let n = 0;
-    for (const t of visibleThreads()) {
-      const a = resolveAnchor(t);
+    let focusedRect = null;
+    for (const { t, a } of ordered) {
+      if (a.status !== 'ok' && a.status !== 'clipped') { t._num = null; continue; }
       if (a.status !== 'ok') { t._num = null; continue; }
       const pos = a.pos;
       n += 1;
@@ -525,267 +401,591 @@
         layer.appendChild(reg);
       }
       const pin = el('div', 'pp-anno-pin' + (t.resolved ? ' pp-anno-resolved' : '')
-        + (state.openThreadId === t.id ? ' pp-anno-current' : ''));
+        + (state.focusedId === t.id ? ' pp-anno-current' : ''));
       pin.dataset.ppAnno = '1';
       pin.dataset.ppRole = 'marker';
       pin.dataset.tid = t.id;
       pin.style.left = pos.x + 'px';
       pin.style.top = pos.y + 'px';
       pin.style.background = col;
-      if (t.resolved) { pin.textContent = ''; pin.appendChild(svg(ICON.check, 14)); }
+      if (t.resolved) { pin.textContent = ''; pin.appendChild(svg(ICON.check, 13)); }
       else pin.textContent = String(n);
-      pin.onclick = (e) => { e.stopPropagation(); gotoPin(t.id); };
+      pin.onclick = (e) => { e.stopPropagation(); focusThread(t.id, true); };
       layer.appendChild(pin);
+      if (state.focusedId === t.id && !t.resolved && a.el) focusedRect = a.el.getBoundingClientRect();
     }
+    // 发光相机：聚焦元素套环（未解决、ok 锚点）
+    if (focusedRect) {
+      const ft = byId(state.focusedId);
+      const accent = ft ? kindColor(ft) : '#0f7c72';
+      const g = el('div', 'pp-anno-glow');
+      g.dataset.ppAnno = '1';
+      g.style.left = (focusedRect.left + scrollX - 5) + 'px';
+      g.style.top = (focusedRect.top + scrollY - 5) + 'px';
+      g.style.width = (focusedRect.width + 10) + 'px';
+      g.style.height = (focusedRect.height + 10) + 'px';
+      g.style.boxShadow = `0 0 0 2px ${accent},0 0 0 7px ${accent}22,0 0 26px 2px ${accent}33`;
+      layer.appendChild(g);
+    }
+    // 草稿框的区域预览（box-select）随滚动重摆
+    if (state.draft && state.draft.box && state.draft._rubberPos) {
+      const rb = layer.querySelector('.pp-anno-rubber');
+      const p = state.draft._rubberPos();
+      if (rb && p) { rb.style.left = p.x + 'px'; rb.style.top = p.y + 'px'; rb.style.width = p.w + 'px'; rb.style.height = p.h + 'px'; }
+    }
+    syncDrawerCounts();
+  }
+
+  /* ---------------- 抽屉渲染 ---------------- */
+  const openCount = () => state.threads.filter((t) => !t.resolved).length;
+
+  function setRail(open, opts) {
+    opts = opts || {};
+    if (open === state.railOpen) return;
+    if (!open && !opts.force) {
+      // 收起前清未发草稿（草稿保护：有稿则抖动拦截）
+      if (state.draft && draftHasText() && !opts.discard) { shakeDraft(); return; }
+    }
+    state.railOpen = open;
+    if (!opts.auto) persistRail(); // 自动收起不写盘（只记手动偏好）
+    drawer.classList.toggle('pp-anno-closed', !open);
+    tabEl.style.display = open ? 'none' : '';
+    if (open) { renderDrawer(); requestAnimationFrame(() => scrollFocusedCardIntoView()); }
+    else if (opts.refocusTab) tabEl.focus();
+    syncDrawerCounts(); // 收起时也要把 tab 的图标/未解决数画出来
+    syncFlags();
+  }
+
+  function renderDrawer() {
+    if (!drawer) return;
+    drawer.textContent = '';
     const open = openCount();
-    const cntEl = bar && bar.querySelector('.pp-anno-count');
-    if (cntEl) cntEl.textContent = String(open);
-    if (state.collapsed && !draggingDot) paintCollapse(); // 收起态：dot 上的未解决数跟随
-    if (state.listOpen) renderList();
-  }
+    const total = state.threads.length;
 
-  /* ---------------- List 暗色弹层 ---------------- */
-  function toggleList() { state.listOpen = !state.listOpen; if (state.listOpen) renderList(); else removeList(); syncFlags(); renderBar(); }
-  function removeList() { if (listEl) { listEl.remove(); listEl = null; } }
-  function renderList() {
-    removeList();
-    listEl = el('div', 'pp-anno-list');
-    listEl.dataset.ppAnno = '1';
+    // header
+    const hd = el('div', 'pp-anno-dwh');
+    const top = el('div', 'pp-anno-dwh-top');
+    const brand = el('span', 'pp-anno-brand');
+    const bi = el('i'); bi.appendChild(svg(ICON.cmd, 12)); brand.append(bi, document.createTextNode('Review'));
+    const collapse = el('button', 'pp-anno-dwh-collapse'); collapse.dataset.ppAct = 'collapse'; collapse.title = 'Hide drawer (\\)';
+    collapse.appendChild(svg(ICON.arrowR, 14));
+    collapse.onclick = () => setRail(false, { refocusTab: true });
+    top.append(brand, collapse);
+
+    const meta = el('div', 'pp-anno-dwh-meta');
+    meta.appendChild(el('span', 'pp-anno-dwh-sub', total ? `${open} open · ${total} total` : 'No comments yet'));
+    const seg = el('div', 'pp-anno-seg');
+    const segOpen = el('button', state.filter === 'open' ? 'pp-anno-on' : null, `Open ${open}`);
+    segOpen.dataset.ppAct = 'filter'; segOpen.dataset.ppFilter = 'open';
+    segOpen.onclick = () => setFilter('open');
+    const segAll = el('button', state.filter === 'all' ? 'pp-anno-on' : null, 'All');
+    segAll.dataset.ppFilter = 'all';
+    segAll.onclick = () => setFilter('all');
+    seg.append(segOpen, segAll);
+    meta.append(seg);
+
+    const acts = el('div', 'pp-anno-dwh-acts');
+    const cbtn = el('button', 'pp-anno-cbtn' + (state.mode === 'comment' ? ' pp-anno-on' : ''));
+    cbtn.dataset.ppAct = 'comment';
+    cbtn.appendChild(svg(ICON.plus, 14));
+    cbtn.appendChild(document.createTextNode(state.mode === 'comment' ? 'Click an element…' : 'Comment'));
+    cbtn.onclick = () => (state.mode === 'comment' ? exitComment() : enterComment());
+    const wbtn = el('button', 'pp-anno-wbtn'); wbtn.dataset.ppAct = 'whole'; wbtn.title = 'Note on the whole page';
+    wbtn.appendChild(svg(ICON.msg, 13));
+    wbtn.onclick = openDraftForPage;
+    acts.append(cbtn, wbtn);
+
+    hd.append(top, meta, acts);
+    drawer.appendChild(hd);
+
+    // list
+    listEl = el('div', 'pp-anno-dwlist');
     listEl.dataset.ppRole = 'list';
-    const u = unresolved();
-    const hd = el('div', 'pp-anno-list-hd');
-    hd.append(document.createTextNode('Open threads'), el('span', 'pp-cnt', String(u.length)), el('span', 'pp-note', 'document order'));
-    listEl.appendChild(hd);
-    const body = el('div', 'pp-anno-list-body');
-    if (!u.length) {
-      body.appendChild(el('div', 'pp-anno-empty', state.threads.length
-        ? 'No open threads.' : 'No comments yet. Hold ⌘ and click any element to start a thread — or use Whole page for overall notes.'));
+    const ordered = orderedVisible();
+    if (!ordered.length && !state.draft) {
+      listEl.appendChild(el('div', 'pp-anno-empty', total
+        ? 'No open threads. Switch to All to see resolved ones.'
+        : 'No comments yet.\nClick Comment then an element — or drag on an image to box a region.'));
     } else {
-      // 文档序：先 ok-anchor 的（带号），再 page/lost/changed
-      const withNum = u.map((t) => ({ t, a: resolveAnchor(t) }));
-      withNum.sort((x, y) => (x.t._num || 999) - (y.t._num || 999));
-      for (const { t, a } of withNum) body.appendChild(listItem(t, a));
+      for (const { t, a } of ordered) listEl.appendChild(threadCard(t, a));
     }
-    listEl.appendChild(body);
-    root.appendChild(listEl);
+    if (state.draft) listEl.appendChild(draftCard());
+    drawer.appendChild(listEl);
+
+    // hint strip
+    const hint = el('div', 'pp-anno-dwhint');
+    const kp = (k, label) => { const w = el('span', 'pp-anno-kpair'); w.appendChild(el('kbd', null, k)); w.appendChild(document.createTextNode(label)); return w; };
+    hint.append(kp('j/k', 'move'), kp('c', 'comment'), kp('r', 'resolve'), kp('\\', 'hide'));
+    drawer.appendChild(hint);
+
+    if (state.focusedId) requestAnimationFrame(() => scrollFocusedCardIntoView());
   }
-  function listItem(t, a) {
-    const c0 = t.comments[0];
-    const m = t.kind && KIND[t.kind];
+
+  function syncDrawerCounts() {
+    const open = openCount();
+    if (drawer && state.railOpen) {
+      const sub = drawer.querySelector('.pp-anno-dwh-sub');
+      const total = state.threads.length;
+      if (sub) sub.textContent = total ? `${open} open · ${total} total` : 'No comments yet';
+      const so = drawer.querySelector('[data-pp-filter="open"]');
+      if (so) so.textContent = `Open ${open}`;
+    }
+    if (tabEl && !state.railOpen) {
+      tabEl.textContent = '';
+      tabEl.appendChild(svg(ICON.cmd, 14));
+      tabEl.appendChild(document.createTextNode('Review'));
+      if (open > 0) { const d = el('span', 'pp-anno-tabdot', String(open)); d.dataset.ppRole = 'tab-count'; tabEl.appendChild(d); }
+      tabEl.setAttribute('aria-label', open > 0 ? `Open review drawer (${open} unresolved)` : 'Open review drawer (all resolved)');
+    }
+  }
+
+  function setFilter(f) {
+    if (state.filter === f) return;
+    state.filter = f;
+    // 切到 open 时，若聚焦的是已解决线程，清焦点
+    if (f === 'open') { const ft = byId(state.focusedId); if (ft && ft.resolved) state.focusedId = null; }
+    renderDrawer();
+    render();
+  }
+
+  /* ---------------- 线程卡（折叠摘要 / 聚焦展开） ---------------- */
+  function avatar(name, size) {
+    const a = el('div', 'pp-anno-ava', initialOf(name));
+    a.style.width = a.style.height = size + 'px';
+    a.style.fontSize = (size * 0.42) + 'px';
+    a.style.background = avatarColor(name);
+    return a;
+  }
+
+  function threadCard(t, a) {
+    const focused = state.focusedId === t.id;
+    const col = kindColor(t);
+    const accent = t.resolved ? '#d7dadd' : (t.kind && KIND[t.kind] ? KIND[t.kind].color : NO_KIND);
     const stale = a.status === 'lost' || a.status === 'changed';
-    const row = el('div', 'pp-anno-li' + (stale ? ' pp-anno-stale' : ''));
-    row.dataset.ppRole = 'list-item';
-    row.dataset.tid = t.id;
-    row.dataset.ppStatus = a.status;
-    const num = el('span', 'pp-anno-li-num', isPage(t) ? '¶' : (stale ? '!' : (t._num != null ? String(t._num) : '•')));
-    num.style.background = isPage(t) ? '#5d574d' : (stale ? '#b08423' : (m ? m.color : NO_KIND));
-    if (stale) { num.style.background = '#fff8ee'; num.style.color = '#b08423'; num.style.border = '1.5px dashed #aab2bb'; }
-    const who = el('span', 'pp-anno-li-who', c0.author_name);
-    row.append(num, who);
-    if (m) { const k = el('span', 'pp-anno-li-kind', m.label); k.style.color = m.color; row.appendChild(k); }
-    const note = stale
-      ? el('span', 'pp-anno-li-note', `⚠ Anchor lost — was on ${t.selector}`)
-      : el('span', 'pp-anno-li-txt', c0.text);
-    if (stale) note.style.color = '#b08423';
-    row.appendChild(note);
-    const link = el('button', 'pp-anno-li-link');
-    link.dataset.ppRole = 'copy-link';
-    link.title = 'Copy link';
-    link.appendChild(svg(ICON.link, 13));
-    link.onclick = (e) => { e.stopPropagation(); copyThreadLink(t); };
-    row.appendChild(link);
-    row.onclick = () => { gotoPin(t.id); };
-    return row;
-  }
+    const card = el('div', 'pp-anno-card'
+      + (focused ? ' pp-anno-focused' : '')
+      + (t.resolved && !focused ? ' pp-anno-dim' : ''));
+    card.dataset.ppRole = 'card';
+    card.dataset.tid = t.id;
+    card.dataset.ppStatus = a.status;
+    card.dataset.ppNum = isPage(t) ? 'page' : (stale ? 'stale' : (t._num != null ? String(t._num) : ''));
+    if (focused) card.dataset.ppFocused = '1';
+    card.onclick = () => { if (!focused) focusThread(t.id, true); };
 
-  /* ---------------- 弹层定位（保留） ---------------- */
-  let popupTarget = null;
-  function setBound(node) {
-    document.querySelectorAll('.pp-anno-bound').forEach((n) => n.classList.remove('pp-anno-bound'));
-    if (node && node !== document.body && !node.closest('[data-pp-anno]')) node.classList.add('pp-anno-bound');
-  }
-  function threadEl(t) {
-    if (isPage(t)) return null;
-    try { return document.querySelector(t.selector); } catch (e) { return null; }
-  }
-  function positionPopup(p, x, y) {
-    const w = p.offsetWidth || 300, h = p.offsetHeight || 240;
-    const vw = document.documentElement.clientWidth;
-    // 侧向感知：优先放 pin 右侧，放不下翻左侧
-    let left = x + 30;
-    if (left + w > scrollX + vw - 12) left = x - w - 18;
-    p.style.left = Math.max(scrollX + 8, left) + 'px';
-    let top = y - 18;
-    if (top + h > scrollY + innerHeight - 12) top = scrollY + innerHeight - h - 12;
-    p.style.top = Math.max(scrollY + 8, top) + 'px';
-  }
-  const centerPos = () => ({ x: scrollX + document.documentElement.clientWidth / 2 - 150, y: scrollY + innerHeight / 3 });
+    const rail = el('span', 'pp-anno-card-rail'); rail.style.background = accent; card.appendChild(rail);
 
-  function popupHasDraft() {
-    if (!state.openPopup) return false;
-    const ta = state.openPopup.querySelector('textarea');
-    return !!(ta && ta.value.trim());
-  }
-  let lastShakeHint = 0;
-  function shakePopup() {
-    const p = state.openPopup;
-    if (!p) return;
-    p.classList.remove('pp-anno-shaking');
-    void p.offsetWidth;
-    p.classList.add('pp-anno-shaking');
-    p.querySelector('textarea')?.focus();
-    if (Date.now() - lastShakeHint > 2500) { lastShakeHint = Date.now(); toast('Unsent comment — post it, or press Esc to discard'); }
-  }
-  const draftStash = new Map();
-
-  function closePopup(force) {
-    if (!state.openPopup) return true;
-    const ta = state.openPopup.querySelector('textarea');
-    const draft = ta ? ta.value.trim() : '';
-    if (state.openThreadId) {
-      if (force || !draft) draftStash.delete(state.openThreadId);
-      else draftStash.set(state.openThreadId, ta.value);
-    } else if (!force && draft) {
-      shakePopup();
-      return false; // composer 草稿保护
+    if (t.resolved && focused) {
+      const banner = el('div', 'pp-anno-resolved-banner');
+      banner.appendChild(svg(ICON.checks, 12));
+      banner.appendChild(document.createTextNode('Resolved'));
+      card.appendChild(banner);
     }
-    if (state.openPopup._cleanup) state.openPopup._cleanup();
-    state.openPopup.remove();
-    state.openPopup = null;
-    state.openThreadId = null;
-    popupTarget = null;
-    setBound(null);
-    layer.querySelectorAll('.pp-anno-pin.pp-anno-current').forEach((n) => n.classList.remove('pp-anno-current'));
-    syncFlags();
-    return true;
-  }
-  function popupShell(x, y, role) {
-    if (state.collapsed) expand(); // 收起态下要弹任何面板（composer/popover）：先展开 bar
-    if (!closePopup()) return null;
-    const p = el('div', 'pp-anno-popup');
-    p.dataset.ppAnno = '1';
-    p.dataset.ppRole = role;
-    layer.appendChild(p);
-    state.openPopup = p;
-    syncFlags();
-    if (hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
-    p.style.left = x + 'px';
-    p.style.top = y + 'px';
-    p.style.visibility = 'hidden';
-    requestAnimationFrame(() => { positionPopup(p, x, y); p.style.visibility = ''; });
-    return p;
+
+    const bd = el('div', 'pp-anno-card-bd');
+    const hd = el('div', 'pp-anno-card-hd');
+    // 序号徽标 / @page / stale
+    if (isPage(t)) { const num = el('span', 'pp-anno-num', '¶'); num.style.background = '#5d574d'; hd.appendChild(num); }
+    else if (stale) { const num = el('span', 'pp-anno-num', '!'); num.style.background = '#b08423'; hd.appendChild(num); }
+    else if (t._num != null) { const num = el('span', 'pp-anno-num', t.resolved ? '' : String(t._num)); num.style.background = col; if (t.resolved) num.appendChild(svg(ICON.check, 11)); hd.appendChild(num); }
+    else { hd.appendChild(avatar(t.comments[0].author_name, 20)); }
+
+    const idn = el('div'); idn.style.minWidth = '0'; idn.style.flex = '1';
+    const line1 = el('div'); line1.style.display = 'flex'; line1.style.alignItems = 'center'; line1.style.gap = '6px';
+    line1.appendChild(el('span', 'pp-anno-who', t.comments[0].author_name));
+    if (focused) line1.appendChild(el('span', 'pp-anno-when', '· ' + fmtTime(t.comments[0].created_at)));
+    const line2 = el('div'); line2.style.display = 'flex'; line2.style.alignItems = 'center'; line2.style.gap = '6px';
+    if (stale) {
+      const sb = el('span', 'pp-anno-stalebadge', `⚠ Anchor lost — was on ${t.selector}`);
+      line2.appendChild(sb);
+    } else {
+      const an = el('span', 'pp-anno-anchor', isPage(t) ? '@page' : `${t._num != null ? t._num + ' · ' : ''}#${anchorLabel(t.selector)}`);
+      an.style.color = t.resolved ? '#9aa1a9' : col;
+      line2.appendChild(an);
+    }
+    idn.append(line1, line2);
+    hd.appendChild(idn);
+
+    // 右侧动作
+    const cardActs = el('div', 'pp-anno-card-acts');
+    if (focused) {
+      const linkBtn = el('button', 'pp-anno-iconbtn'); linkBtn.dataset.ppRole = 'copy-link'; linkBtn.title = 'Copy link';
+      linkBtn.appendChild(svg(ICON.link, 14));
+      linkBtn.onclick = (e) => { e.stopPropagation(); copyThreadLink(t); };
+      cardActs.appendChild(linkBtn);
+      const mine = state.viewer && t.comments[0].author_sub === state.viewer.sub;
+      if (mine) cardActs.appendChild(deleteBtn(t));
+      if (t.resolved) {
+        const reopen = el('button', 'pp-anno-ghost'); reopen.dataset.ppRole = 'reopen';
+        reopen.style.padding = '4px 9px'; reopen.appendChild(document.createTextNode('Reopen'));
+        reopen.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
+        cardActs.appendChild(reopen);
+      } else {
+        const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = 'Resolve & next (r)';
+        rb.appendChild(svg(ICON.check, 14));
+        rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
+        cardActs.appendChild(rb);
+      }
+    } else if (t.resolved) {
+      const done = el('span', 'pp-anno-donechip'); done.appendChild(svg(ICON.check, 10)); done.appendChild(document.createTextNode('done'));
+      cardActs.appendChild(done);
+    } else {
+      const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = 'Resolve (r)';
+      rb.appendChild(svg(ICON.check, 14));
+      rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
+      cardActs.appendChild(rb);
+    }
+    hd.appendChild(cardActs);
+    bd.appendChild(hd);
+
+    if (focused) {
+      bd.appendChild(focusedBody(t));
+    } else {
+      bd.appendChild(el('p', 'pp-anno-snippet', t.comments[0].text));
+      const ft = el('div', 'pp-anno-card-ft');
+      if (t.kind && KIND[t.kind]) {
+        const kl = el('span', 'pp-anno-kindlab'); const ki = el('i');
+        ki.style.background = t.resolved ? '#d7dadd' : KIND[t.kind].color;
+        kl.style.color = t.resolved ? '#9aa1a9' : KIND[t.kind].color;
+        kl.append(ki, document.createTextNode(KIND[t.kind].label));
+        ft.appendChild(kl);
+      }
+      if (t.comments.length > 1) { const rc = el('span'); rc.style.display = 'inline-flex'; rc.style.alignItems = 'center'; rc.style.gap = '4px'; rc.appendChild(svg(ICON.reply, 11)); rc.appendChild(document.createTextNode(String(t.comments.length))); ft.appendChild(rc); }
+      const tm = el('span', null, fmtTime(t.comments[0].created_at)); tm.style.marginLeft = 'auto'; ft.appendChild(tm);
+      bd.appendChild(ft);
+    }
+    card.appendChild(bd);
+    return card;
   }
 
-  // 通用 footer（textarea + 提交）
-  function footer(p, placeholder, hint, btnLabel, btnIcon, onSubmit, extraLeft) {
-    const ft = el('div', 'pp-anno-ft');
-    const ta = document.createElement('textarea');
-    ta.rows = 2;
-    ta.placeholder = placeholder;
-    const row = el('div', 'pp-anno-ft-row');
-    if (extraLeft) row.appendChild(extraLeft);
-    row.appendChild(el('span', 'pp-anno-hint', hint));
-    const send = el('button', 'pp-anno-send');
-    send.dataset.ppRole = 'send';
-    if (btnIcon) send.appendChild(svg(btnIcon, 14));
-    send.appendChild(document.createTextNode(btnLabel));
-    row.appendChild(send);
-    ft.append(ta, row);
-    p.appendChild(ft);
-    const submit = async () => {
-      const text = ta.value.trim();
-      if (!text) { ta.focus(); return; }
-      send.disabled = true;
-      try { await onSubmit(text); } catch (e) { toast(e.message || 'Failed'); send.disabled = false; }
+  function deleteBtn(t) {
+    const delBtn = el('button', 'pp-anno-iconbtn pp-anno-del'); delBtn.dataset.ppRole = 'delete'; delBtn.title = 'Delete';
+    delBtn.appendChild(svg(ICON.x, 14));
+    let disarm = null;
+    delBtn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!delBtn.dataset.armed) {
+        delBtn.dataset.armed = '1'; delBtn.textContent = 'Delete?'; delBtn.classList.add('pp-anno-armed');
+        disarm = setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = ''; delBtn.appendChild(svg(ICON.x, 14)); delBtn.classList.remove('pp-anno-armed'); }, 3000);
+        return;
+      }
+      clearTimeout(disarm);
+      try {
+        const wasIdx = orderedVisible().findIndex((x) => x.t.id === t.id);
+        await deleteThread(t.id);
+        state.threads = state.threads.filter((x) => x.id !== t.id);
+        state.replyStash.delete(t.id);
+        // 焦点前移到下一张可见卡
+        const ov = orderedVisible();
+        state.focusedId = ov.length ? ov[Math.min(wasIdx, ov.length - 1)].t.id : null;
+        renderDrawer();
+        render();
+      } catch (err) { toast(err.message || 'Delete failed'); }
     };
-    send.onclick = submit;
-    ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); } };
-    return ta;
+    return delBtn;
   }
 
-  // kind chips（composer 默认 copy；thread 反映当前 kind）
-  function kindChips(selected, onPick, readonly) {
+  function focusedBody(t) {
+    const wrap = el('div');
+    // 评论流
+    const msgs = el('div', 'pp-anno-msgs');
+    t.comments.forEach((c) => {
+      const m = el('div', 'pp-anno-msg');
+      m.appendChild(avatar(c.author_name, 22));
+      const right = el('div');
+      const line = el('div', 'pp-anno-msg-line');
+      line.append(el('span', 'pp-anno-who', c.author_name), el('span', 'pp-anno-when', fmtTime(c.created_at)));
+      right.append(line, el('div', 'pp-anno-txt', c.text));
+      m.appendChild(right);
+      msgs.appendChild(m);
+    });
+    wrap.appendChild(msgs);
+
+    // kind chips（未解决才显示；点选即 PATCH）
+    if (!t.resolved) wrap.appendChild(kindChipsFor(t));
+
+    // 回复区
+    wrap.appendChild(replyArea(t));
+    return wrap;
+  }
+
+  function kindChipsFor(t) {
     const wrap = el('div', 'pp-anno-chips');
+    let kindInFlight = false;
+    const applySel = () => {
+      wrap.querySelectorAll('.pp-anno-chip2').forEach((x) => {
+        const on = !!t.kind && x.dataset.ppKind === t.kind;
+        x.classList.toggle('pp-anno-on', on);
+        x.style.background = on ? KIND[t.kind].color : '';
+      });
+    };
     for (const k of KIND_KEYS) {
       const m = KIND[k];
-      const b = el('button', 'pp-anno-chip2' + (selected === k ? ' pp-anno-on' : ''));
+      const b = el('button', 'pp-anno-chip2' + (t.kind === k ? ' pp-anno-on' : ''));
       b.dataset.ppKind = k;
       const dot = el('i'); dot.style.background = m.color;
       b.append(dot, document.createTextNode(m.label));
-      if (selected === k) b.style.background = m.color;
-      if (readonly) b.style.cursor = 'default';
-      else b.onclick = () => onPick(k, b, wrap);
+      if (t.kind === k) b.style.background = m.color;
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        if (kindInFlight) return;
+        const newKind = t.kind === k ? null : k;
+        kindInFlight = true;
+        try {
+          const updated = await patchThread(t.id, { kind: newKind });
+          Object.assign(t, updated);
+          applySel();
+          render(); // pin/accent 重新上色
+          const railEl = wrap.closest('.pp-anno-card')?.querySelector('.pp-anno-card-rail');
+          if (railEl) railEl.style.background = kindColor(t);
+        } catch (err) { toast(err.message || 'Failed'); }
+        kindInFlight = false;
+      };
       wrap.appendChild(b);
     }
     return wrap;
   }
 
-  /* ---------------- composer（评论模式打点） ---------------- */
-  function openComposer(x, y, selector, rx, ry, box) {
-    const p = popupShell(x, y, 'composer');
-    if (!p) return;
-    const accent = el('div', 'pp-anno-accent'); accent.style.background = 'linear-gradient(90deg,#0f7c72,#14958a)';
-    p.appendChild(accent);
-    if (selector !== PAGE_SELECTOR) {
-      try { popupTarget = document.querySelector(selector); } catch (e) { popupTarget = null; }
-      setBound(popupTarget);
-      const fx = box ? Math.min(1, rx + box.rw) : rx;
-      const fy = box ? Math.min(1, ry + box.rh) : ry;
-      p._getPos = () => {
-        let node = null;
-        try { node = document.querySelector(selector); } catch (e) { /* ignore */ }
-        if (!node) return null;
-        const r = node.getBoundingClientRect();
-        return { x: r.left + scrollX + r.width * fx, y: r.top + scrollY + r.height * fy };
-      };
-    }
-    if (box && popupTarget) {
-      const r = popupTarget.getBoundingClientRect();
-      const reg = el('div', 'pp-anno-rubber');
-      reg.dataset.ppAnno = '1';
-      reg.style.left = (r.left + scrollX + r.width * rx) + 'px';
-      reg.style.top = (r.top + scrollY + r.height * ry) + 'px';
-      reg.style.width = (r.width * box.rw) + 'px';
-      reg.style.height = (r.height * box.rh) + 'px';
-      layer.appendChild(reg);
-      p._cleanup = () => reg.remove();
-    }
-    const hd = el('div', 'pp-anno-hd');
-    hd.dataset.ppRole = 'composer-head';
-    const title = el('span', 'pp-anno-who', selector === PAGE_SELECTOR ? 'Whole page' : 'New comment');
-    hd.appendChild(title);
-    if (selector !== PAGE_SELECTOR) {
-      const tag = el('span', 'pp-anno-seltag', selector);
-      hd.appendChild(tag);
-    }
-    p.appendChild(hd);
-    let kind = null; // 默认无选中（design 默认 Copy，但允许无 kind 提交）
-    const chips = kindChips(kind, (k, b, wrap) => {
-      kind = kind === k ? null : k;
-      wrap.querySelectorAll('.pp-anno-chip2').forEach((x) => { x.classList.remove('pp-anno-on'); x.style.background = ''; });
-      if (kind) { b.classList.add('pp-anno-on'); b.style.background = KIND[kind].color; }
-      p.dataset.ppKind = kind || '';
-    });
-    p.appendChild(chips);
-    const cancel = el('button', 'pp-anno-ghost', 'Cancel');
-    cancel.onclick = () => { closePopup(true); };
-    const ta = footer(p, selector === PAGE_SELECTOR ? 'Say something about the whole page…' : 'Say something…',
-      box ? 'Esc to discard' : 'or drag on an image to box a region', 'Post', null, async (text) => {
-        const anchor_text = popupTarget && selector !== PAGE_SELECTOR ? fingerprint(popupTarget) || null : null;
-        const t = await createThread({
-          path: CFG.path, selector, rx, ry,
-          rw: box ? box.rw : null, rh: box ? box.rh : null, kind, anchor_text, text,
-        });
-        state.threads.push(t);
-        closePopup(true);
+  function replyArea(t) {
+    const wrap = el('div', 'pp-anno-replyarea');
+    const taWrap = el('div', 'pp-anno-ta-wrap');
+    const ta = document.createElement('textarea');
+    ta.rows = 2;
+    ta.dataset.ppRole = 'reply';
+    ta.placeholder = t.resolved ? 'Add a note…' : 'Reply…';
+    const stash = state.replyStash.get(t.id);
+    if (stash) ta.value = stash;
+    ta.oninput = () => { if (ta.value.trim()) state.replyStash.set(t.id, ta.value); else state.replyStash.delete(t.id); syncFlags(); };
+    ta.onfocus = syncFlags;
+    ta.onblur = syncFlags;
+    const row = el('div', 'pp-anno-ta-row');
+    row.appendChild(el('span', 'pp-anno-hint', 'Enter to reply'));
+    const send = el('button', 'pp-anno-send');
+    send.dataset.ppRole = 'send';
+    send.appendChild(svg(ICON.enter, 13));
+    send.appendChild(document.createTextNode('Reply'));
+    row.appendChild(send);
+    taWrap.append(ta, row);
+    wrap.appendChild(taWrap);
+
+    const submit = async () => {
+      const txt = ta.value.trim();
+      if (!txt) { ta.focus(); return; }
+      send.disabled = true;
+      try {
+        const reply = await addReply(t.id, txt);
+        t.comments.push(reply);
+        state.replyStash.delete(t.id);
+        renderDrawer();
         render();
-        const pin = layer.querySelector(`.pp-anno-pin[data-tid="${t.id}"]`);
-        if (pin) pin.classList.add('pp-anno-pulse');
-        else toast('Whole-page note recorded');
-      }, cancel);
-    ta.focus();
+        // 重新聚焦回复框
+        requestAnimationFrame(() => { const f = drawer.querySelector('[data-pp-focused="1"] [data-pp-role="reply"]'); if (f) f.focus(); });
+      } catch (err) { toast(err.message || 'Failed'); send.disabled = false; }
+    };
+    send.onclick = (e) => { e.stopPropagation(); void submit(); };
+    ta.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); state.replyStash.delete(t.id); ta.value = ''; ta.blur(); syncFlags(); }
+    };
+    return wrap;
   }
-  const openComposerForPage = () => { setMode('rest'); openComposer(centerPos().x, centerPos().y, PAGE_SELECTOR, 0, 0); };
+
+  /* ---------------- 聚焦 + 发光相机 ---------------- */
+  function focusThread(id, scroll) {
+    const t = byId(id);
+    if (!t) return;
+    state.focusedId = id;
+    if (!state.railOpen) setRail(true);
+    else renderDrawer();
+    render();
+    if (scroll) {
+      const a = resolveAnchor(t);
+      if (a.el) {
+        const r = a.el.getBoundingClientRect();
+        const target = scrollY + r.top - innerHeight * 0.38 + r.height / 2;
+        scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+      } else if (isPage(t)) {
+        scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+    requestAnimationFrame(() => scrollFocusedCardIntoView());
+    try { history.replaceState(null, '', location.pathname + location.search + '#pp-comment-' + id); } catch (e) { /* ignore */ }
+  }
+
+  function scrollFocusedCardIntoView() {
+    if (!listEl || !state.focusedId) return;
+    const card = listEl.querySelector('[data-pp-focused="1"]');
+    if (card) card.scrollIntoView({ block: 'nearest' });
+  }
+
+  function move(delta) {
+    const ov = orderedVisible();
+    if (!ov.length) return;
+    const cur = ov.findIndex((x) => x.t.id === state.focusedId);
+    const next = cur === -1 ? (delta > 0 ? 0 : ov.length - 1) : Math.min(ov.length - 1, Math.max(0, cur + delta));
+    focusThread(ov[next].t.id, true);
+  }
+
+  let resolveInFlight = false;
+  async function doResolve(id) {
+    if (resolveInFlight) return;
+    const t = byId(id);
+    if (!t) return;
+    const wasResolved = t.resolved;
+    const ov = orderedVisible();
+    const i = ov.findIndex((x) => x.t.id === id);
+    resolveInFlight = true;
+    try {
+      const updated = await patchThread(id, { resolved: !wasResolved });
+      Object.assign(t, updated);
+    } catch (e) { toast(e.message || 'Failed'); resolveInFlight = false; return; }
+    resolveInFlight = false;
+    // resolve-and-advance：刚解决且 filter=open（卡会消失）→ 焦点前移到下一张
+    if (!wasResolved && state.filter === 'open') {
+      const ov2 = orderedVisible();
+      const nxt = ov2[Math.min(i, ov2.length - 1)];
+      state.focusedId = nxt ? nxt.t.id : null;
+      toast('Resolved');
+      if (state.focusedId) { focusThread(state.focusedId, true); return; }
+    } else {
+      toast(wasResolved ? 'Reopened' : 'Resolved');
+    }
+    renderDrawer();
+    render();
+  }
+
+  /* ---------------- 草稿（新建评论，落在抽屉里） ---------------- */
+  const draftHasText = () => !!(state.draft && state.draft.text && state.draft.text.trim());
+  function shakeDraft() {
+    const card = drawer && drawer.querySelector('[data-pp-role="draft"]');
+    if (!card) return;
+    card.classList.remove('pp-anno-shaking'); void card.offsetWidth; card.classList.add('pp-anno-shaking');
+    const ta = card.querySelector('textarea'); if (ta) ta.focus();
+    toast('Unsent comment — post it, or press Esc to discard');
+  }
+  function clearDraft(discard) {
+    if (!state.draft) return true;
+    if (!discard && draftHasText()) { shakeDraft(); return false; }
+    if (state.draft._cleanup) state.draft._cleanup();
+    state.draft = null;
+    return true;
+  }
+  function openDraftFor(selector, rx, ry, box) {
+    if (!clearDraft()) return; // 已有未发草稿：拦截
+    // 注意：不退出评论模式 —— 保留十字光标以便连续打点，并让评论模式下的「点空白关空草稿」两步式继续生效。
+    const d = { selector, rx: rx == null ? 0.5 : rx, ry: ry == null ? 0.5 : ry, box: box || null, kind: null, text: '' };
+    // box-select：在页面上画持久预览框 + 提供随滚动重摆的几何
+    if (box && selector !== PAGE_SELECTOR) {
+      let node = null;
+      try { node = document.querySelector(selector); } catch (e) { node = null; }
+      if (node) {
+        const rub = el('div', 'pp-anno-rubber'); rub.dataset.ppAnno = '1'; layer.appendChild(rub);
+        d._rubberPos = () => {
+          const r = node.getBoundingClientRect();
+          return { x: r.left + scrollX + r.width * d.rx, y: r.top + scrollY + r.height * d.ry, w: r.width * box.rw, h: r.height * box.rh };
+        };
+        d._cleanup = () => rub.remove();
+      }
+    }
+    state.draft = d;
+    state.focusedId = null;
+    if (!state.railOpen) setRail(true); else renderDrawer();
+    render();
+    requestAnimationFrame(() => {
+      const ta = drawer.querySelector('[data-pp-role="draft"] textarea');
+      if (ta) ta.focus();
+      const card = drawer.querySelector('[data-pp-role="draft"]');
+      if (card) card.scrollIntoView({ block: 'nearest' });
+    });
+    syncFlags();
+  }
+  const openDraftForPage = () => { if (state.mode === 'comment') exitComment(); openDraftFor(PAGE_SELECTOR, 0, 0); };
+
+  function draftCard() {
+    const d = state.draft;
+    const accent = d.kind && KIND[d.kind] ? KIND[d.kind].color : '#0f7c72';
+    const card = el('div', 'pp-anno-card pp-anno-draft');
+    card.dataset.ppRole = 'draft';
+    card.dataset.ppSelector = d.selector;
+    const rail = el('span', 'pp-anno-card-rail'); rail.style.background = accent; card.appendChild(rail);
+    const bd = el('div', 'pp-anno-card-bd');
+    const hd = el('div', 'pp-anno-card-hd');
+    hd.appendChild(avatar(state.viewer ? state.viewer.name : '?', 20));
+    hd.appendChild(el('span', 'pp-anno-who', d.selector === PAGE_SELECTOR ? 'Note on the whole page' : 'New comment'));
+    if (d.selector !== PAGE_SELECTOR) hd.appendChild(el('span', 'pp-anno-seltag', d.selector));
+    bd.appendChild(hd);
+
+    const taWrap = el('div', 'pp-anno-ta-wrap'); taWrap.style.marginTop = '8px';
+    const ta = document.createElement('textarea');
+    ta.rows = 2;
+    ta.placeholder = d.selector === PAGE_SELECTOR ? 'Say something about the whole page…' : 'What needs changing here?';
+    ta.value = d.text;
+    ta.oninput = () => { d.text = ta.value; syncFlags(); };
+    taWrap.appendChild(ta);
+    bd.appendChild(taWrap);
+
+    // kind chips（草稿态本地选择，提交时带上）
+    const chips = el('div', 'pp-anno-chips');
+    for (const k of KIND_KEYS) {
+      const m = KIND[k];
+      const b = el('button', 'pp-anno-chip2' + (d.kind === k ? ' pp-anno-on' : ''));
+      b.dataset.ppKind = k;
+      const dot = el('i'); dot.style.background = m.color;
+      b.append(dot, document.createTextNode(m.label));
+      if (d.kind === k) b.style.background = m.color;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        d.kind = d.kind === k ? null : k;
+        chips.querySelectorAll('.pp-anno-chip2').forEach((x) => { x.classList.remove('pp-anno-on'); x.style.background = ''; });
+        if (d.kind) { b.classList.add('pp-anno-on'); b.style.background = KIND[d.kind].color; }
+        rail.style.background = d.kind && KIND[d.kind] ? KIND[d.kind].color : '#0f7c72';
+      };
+      chips.appendChild(b);
+    }
+    bd.appendChild(chips);
+
+    const row = el('div', 'pp-anno-ta-row');
+    const cancel = el('button', 'pp-anno-ghost', 'Cancel');
+    cancel.onclick = (e) => { e.stopPropagation(); clearDraft(true); renderDrawer(); render(); syncFlags(); };
+    row.appendChild(cancel);
+    const send = el('button', 'pp-anno-send'); send.dataset.ppRole = 'send';
+    send.appendChild(document.createTextNode('Comment'));
+    send.appendChild(svg(ICON.arrowR, 13));
+    row.appendChild(send);
+    bd.appendChild(row);
+
+    const submit = async () => {
+      const text = ta.value.trim();
+      if (!text) { ta.focus(); return; }
+      send.disabled = true;
+      try {
+        let node = null;
+        if (d.selector !== PAGE_SELECTOR) { try { node = document.querySelector(d.selector); } catch (e) { node = null; } }
+        const anchor_text = node ? (fingerprint(node) || null) : null;
+        const created = await createThread({
+          path: CFG.path, selector: d.selector, rx: d.rx, ry: d.ry,
+          rw: d.box ? d.box.rw : null, rh: d.box ? d.box.rh : null, kind: d.kind, anchor_text, text,
+        });
+        state.threads.push(created);
+        if (state.draft && state.draft._cleanup) state.draft._cleanup();
+        state.draft = null;
+        state.focusedId = created.id;
+        renderDrawer();
+        render();
+        const pin = layer.querySelector(`.pp-anno-pin[data-tid="${created.id}"]`);
+        if (pin) pin.classList.add('pp-anno-pulse');
+        else if (d.selector === PAGE_SELECTOR) toast('Whole-page note recorded');
+        syncFlags();
+      } catch (err) { toast(err.message || 'Failed'); send.disabled = false; }
+    };
+    send.onclick = (e) => { e.stopPropagation(); void submit(); };
+    ta.onkeydown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submit(); }
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); clearDraft(true); renderDrawer(); render(); syncFlags(); }
+    };
+    card.appendChild(bd);
+    return card;
+  }
 
   /* ---------------- 深链复制（保留，英文化） ---------------- */
   async function copyThreadLink(t) {
@@ -800,234 +1000,40 @@
     toast('Link copied');
   }
 
-  /* ---------------- Review Walk + at-pin 弹层 ---------------- */
-  function enterComment() { setMode('comment'); }
-  function cancelComment() { closePopup(true); setMode('rest'); }
-  // 单点维护两个宿主级标记（imgShell Esc 据此让权，crosshair CSS 据此暂停）：
-  //  mode-on = 评论模式（无弹层时出十字光标）；paused = 弹层/列表/Walk 正占用交互
+  /* ---------------- 评论模式 + 宿主级标记 ---------------- */
+  function enterComment() { state.mode = 'comment'; if (!state.railOpen) setRail(true); else renderDrawer(); syncFlags(); }
+  function exitComment() {
+    state.mode = 'rest';
+    if (hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
+    renderDrawer();
+    syncFlags();
+  }
+  // mode-on = 评论模式（无草稿时出十字光标）；paused = 草稿/回复输入占用交互（图片壳据此让权 Esc）
+  function replyFocused() {
+    const ae = document.activeElement;
+    return !!(ae && ae.dataset && ae.dataset.ppRole === 'reply' && ae.value && ae.value.trim());
+  }
   function syncFlags() {
     const de = document.documentElement;
-    de.classList.toggle('pp-anno-mode-on', state.mode === 'comment');
-    de.classList.toggle('pp-anno-paused', !!state.openPopup || state.listOpen || state.mode === 'walk');
-  }
-  function setMode(m) {
-    if (m !== 'rest' && state.collapsed) expand(); // 进入 comment/walk 前先展开
-    state.mode = m;
-    if (m !== 'comment' && hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
-    syncFlags();
-    renderBar();
+    de.classList.toggle('pp-anno-mode-on', state.mode === 'comment' && !state.draft);
+    de.classList.toggle('pp-anno-paused', !!state.draft || replyFocused());
+    // aim hint
+    let h = root && root.querySelector('.pp-anno-aimhint');
+    if (state.mode === 'comment' && !state.draft) {
+      if (!h) { h = el('div', 'pp-anno-aimhint', 'Click an element to comment · drag on an image to box a region · Esc to exit'); h.dataset.ppAnno = '1'; root.appendChild(h); }
+    } else if (h) h.remove();
   }
 
-  function startReview() {
-    if (state.listOpen) toggleList();
-    const u = unresolved();
-    state.walk.resolvedThisPass = 0;
-    if (!u.length) { setMode('walk'); state.walk.curId = null; state.walk.entryTop = true; closePopup(true); render(); renderBar(); return; }
-    state.walk.entryTop = true;
-    setMode('walk');
-    goTo(u[0].id);
-  }
-  function gotoPin(id) {
-    if (state.listOpen) toggleList();
-    const u = unresolved();
-    const i = u.findIndex((t) => t.id === id);
-    if (i < 0) { // 已解决线程（filter=all 时点了）：直接开弹层，不进队列
-      const t = byId(id); if (t) { setMode('walk'); goTo(id); }
-      return;
-    }
-    if (state.mode !== 'walk') state.walk.entryTop = (i === 0);
-    setMode('walk');
-    goTo(id);
-  }
-  function goTo(id) {
-    const t = byId(id);
-    if (!t) return;
-    state.walk.curId = id;
-    const a = resolveAnchor(t);
-    // 立即开弹层（pin 切换要跟手）；随后 scrollIntoView，弹层经 render 的 _getPos 跟随滚动
-    openPopover(t, a.pos || centerPos());
-    if (a.el) a.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    renderBar();
-    try { history.replaceState(null, '', location.pathname + location.search + '#pp-comment-' + id); } catch (e) { /* ignore */ }
-  }
-  function step(d) {
-    const u = unresolved();
-    let i = u.findIndex((t) => t.id === state.walk.curId);
-    if (i < 0) i = d > 0 ? -1 : u.length; // 当前线程不在队列（已解决）：J 从队首、K 从队尾起步
-    const ni = i + d;
-    if (ni < 0) return;
-    if (ni >= u.length) { caughtUp(); return; }
-    goTo(u[ni].id);
-  }
-  function caughtUp() {
-    state.walk.curId = null;
-    closePopup(true);
-    render();
-    renderBar();
-  }
-  function exitWalk() {
-    setMode('rest');
-    state.walk.curId = null;
-    closePopup(true);
-    render();
-    renderBar();
-  }
-  let resolveInFlight = false;
-  async function resolveNext() {
-    if (resolveInFlight) return; // 连按 R 防重复 PATCH / 双跳
-    const id = state.walk.curId;
-    const t = byId(id);
-    if (!t) { step(1); return; }
-    const u = unresolved();
-    const i = u.findIndex((x) => x.id === id);
-    resolveInFlight = true;
-    let ok = false;
-    try {
-      const updated = await patchThread(t.id, { resolved: true });
-      Object.assign(t, updated);
-      state.walk.resolvedThisPass += 1;
-      ok = true;
-    } catch (e) { toast(e.message || 'Failed'); }
-    resolveInFlight = false;
-    if (!ok) return;
-    const u2 = unresolved(); // 不含 t
-    // 先把游标移到下一条再 render，避免命令条闪现一帧 caught-up
-    state.walk.curId = i >= 0 && i < u2.length ? u2[i].id : null;
-    render();
-    if (state.walk.curId) goTo(state.walk.curId);
-    else caughtUp();
-  }
-
-  function openPopover(t, pos, focusReply) {
-    const p = popupShell(pos.x, pos.y, 'popover');
-    if (!p) return;
-    state.openThreadId = t.id;
-    state.walk.curId = t.id;
-    p.dataset.ppThread = t.id;
-    p.dataset.ppNum = isPage(t) ? 'page' : (t._num != null ? String(t._num) : '');
-    popupTarget = threadEl(t);
-    setBound(popupTarget);
-    p._getPos = () => resolveAnchor(t).pos;
-    layer.querySelectorAll('.pp-anno-pin').forEach((n) => n.classList.toggle('pp-anno-current', n.dataset.tid === t.id));
-    const accent = el('div', 'pp-anno-accent'); accent.style.background = kindColor(t); p.appendChild(accent);
-
-    // header: ◀ n/N ▶ + copy-link + delete + exit
-    const hd = el('div', 'pp-anno-hd');
-    const u = unresolved();
-    const i = u.findIndex((x) => x.id === t.id);
-    const prev = el('button', 'pp-anno-step'); prev.appendChild(svg(ICON.prev, 13)); prev.title = 'Previous (K)';
-    prev.dataset.ppAct = 'prev'; prev.onclick = () => step(-1);
-    const counter = el('span', 'pp-anno-counter2', i >= 0 ? `${i + 1} / ${u.length}` : '–');
-    const next = el('button', 'pp-anno-step'); next.appendChild(svg(ICON.next, 13)); next.title = 'Next (J)';
-    next.dataset.ppAct = 'next'; next.onclick = () => step(1);
-    hd.append(prev, counter, next);
-    const ops = el('div', 'pp-anno-ops');
-    const linkBtn = el('button'); linkBtn.dataset.ppRole = 'copy-link'; linkBtn.title = 'Copy link'; linkBtn.appendChild(svg(ICON.link, 14));
-    linkBtn.onclick = () => copyThreadLink(t);
-    ops.appendChild(linkBtn);
-    const mine = state.viewer && t.comments[0].author_sub === state.viewer.sub;
-    if (mine) {
-      const delBtn = el('button', 'pp-anno-del', 'Delete'); delBtn.title = 'Delete';
-      let disarm = null;
-      delBtn.onclick = async () => {
-        if (!delBtn.dataset.armed) {
-          delBtn.dataset.armed = '1'; delBtn.textContent = 'Delete?'; delBtn.classList.add('pp-anno-armed');
-          disarm = setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = 'Delete'; delBtn.classList.remove('pp-anno-armed'); }, 3000);
-          return;
-        }
-        clearTimeout(disarm);
-        try {
-          await deleteThread(t.id);
-          const wasIdx = unresolved().findIndex((x) => x.id === t.id);
-          state.threads = state.threads.filter((x) => x.id !== t.id);
-          render();
-          const u2 = unresolved();
-          if (state.mode === 'walk' && wasIdx >= 0 && wasIdx < u2.length) goTo(u2[wasIdx].id);
-          else if (state.mode === 'walk') caughtUp();
-          else closePopup(true);
-        } catch (e) { toast(e.message || 'Delete failed'); }
-      };
-      ops.appendChild(delBtn);
-    }
-    const exit = el('button'); exit.dataset.ppAct = 'exit'; exit.title = 'Exit (Esc)'; exit.appendChild(svg(ICON.x, 14));
-    exit.onclick = () => exitWalk();
-    ops.appendChild(exit);
-    hd.appendChild(ops);
-    p.appendChild(hd);
-
-    // messages
-    const msgs = el('div', 'pp-anno-msgs');
-    t.comments.forEach((c) => {
-      const m = el('div', 'pp-anno-msg');
-      const ava = el('div', 'pp-anno-ava', initialOf(c.author_name));
-      ava.style.background = avatarColor(c.author_name);
-      const right = el('div');
-      const line = el('div');
-      line.append(el('span', 'pp-anno-who', c.author_name), el('span', 'pp-anno-when', fmtTime(c.created_at)));
-      right.append(line, el('div', 'pp-anno-txt', c.text));
-      m.append(ava, right);
-      msgs.appendChild(m);
-    });
-    p.appendChild(msgs);
-
-    // kind chips：点选即改 kind（PATCH，任意登录成员可改，再点同一项取消）。改后重绘 pin/accent 上色，弹层不关。
-    let kindInFlight = false;
-    const applyKindSel = (wrap) => {
-      wrap.querySelectorAll('.pp-anno-chip2').forEach((x) => {
-        const on = !!t.kind && x.dataset.ppKind === t.kind;
-        x.classList.toggle('pp-anno-on', on);
-        x.style.background = on ? KIND[t.kind].color : '';
-      });
-    };
-    p.appendChild(kindChips(t.kind, async (k, b, wrap) => {
-      if (kindInFlight) return;
-      const newKind = t.kind === k ? null : k;
-      kindInFlight = true;
-      try {
-        const updated = await patchThread(t.id, { kind: newKind });
-        Object.assign(t, updated);
-        applyKindSel(wrap);
-        accent.style.background = kindColor(t);
-        render();
-      } catch (e) { toast(e.message || 'Failed'); }
-      kindInFlight = false;
-    }, false));
-
-    // footer: reply 输入 + Resolve & next（同一按钮：有草稿先发回复，无草稿则解决并前进）
-    const ta = footer(p, 'Reply…', 'Enter to reply', 'Resolve & next', ICON.check, async () => {});
-    const sendBtn = p.querySelector('.pp-anno-send');
-    const sendReply = async () => {
-      const txt = ta.value.trim();
-      if (!txt) { void resolveNext(); return; } // 无草稿 → resolve-and-advance
-      sendBtn.disabled = true;
-      try {
-        const reply = await addReply(t.id, txt);
-        t.comments.push(reply);
-        ta.value = ''; // 先清空，避免 closePopup 把已发回复当草稿暂存
-        draftStash.delete(t.id);
-        render();
-        openPopover(byId(t.id) || t, pos, true);
-      } catch (e) { toast(e.message || 'Failed'); sendBtn.disabled = false; }
-    };
-    sendBtn.onclick = sendReply;
-    ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendReply(); } };
-    const stashed = draftStash.get(t.id);
-    if (stashed) ta.value = stashed;
-    msgs.scrollTop = 1e5;
-    if (focusReply) requestAnimationFrame(() => requestAnimationFrame(() => { const f = p.querySelector('textarea'); if (f) f.focus(); }));
-  }
-
-  /* ---------------- 评论模式 hover + 打点（保留） ---------------- */
+  /* ---------------- 评论模式 hover + 打点（保留几何） ---------------- */
   let hoverHint = null;
   document.addEventListener('mouseover', (e) => {
-    if (state.mode !== 'comment' || state.openPopup) return;
+    if (state.mode !== 'comment' || state.draft) return;
     if (hoverHint) hoverHint.classList.remove('pp-anno-hover-hint');
     hoverHint = e.target.closest('[data-pp-anno]') ? null : e.target;
     if (hoverHint && hoverHint !== document.body) hoverHint.classList.add('pp-anno-hover-hint');
   }, true);
   const modeArmed = (e) =>
-    state.mode === 'comment' &&
-    !document.documentElement.classList.contains('pp-anno-paused') &&
+    state.mode === 'comment' && !state.draft &&
     !(e.target.closest && e.target.closest('[data-pp-anno]'));
   document.addEventListener('dragstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
   document.addEventListener('selectstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
@@ -1035,7 +1041,7 @@
   /* ---------------- 图片框选（保留几何） ---------------- */
   let suppressNextClick = false;
   document.addEventListener('mousedown', (down) => {
-    if (state.mode !== 'comment' || state.openPopup || down.button !== 0) return;
+    if (state.mode !== 'comment' || state.draft || down.button !== 0) return;
     const img = down.target;
     if (!(img instanceof HTMLImageElement) || img.closest('[data-pp-anno]')) return;
     const r0 = img.getBoundingClientRect();
@@ -1067,7 +1073,7 @@
       suppressNextClick = true;
       const g = geom(e);
       if (g.w < 8 || g.h < 8) return;
-      openComposer(g.x1 + g.w + scrollX, g.y1 + g.h + scrollY, cssPath(img),
+      openDraftFor(cssPath(img),
         cl((g.x1 - r0.left) / r0.width, 0, 1), cl((g.y1 - r0.top) / r0.height, 0, 1),
         { rw: Math.min(1, g.w / r0.width), rh: Math.min(1, g.h / r0.height) });
     };
@@ -1080,7 +1086,7 @@
     const r = node.getBoundingClientRect();
     const rx = r.width ? (e.clientX - r.left) / r.width : 0.5;
     const ry = r.height ? (e.clientY - r.top) / r.height : 0.5;
-    openComposer(e.pageX, e.pageY, cssPath(node), Math.min(1, Math.max(0, rx)), Math.min(1, Math.max(0, ry)));
+    openDraftFor(cssPath(node), Math.min(1, Math.max(0, rx)), Math.min(1, Math.max(0, ry)));
   }
 
   document.addEventListener('click', (e) => {
@@ -1089,35 +1095,56 @@
     if (state.mode === 'comment' || e.altKey || (e.metaKey && !e.ctrlKey)) {
       e.preventDefault();
       e.stopPropagation();
-      // 两步式：composer 开着时这次点击只收掉它（空稿关、有稿抖动），⌥/⌘ 是明确意图直接弹
-      if (state.openPopup && state.openThreadId === null && !e.altKey && !e.metaKey) { closePopup(); return; }
+      // 已有草稿开着：⌥/⌘ 是明确意图直接换锚点；否则这次点击只收掉草稿
+      // （空稿关；有稿则 clearDraft 抖动并返回 false → 不重建，保住 textarea 焦点与光标）
+      if (state.draft && !e.altKey && !e.metaKey) { if (clearDraft()) { renderDrawer(); render(); syncFlags(); } return; }
       composeAt(e);
       return;
     }
-    closePopup(); // 普通点空白：关弹层（草稿保护内置）
   }, true);
 
-  /* ---------------- 键盘（保留 + Walk 感知） ---------------- */
+  /* ---------------- 键盘（常驻 j/k + Walk-less） ---------------- */
   document.addEventListener('keydown', (e) => {
-    const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')
-      || (document.activeElement && document.activeElement.isContentEditable);
+    const ae = document.activeElement || {};
+    const typing = /INPUT|TEXTAREA|SELECT/.test(ae.tagName || '') || (ae && ae.isContentEditable);
     if (e.key === 'Escape') {
-      if (state.mode === 'comment') { cancelComment(); return; }
-      if (state.mode === 'walk') { if (closePopup(true)) exitWalk(); return; }
-      closePopup(true);
-      return;
+      if (typing) return; // textarea 自己的 onkeydown 处理 Esc
+      // 草稿优先放弃（即使同时处于评论模式），再退出评论模式
+      if (state.draft) { clearDraft(true); renderDrawer(); render(); }
+      if (state.mode === 'comment') exitComment();
+      syncFlags();
+      return; // 无草稿/非评论模式时为 no-op：不消费 Esc（让图片壳关闭预览）
     }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === 'c' || e.key === 'C') { state.mode === 'comment' ? setMode('rest') : enterComment(); }
-    else if (e.key === 'g' || e.key === 'G') openComposerForPage();
-    else if (state.mode === 'walk') {
-      if (e.key === 'j' || e.key === 'J') { e.preventDefault(); step(1); }
-      else if (e.key === 'k' || e.key === 'K') { e.preventDefault(); step(-1); }
-      else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); void resolveNext(); }
-    } else if (e.key === 'r' || e.key === 'R') { startReview(); }
+    switch (e.key) {
+      case 'j': case 'J': e.preventDefault(); move(1); break;
+      case 'k': case 'K': e.preventDefault(); move(-1); break;
+      case 'r': case 'R': e.preventDefault(); if (state.focusedId) void doResolve(state.focusedId); break;
+      case 'c': case 'C': e.preventDefault(); state.mode === 'comment' ? exitComment() : enterComment(); break;
+      case '\\': e.preventDefault(); setRail(!state.railOpen, { refocusTab: !state.railOpen ? false : true }); break;
+      default: break;
+    }
   });
 
-  addEventListener('resize', () => render());
+  /* ---------------- 宽度感知自动收起 ---------------- */
+  function onResizeWidth() {
+    const b = widthBucket(innerWidth);
+    if (b === lastBucket) return;
+    lastBucket = b;
+    if (b === 'narrow' && state.railOpen) {
+      setRail(false, { auto: true, discard: false, force: true });
+      state.autoHint = true;
+      const h = el('div', 'pp-anno-aimhint', 'Narrow window — drawer tucked away so the page stays full-width');
+      h.dataset.ppAnno = '1'; h.dataset.ppRole = 'auto-hint';
+      h.style.top = '50%'; h.style.left = 'auto'; h.style.right = '54px'; h.style.transform = 'translateY(-50%)';
+      root.appendChild(h);
+      setTimeout(() => h.remove(), 2600);
+    } else if (b === 'wide' && !state.railOpen) {
+      setRail(true, { auto: true });
+    }
+  }
+
+  addEventListener('resize', () => { render(); onResizeWidth(); });
   addEventListener('load', () => render());
 
   /* ---------------- 跟随重摆（保留） ---------------- */
@@ -1150,12 +1177,17 @@
   /* ---------------- 静默刷新（保留） ---------------- */
   async function refresh() {
     if (document.visibilityState !== 'visible') return;
-    if (state.openPopup) return;
+    if (state.draft) return; // 撰写中不打断
     try {
       const data = await fetchThreads();
       const before = JSON.stringify(state.threads.map((t) => [t.id, t.comments.length, t.resolved]));
       const after = JSON.stringify(data.threads.map((t) => [t.id, t.comments.length, t.resolved]));
-      if (before !== after) { state.threads = data.threads; render(); }
+      if (before !== after) {
+        state.threads = data.threads;
+        if (state.focusedId && !byId(state.focusedId)) state.focusedId = null;
+        renderDrawer();
+        render();
+      }
     } catch (e) { /* 静默 */ }
   }
   setInterval(refresh, 30000);
@@ -1165,28 +1197,32 @@
   addEventListener('pagepin:navigate', (e) => {
     const next = e && e.detail && e.detail.path;
     if (!next || next === CFG.path) return;
-    if (!closePopup()) { e.preventDefault(); return; }
+    if (!clearDraft()) { e.preventDefault(); return; } // 草稿未发：阻断切换
     CFG.path = next;
     state.threads = [];
-    state.walk.curId = null;
-    if (state.mode === 'walk') setMode('rest');
+    state.focusedId = null;
+    if (state.mode === 'comment') exitComment();
+    renderDrawer();
     render();
-    // 守卫乱序响应：快速连续导航时，丢弃晚到的旧 path 结果（否则 dot/pin 会闪错计数）
-    fetchThreads().then((data) => { if (CFG.path !== next) return; state.threads = data.threads; render(); }).catch(() => { /* 静默 */ });
+    // 守卫乱序响应：快速连续导航时，丢弃晚到的旧 path 结果
+    fetchThreads().then((data) => { if (CFG.path !== next) return; state.threads = data.threads; renderDrawer(); render(); }).catch(() => { /* 静默 */ });
   });
 
-  /* ---------------- 深链 #pp-comment-<id>（保留 id 形态宽匹配） ---------------- */
+  /* ---------------- 深链 #pp-comment-<id>（id 形态宽匹配；长度不设下限——find 兜底） ---------------- */
   function maybeDeepLink() {
-    const m = location.hash.match(/^#pp-comment-([\w-]{8,})$/);
+    const m = location.hash.match(/^#pp-comment-([\w-]+)$/);
     if (!m) return;
     const t = state.threads.find((x) => x.id === m[1]);
     if (!t) return;
-    if (t.resolved && state.filter !== 'all') { state.filter = 'all'; render(); renderBar(); }
-    setTimeout(() => gotoPin(t.id), 300);
+    if (t.resolved && state.filter !== 'all') { state.filter = 'all'; }
+    setTimeout(() => { if (!state.railOpen) setRail(true); focusThread(t.id, true); }, 300);
   }
+  // hash 变化也定位：在已打开页里把地址改成 .../#pp-comment-<id> 不会触发重载（只发 hashchange）
+  addEventListener('hashchange', maybeDeepLink);
 
   /* ---------------- 启动（保留身份门控） ---------------- */
   async function boot() {
+    loadRail();
     try { state.viewer = await api('/api/viewer'); }
     catch (e) { return; } // 匿名访客：不渲染任何 UI
     buildUI();
@@ -1197,6 +1233,7 @@
       if (e.status === 403) { root.remove(); return; } // 站点已关评论
       toast('Failed to load comments: ' + (e.message || ''));
     }
+    renderDrawer();
     render();
     maybeDeepLink();
   }
