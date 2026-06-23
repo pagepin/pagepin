@@ -40,3 +40,5 @@ ds-bundle-comments/
 .design-sync/comments/dist/
 .design-sync/comments/.specs.json
 .design-sync/comments/src/comments-source.generated.js
+# verification screenshots — heavy binaries, regenerable from the live Claude Design project / a rerun
+.design-sync/*/screenshots/
