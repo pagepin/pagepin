@@ -12,6 +12,7 @@ export interface Limits {
   max_file_mb: number;
   max_site_mb: number;
   max_files: number;
+  keep_versions: number;
   public_max_hours: number;
 }
 
@@ -62,6 +63,8 @@ export interface SiteOut {
   file_count: number;
   total_bytes: number;
   version_count: number;
+  /** 本次部署因版本上限被永久删除的旧版本数(仅 deploy/commit 响应带;>0 → 前端提示) */
+  pruned_versions?: number;
   created_at: string;
   updated_at: string;
 }

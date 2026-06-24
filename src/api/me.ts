@@ -48,6 +48,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     max_file_mb: cfg.maxFileMb,
     max_site_mb: cfg.maxSiteMb,
     max_files: cfg.maxFiles,
+    keep_versions: cfg.keepVersions,
     public_max_hours: cfg.publicMaxHours,
   });
 

@@ -160,6 +160,8 @@ test('GC: keepVersions=2,部署 3 次裁掉最旧版本并回收其存储', asyn
   for (let i = 0; i < 3; i++) {
     const r = await postForm(app, '/api/sites/gc/deploy', form([{ path: 'index.html', bytes: `v${i}` }], 'GC'));
     assert.equal(r.status, 200);
+    // 第 3 次(i=2)发布触达上限 → 响应里 pruned_versions=1;前两次为 0
+    assert.equal((await r.json()).pruned_versions, i < 2 ? 0 : 1, 'pruned_versions 透出被回收版本数');
     const row = await db.select().from(sites).where(eq(sites.slug, 'gc')).get();
     prefixes.push(row!.versions[row!.versions.length - 1]!.storage_prefix);
   }
