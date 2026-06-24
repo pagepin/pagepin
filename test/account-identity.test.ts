@@ -26,6 +26,7 @@ import { loadConfig } from '../src/config.js';
 import { identities, users } from '../src/db/index.js';
 import type { UserRow } from '../src/db/index.js';
 import { createLibsqlDb } from '../src/db/libsql.js';
+import type { MailMessage, Mailer } from '../src/mail/index.js';
 import { FsStorage } from '../src/storage/fs.js';
 import type { AppDeps, AppEnv } from '../src/types.js';
 
@@ -43,7 +44,7 @@ function del(app: Hono<AppEnv>, path: string): Promise<Response> {
   return Promise.resolve(app.fetch(new Request('http://localhost' + path, { method: 'DELETE' })));
 }
 
-async function setup(env: Record<string, string> = {}) {
+async function setup(env: Record<string, string> = {}, mailer?: Mailer) {
   const dir = await mkdtemp(join(tmpdir(), 'pagepin-ident-'));
   const storage = new FsStorage(dir);
   const db = await createLibsqlDb(':memory:'); // 自动应用 drizzle 迁移(含 0005 identities)
@@ -54,7 +55,7 @@ async function setup(env: Record<string, string> = {}) {
     PAGEPIN_REGISTRATION_MODE: 'open',
     ...env,
   });
-  const deps: AppDeps = { config: cfg, db, storage };
+  const deps: AppDeps = { config: cfg, db, storage, mailer };
   const app = makeAuthRoutes(deps, 'session');
   return { db, cfg, deps, app };
 }
@@ -176,4 +177,36 @@ test('disconnect: 不能断开最后一个身份;断开后清密码 + bump epoch
   const ids = await db.select().from(identities).where(eq(identities.userId, u.id)).all();
   assert.equal(ids.length, 1);
   assert.equal(ids[0]!.provider, 'google');
+});
+
+test('verify-email: 注册发验证信,点链接置 emailVerified(user + password identity)', async () => {
+  const sent: MailMessage[] = [];
+  const mailer: Mailer = { send: async (m) => void sent.push(m) };
+  const { app, db } = await setup({}, mailer);
+  await postJson(app, '/auth/signup', { email: 'frank@example.com', password: 'password123' });
+  assert.equal(sent.length, 1); // 注册触发一封验证信
+  let u = (await db.select().from(users).where(eq(users.canonicalEmail, 'frank@example.com')).get())!;
+  assert.equal(u.emailVerified, false); // 注册时未验证
+
+  const tok = /verify-email\?token=([^\s&"]+)/.exec(sent[0]!.text ?? sent[0]!.html)?.[1];
+  assert.ok(tok, '邮件含验证链接');
+  assert.equal((await app.fetch(new Request(`http://localhost/auth/verify-email?token=${tok}`))).status, 200);
+
+  u = (await db.select().from(users).where(eq(users.id, u.id)).get())!;
+  assert.equal(u.emailVerified, true);
+  const ident = await db
+    .select()
+    .from(identities)
+    .where(and(eq(identities.userId, u.id), eq(identities.provider, 'password')))
+    .get();
+  assert.equal(ident?.emailVerified, true);
+});
+
+test('verify-email: 篡改/过期 token → 400,不改状态', async () => {
+  const { app, db } = await setup({}, { send: async () => {} });
+  await postJson(app, '/auth/signup', { email: 'grace@example.com', password: 'password123' });
+  const r = await app.fetch(new Request('http://localhost/auth/verify-email?token=not-a-real-token'));
+  assert.equal(r.status, 400);
+  const u = (await db.select().from(users).where(eq(users.canonicalEmail, 'grace@example.com')).get())!;
+  assert.equal(u.emailVerified, false);
 });

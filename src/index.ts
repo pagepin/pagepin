@@ -17,6 +17,7 @@ import { mountConsoleStatic } from './console-static.js';
 import { bootstrapAdmin } from './auth/admin-bootstrap.js';
 import { consoleBase, contentBase, loadConfig } from './config.js';
 import { createLibsqlDb } from './db/libsql.js';
+import { createMailer } from './mail/factory.js';
 import { createStorage } from './storage/factory.js';
 
 async function main(): Promise<void> {
@@ -56,7 +57,7 @@ async function main(): Promise<void> {
   const consoleDist = existsSync(consoleDistUrl) ? fileURLToPath(consoleDistUrl) : undefined;
 
   const app = await createApp(
-    { config: cfg, db, storage, rateLimiter: new MemoryRateLimiter() },
+    { config: cfg, db, storage, mailer: createMailer(cfg.mail), rateLimiter: new MemoryRateLimiter() },
     { consoleDist, skillMd, mountConsole: mountConsoleStatic },
   );
 

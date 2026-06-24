@@ -8,6 +8,7 @@ import { createApp, type AppHandle } from './app.js';
 import { bootstrapAdmin } from './auth/admin-bootstrap.js';
 import { loadConfig } from './config.js';
 import { createD1Db } from './db/d1.js';
+import { createMailer } from './mail/factory.js';
 import { SKILL_MD } from './generated/edge-assets.js';
 import { htmlRewriterInject } from './serving-inject.js';
 import { R2Storage } from './storage/r2.js';
@@ -37,6 +38,7 @@ async function buildApp(env: Env): Promise<AppHandle> {
     config: cfg,
     db: createD1Db(env.DB),
     storage: new R2Storage(env.BUCKET),
+    mailer: createMailer(cfg.mail), // 邮箱验证(未配置 PAGEPIN_MAIL_PROVIDER → undefined,不发信)
     // per-isolate 尽力而为限流；边缘真正防护用 CF Rate Limiting Rules。
     rateLimiter: new MemoryRateLimiter(),
   };

@@ -34,6 +34,13 @@ export interface TurnstileConfig {
   secretKey: string; // 服务端 siteverify 用，绝不下发前端
 }
 
+/** 邮件发送(可选,默认关)。provider=resend 需 from + resendApiKey(secret);log 仅需 from(打日志兜底)。 */
+export interface MailConfig {
+  provider: 'resend' | 'log';
+  from: string;
+  resendApiKey?: string;
+}
+
 export interface Config {
   port: number;
   dataDir: string;
@@ -53,6 +60,8 @@ export interface Config {
   socialProviders: SocialProvider[];
   /** Cloudflare Turnstile 人机校验(可选,默认关);配齐 site+secret 才启用,加在 signup/login。 */
   turnstile?: TurnstileConfig;
+  /** 邮件发送(可选,默认关);未配置则不发验证信、邮箱保持未验证(安全降级)。 */
+  mail?: MailConfig;
   secret: string;
   sessionTtlH: number;
   oidc?: OidcConfig;
@@ -197,6 +206,24 @@ export function loadConfig(env: Env): Config {
     turnstile = { siteKey: tsSite, secretKey: tsSecret };
   }
 
+  // 邮件发送(可选):PAGEPIN_MAIL_PROVIDER=resend|log;resend 需 PAGEPIN_MAIL_FROM + PAGEPIN_RESEND_API_KEY。
+  let mail: MailConfig | undefined;
+  const mailProvider = (env.PAGEPIN_MAIL_PROVIDER || '').trim().toLowerCase();
+  if (mailProvider && mailProvider !== 'none') {
+    if (!['resend', 'log'].includes(mailProvider)) {
+      throw new Error(`PAGEPIN_MAIL_PROVIDER 只能是 resend/log/none,收到:${mailProvider}`);
+    }
+    const from = env.PAGEPIN_MAIL_FROM;
+    if (!from) throw new Error('启用邮件需设置 PAGEPIN_MAIL_FROM(发件地址)');
+    if (mailProvider === 'resend') {
+      const key = env.PAGEPIN_RESEND_API_KEY;
+      if (!key) throw new Error('PAGEPIN_MAIL_PROVIDER=resend 需设置 PAGEPIN_RESEND_API_KEY');
+      mail = { provider: 'resend', from, resendApiKey: key };
+    } else {
+      mail = { provider: 'log', from };
+    }
+  }
+
   const secret = str(env, 'PAGEPIN_SECRET', '');
   if (!secret) {
     // Node 入口会先从 {dataDir}/secret 落盘/读取后再调本函数;走到这说明两边都没给
@@ -218,6 +245,7 @@ export function loadConfig(env: Env): Config {
     adminPassword: env.PAGEPIN_ADMIN_PASSWORD || undefined,
     socialProviders,
     turnstile,
+    mail,
     secret,
     sessionTtlH: num(env, 'PAGEPIN_SESSION_TTL_H', 8),
     oidc,

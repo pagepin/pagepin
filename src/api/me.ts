@@ -9,6 +9,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 
 import { contentBase } from '../config.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
+import { sendVerificationEmail } from '../mail/verify.js';
 import { setLoginCookies } from '../auth/sessions.js';
 import { apiTokens, commentThreads, currentVersion, identities, sites, users } from '../db/index.js';
 import type { AppDeps, AppEnv } from '../types.js';
@@ -64,6 +65,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       is_admin: user.isAdmin,
       auth_mode: cfg.authMode,
       social_providers: cfg.socialProviders.map((p) => p.id), // 设置页据此渲染「连接账号」按钮
+      mail_enabled: !!deps.mailer, // 配了邮件才显示「验证邮箱」入口
       needs_handle: user.handle === null,
       content_base: contentBase(cfg),
       limits: limitsJson(),
@@ -151,6 +153,25 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     await db.update(users).set({ sessionEpoch: newEpoch }).where(eq(users.id, user.id)).run();
     await setLoginCookies(c, cfg, 'session', user.id, user.handle, newEpoch); // 当前会话重发新 epo
     return c.json({ ok: true });
+  });
+
+  /** 重发邮箱验证信(password 账号、邮箱未验证、实例配了邮件时)。仅 Cookie 会话。
+   *  sent=false:无需验证 / 已验证 / 未配邮件 —— 都按成功返回,前端据此提示。 */
+  app.post('/api/me/verify-email/resend', mw.cookieMutatingUser, async (c) => {
+    const user = c.get('user');
+    if (cfg.authMode !== 'password' || !user.passwordHash) {
+      return c.json({ detail: '当前账号无需邮箱验证' }, 400);
+    }
+    if (user.emailVerified || !deps.mailer || !user.canonicalEmail) {
+      return c.json({ ok: true, sent: false });
+    }
+    try {
+      const sent = await sendVerificationEmail(deps, user);
+      return c.json({ ok: true, sent });
+    } catch (e) {
+      console.error('重发验证邮件失败:', e);
+      return c.json({ detail: '发送失败，请稍后再试' }, 502);
+    }
   });
 
   /** 本人用量聚合(Account & Settings 的 Usage 区)。 */

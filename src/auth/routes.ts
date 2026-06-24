@@ -16,7 +16,7 @@ import { sign, verify as jwtVerify } from 'hono/jwt';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import { escapeHtml, gateDoc, LOCK_SVG } from '../brand-gate.js';
-import type { Config } from '../config.js';
+import { consoleBase, type Config } from '../config.js';
 import { identities, invites, users, type UserRow } from '../db/index.js';
 import { effectiveRegistrationMode } from '../instance-settings.js';
 import type { AppDeps, AppEnv } from '../types.js';
@@ -24,6 +24,7 @@ import { canonicalEmail, nowIso, uuid, validEmail } from '../util.js';
 import { buildAuthorizeUrl, exchangeCode, OidcError, type OidcIdentity } from './oidc.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { exchangeSocialCode, socialAuthorizeUrl } from './social.js';
+import { readVerifyToken, sendVerificationEmail } from '../mail/verify.js';
 import { verifyTurnstile } from './turnstile.js';
 import {
   clearLoginCookies,
@@ -514,6 +515,14 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       throw e;
     }
     await ensurePasswordIdentity(deps, created.id, canonical, now);
+    if (deps.mailer) {
+      // 验证邮件尽力而为发送 —— 失败不阻断注册(邮箱保持未验证,用户可在设置里重发)
+      try {
+        await sendVerificationEmail(deps, created);
+      } catch (e) {
+        console.error('验证邮件发送失败(不阻断注册):', e);
+      }
+    }
     await setLoginCookies(c, cfg, plane, created.id, created.handle, created.sessionEpoch);
     return c.json({ ok: true });
   });
@@ -623,6 +632,49 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     return c.redirect('/', 302);
   });
 
+  // 邮箱验证落地页:点邮件里的链接到这里。token 无状态(同会话密钥签),用途+签发时邮箱都比对,
+  // 验证后把 users.emailVerified 与该账号 password identity 一并置真(幂等:已验证再点也无碍)。
+  app.get('/auth/verify-email', async (c) => {
+    const token = c.req.query('token') ?? '';
+    const payload = token ? await readVerifyToken(cfg.secret, token) : null;
+    const fail = (msg: string) =>
+      c.html(
+        gateDoc(
+          'Verification failed · pagepin',
+          `<div class="chip chip-amber">${LOCK_SVG}</div>
+<h1>Link invalid or expired</h1>
+<p class="body">${escapeHtml(msg)}</p>
+<a class="btn btn-primary" href="${escapeHtml(consoleBase(cfg))}">Go to pagepin</a>`,
+        ),
+        400,
+      );
+    if (!payload) {
+      return fail('This verification link is invalid or has expired. Sign in and resend it from Settings.');
+    }
+    const user = await deps.db.select().from(users).where(eq(users.id, payload.uid)).get();
+    if (!user || user.canonicalEmail !== payload.eml) {
+      return fail('This link no longer matches your account email.');
+    }
+    if (!user.emailVerified) {
+      await deps.db.update(users).set({ emailVerified: true }).where(eq(users.id, user.id)).run();
+      await deps.db
+        .update(identities)
+        .set({ emailVerified: true })
+        .where(and(eq(identities.userId, user.id), eq(identities.provider, 'password')))
+        .run();
+    }
+    return c.html(
+      gateDoc(
+        'Email verified · pagepin',
+        `<div class="chip chip-teal">${LOCK_SVG}</div>
+<h1>Email verified</h1>
+<p class="body">Thanks — <span class="mono">${escapeHtml(user.email ?? payload.eml)}</span> is confirmed.</p>
+<a class="btn btn-primary" href="${escapeHtml(consoleBase(cfg))}">Go to pagepin</a>`,
+      ),
+      200,
+    );
+  });
+
   // console 登录/注册 UI 用:匿名可读,决定渲染密码表单/注册入口还是跳 OIDC
   app.get('/api/auth/config', async (c) => {
     const mode = await effectiveRegistrationMode(deps);
@@ -712,6 +764,14 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       throw e;
     }
     await ensurePasswordIdentity(deps, created.id, canonical, now);
+    if (deps.mailer) {
+      // 验证邮件尽力而为发送 —— 失败不阻断注册(邮箱保持未验证,用户可在设置里重发)
+      try {
+        await sendVerificationEmail(deps, created);
+      } catch (e) {
+        console.error('验证邮件发送失败(不阻断注册):', e);
+      }
+    }
     await setLoginCookies(c, cfg, plane, created.id, created.handle, created.sessionEpoch);
     return c.json({ ok: true });
   });

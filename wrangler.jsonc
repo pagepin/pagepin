@@ -63,7 +63,12 @@
     "PAGEPIN_OAUTH_GOOGLE_CLIENT_ID": "974221109512-aujd3vag1n1kqp35lggu4mrr3sob0v0u.apps.googleusercontent.com",
     // GitHub 改用 GitHub App(非经典 OAuth App):一个 App 可挂多个回调,app.pagepin.ai 与
     // pagepin.page 两个 callback 同属此 App,故双平面共用这一套 client_id/secret(client_id 形如 Iv23…)。
-    "PAGEPIN_OAUTH_GITHUB_CLIENT_ID": "Iv23liEgAOje7DnqVf2a"
+    "PAGEPIN_OAUTH_GITHUB_CLIENT_ID": "Iv23liEgAOje7DnqVf2a",
+    // 邮箱验证(Phase 3):none = 不发信、邮箱保持未验证(安全降级,不影响登录)。
+    // 启用:把 PAGEPIN_MAIL_PROVIDER 改 "resend",在 Resend 验证 pagepin.ai 发件域后
+    //   `wrangler secret put PAGEPIN_RESEND_API_KEY` 放 key,再 cf:deploy;PAGEPIN_MAIL_FROM 须用该域地址。
+    "PAGEPIN_MAIL_PROVIDER": "none",
+    "PAGEPIN_MAIL_FROM": "pagepin <noreply@pagepin.ai>"
   }
 
   // secrets(wrangler secret put):PAGEPIN_SECRET、PAGEPIN_ADMIN_EMAIL、PAGEPIN_ADMIN_PASSWORD、PAGEPIN_OIDC_CLIENT_SECRET、
