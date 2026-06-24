@@ -18,6 +18,10 @@ export function escapeHtml(s: string): string {
 /** 品牌字体(Hanken Grotesk + JetBrains Mono),公共 CDN。门页与内容域查看器壳共用。 */
 export const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">`;
 
+/** pagepin 品牌 favicon(v3 mark),内联 data-URI —— 内容域门页/登录页标签页同样显示新 logo。
+ *  与 console/index.html 同一份 SVG;edge-safe,无静态资源依赖。 */
+export const FAVICON = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath fill='%230f7c72' d='M24,2 H76 A22,22 0 0 1 98,24 V76 A22,22 0 0 1 76,98 H24 A22,22 0 0 1 2,76 V24 A22,22 0 0 1 24,2 Z'/%3E%3Cpath fill='%23fff' d='M24,52 A26,26 0 1 1 50,78 L27,78 A2,2 0 0 1 25,76 Z'/%3E%3Crect x='37' y='42' width='26' height='4.6' rx='2.3' fill='%230f7c72'/%3E%3Crect x='37' y='52' width='17' height='4.6' rx='2.3' fill='%237fcabf'/%3E%3C/svg%3E">`;
+
 export const LOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
 export const CLOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
 
@@ -26,7 +30,7 @@ export function gateDoc(title: string, inner: string): string {
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${FONTS}<title>${title}</title>
+${FAVICON}${FONTS}<title>${title}</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;
