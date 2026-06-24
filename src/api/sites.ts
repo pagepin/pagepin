@@ -279,7 +279,7 @@ async function publishVersion(
     uploadedBy: string;
     title: string | null;
   },
-): Promise<void> {
+): Promise<number> {
   const version: SiteVersion = {
     id: p.vid,
     storage_prefix: p.storagePrefix,
@@ -328,6 +328,7 @@ async function publishVersion(
       console.warn(`版本回收失败 ${v.storage_prefix}:`, e);
     }
   }
+  return removed.length; // 被裁掉的旧版本数(>0 → 前端可提示「已达版本上限」)
 }
 
 /** 本人名下的草稿会话;不属于本人/不匹配 slug → null。 */
@@ -456,7 +457,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     }
     const manifest: PendingFile[] = batch.map((e) => ({ rel: e.rel, size: e.size }));
     await generateIndexFallback(storage, storagePrefix, manifest, title || slug);
-    await publishVersion(db, storage, cfg, {
+    const pruned = await publishVersion(db, storage, cfg, {
       siteId: site.id,
       vid,
       storagePrefix,
@@ -473,7 +474,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     );
     const updated = await ownedSite(db, user.id, slug);
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
-    return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
+    // pruned_versions:本次发布因版本上限被回收的旧版本数(>0 → 前端提示)
+    return c.json({ ...siteOut(deps, updated, await unresolvedCount(db, updated.id)), pruned_versions: pruned });
   });
 
   // ---- 分批部署 begin:开一个草稿版本,文件后续分多请求推上来,commit 才发布 ----
@@ -571,7 +573,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     if (quotaErr) return quotaErr;
 
     await generateIndexFallback(storage, session.storagePrefix, session.manifest, title || session.slug);
-    await publishVersion(db, storage, cfg, {
+    const pruned = await publishVersion(db, storage, cfg, {
       siteId: session.siteId,
       vid: session.id,
       storagePrefix: session.storagePrefix,
@@ -589,7 +591,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     );
     const updated = await ownedSite(db, user.id, session.slug);
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
-    return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
+    return c.json({ ...siteOut(deps, updated, await unresolvedCount(db, updated.id)), pruned_versions: pruned });
   });
 
   // ---- 分批部署 abort:丢弃草稿并回收已上传的存储 ----

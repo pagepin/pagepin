@@ -124,6 +124,16 @@ export function DropZone() {
       setDeployTarget(null);
       setTitle('');
       toast('Deployed');
+      // 触达版本上限:旧版本(含文件)已被永久删除,提醒一句(无法再回滚到它们)
+      const pruned = site.pruned_versions ?? 0;
+      if (pruned > 0) {
+        const kept = me?.limits.keep_versions ?? 0;
+        toast(
+          kept > 0
+            ? `Version limit reached: keeping the latest ${kept}. ${pruned} older version${pruned > 1 ? 's' : ''} permanently deleted (files removed, no rollback).`
+            : `${pruned} older version${pruned > 1 ? 's' : ''} permanently deleted.`,
+        );
+      }
       void refreshSites();
     } catch (err) {
       toastError(err, 'Deploy failed');
