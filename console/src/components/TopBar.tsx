@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { KeyRound, LogOut, Settings as SettingsIcon, Shield } from 'lucide-react';
 import { logout } from '../api';
 import { useStore } from '../store';
+import { BrandMark } from './BrandMark';
 import { TokenDialog } from './TokenDialog';
 
 const iconBtn =
@@ -13,10 +14,13 @@ export function TopBar() {
   return (
     <header className="sticky top-0 z-40 border-b border-ink-200 bg-ink-50/85 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
-        <div className="flex items-baseline gap-3">
-          <span className="font-mono text-lg font-bold tracking-tight text-tide-600">
-            page<span className="text-ink-800">pin</span>
-            <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse-dot rounded-full bg-tide-500 align-baseline" />
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-2">
+            <BrandMark size={26} className="shrink-0" />
+            <span className="font-mono text-lg font-bold tracking-tight text-tide-600">
+              page<span className="text-ink-800">pin</span>
+              <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse-dot rounded-full bg-tide-500 align-baseline" />
+            </span>
           </span>
           <span className="hidden text-xs text-ink-400 sm:inline">drop it in, get a link</span>
         </div>

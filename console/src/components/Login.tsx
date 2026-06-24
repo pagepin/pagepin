@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { KeyRound, Loader2, LogIn, UserPlus } from 'lucide-react';
+import { Loader2, LogIn } from 'lucide-react';
 import { fetchAuthConfig, login, signup } from '../api';
 import type { AuthConfig } from '../types';
+import { BrandMark } from './BrandMark';
 import { Turnstile } from './Turnstile';
 
 /** 品牌标(lucide 已去掉品牌图标,内联 SVG)。 */
@@ -141,9 +142,7 @@ export function Login() {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-md animate-fade-up rounded-card border border-ink-200 bg-white p-7 shadow-login">
-          <div className="flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
-            <LogIn className="h-5 w-5" />
-          </div>
+          <BrandMark size={44} />
           <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
             Sign in to pagepin
           </h1>
@@ -180,9 +179,7 @@ export function Login() {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-md animate-fade-up rounded-card border border-ink-200 bg-white p-7 shadow-login">
-        <div className="flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
-          {isSignup ? <UserPlus className="h-5 w-5" /> : <KeyRound className="h-5 w-5" />}
-        </div>
+        <BrandMark size={44} />
         <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
           {isSignup ? 'Create your account' : 'Sign in to pagepin'}
         </h1>
