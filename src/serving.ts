@@ -14,8 +14,8 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 import { extOf, relHref } from './autoindex.js';
-import { CLOCK_SVG, escapeHtml, FONTS, gateDoc, LOCK_SVG } from './brand-gate.js';
-import { COMMENTS_JS, MARKED_JS } from './generated/edge-assets.js';
+import { CLOCK_SVG, escapeHtml, FAVICON, FONTS, gateDoc, LOCK_SVG } from './brand-gate.js';
+import { COMMENTS_JS, FAVICON_ICO_B64, MARKED_JS } from './generated/edge-assets.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
 import { currentVersion, isPubliclyVisible, sites, users } from './db/index.js';
@@ -54,6 +54,16 @@ function staticAsset(js: string): StaticAsset {
 }
 const COMMENTS_ASSET = staticAsset(COMMENTS_JS);
 const MARKED_ASSET = staticAsset(MARKED_JS);
+
+// favicon.ico —— 二进制资源 base64 内联(edge 无 fs),import 时解一次成字节。
+// 内容域根 /favicon.ico 兜底用:托管页未自带 <link rel=icon> 时浏览器请求它,回落 pagepin 标。
+function decodeB64(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64);
+  const data = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
+  return data;
+}
+const FAVICON_ICO = decodeB64(FAVICON_ICO_B64);
 
 function injectTag(handle: string, slug: string, rel: string, versionId: string): string {
   const attrs = (
@@ -179,7 +189,7 @@ const CODE_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" s
 const mdShell = (fname: string, contentJson: string, inject: string, sizeBytes: number) => `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${FONTS}<title>${fname}</title>
+${FAVICON}${FONTS}<title>${fname}</title>
 <style>
 :root{color-scheme:light}
 *{box-sizing:border-box}
@@ -351,7 +361,7 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${FONTS}<title>${title}</title>
+${FAVICON}${FONTS}<title>${title}</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;font-family:'Hanken Grotesk',system-ui,sans-serif;
@@ -440,6 +450,16 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
   );
   app.get('/_pagepin/marked.min.js', (c) =>
     staticJs(c, MARKED_ASSET.data, MARKED_ASSET.etag, 'public, max-age=86400'),
+  );
+  // 内容域根 favicon 兜底:托管页没声明自己的 <link rel=icon> 时,浏览器请求 host/favicon.ico
+  // 回落到 pagepin 标。不改任何用户 HTML;页面自带 favicon 的浏览器优先级更高,不受影响。
+  // 须先于站点通配路由('favicon.ico' 已在 RESERVED_SEGMENTS,handle 不会撞)。
+  app.get(
+    '/favicon.ico',
+    () =>
+      new Response(FAVICON_ICO, {
+        headers: { 'Content-Type': 'image/x-icon', 'Cache-Control': 'public, max-age=86400' },
+      }),
   );
 
   const notFound = (c: Context<AppEnv>, siteRoot?: string) => c.html(notFoundHtml(siteRoot), 404);
