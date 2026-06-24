@@ -482,6 +482,12 @@ export function SiteCard({
               ) : (
                 <div className="py-2 text-xs text-ink-400">No previous versions</div>
               )}
+              {me && me.limits.keep_versions > 0 && versions && versions.versions.length > 0 && (
+                <p className="mt-2 px-0.5 text-[11px] leading-relaxed text-ink-400">
+                  Keeping the last {me.limits.keep_versions} versions — older ones are removed
+                  automatically (files deleted, not recoverable).
+                </p>
+              )}
             </div>
           )}
         </div>
