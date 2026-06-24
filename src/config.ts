@@ -53,6 +53,13 @@ export interface Config {
   maxFileMb: number;
   maxSiteMb: number;
   maxFiles: number;
+  /** 每用户总存储配额(MB);0 = 不限。免费档硬顶,管理员豁免;
+   *  统计本人名下所有未删站点、所有版本的字节和(= 真实占用的存储量)。 */
+  freeUserMb: number;
+  /** 每站点保留的版本数;0 = 不限。部署后裁到最近 N 版,超出的旧版本从存储回收(尽力而为)。 */
+  keepVersions: number;
+  /** 分批上传草稿会话的有效期(小时);超期未 commit 的草稿在后续 begin 时被回收。 */
+  deployTtlH: number;
   publicMaxHours: number;
   /** 设备授权(/api/device)铸出的 token 的有效期(天);0 = 不过期。普通 PAT 不受此限。 */
   deviceTokenTtlDays: number;
@@ -197,8 +204,11 @@ export function loadConfig(env: Env): Config {
     storage,
     s3,
     maxFileMb: num(env, 'PAGEPIN_MAX_FILE_MB', 25),
-    maxSiteMb: num(env, 'PAGEPIN_MAX_SITE_MB', 200),
+    maxSiteMb: num(env, 'PAGEPIN_MAX_SITE_MB', 1024),
     maxFiles: num(env, 'PAGEPIN_MAX_FILES', 2000),
+    freeUserMb: num(env, 'PAGEPIN_FREE_USER_MB', 5120),
+    keepVersions: num(env, 'PAGEPIN_KEEP_VERSIONS', 3),
+    deployTtlH: num(env, 'PAGEPIN_DEPLOY_TTL_H', 2),
     publicMaxHours: num(env, 'PAGEPIN_PUBLIC_MAX_HOURS', 168),
     deviceTokenTtlDays: num(env, 'PAGEPIN_DEVICE_TOKEN_TTL_DAYS', 90),
     secureCookies:
