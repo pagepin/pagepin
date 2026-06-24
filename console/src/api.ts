@@ -76,13 +76,21 @@ async function authPost(path: string, body: Record<string, unknown>): Promise<vo
   }
 }
 
-export function login(email: string, password: string): Promise<void> {
-  return authPost('/auth/password', { email, password });
+export function login(email: string, password: string, turnstileToken?: string): Promise<void> {
+  const body: Record<string, unknown> = { email, password };
+  if (turnstileToken) body.turnstile_token = turnstileToken;
+  return authPost('/auth/password', body);
 }
 
-export function signup(email: string, password: string, displayName?: string): Promise<void> {
+export function signup(
+  email: string,
+  password: string,
+  displayName?: string,
+  turnstileToken?: string,
+): Promise<void> {
   const body: Record<string, unknown> = { email, password };
   if (displayName && displayName.trim()) body.display_name = displayName.trim();
+  if (turnstileToken) body.turnstile_token = turnstileToken;
   return authPost('/auth/signup', body);
 }
 

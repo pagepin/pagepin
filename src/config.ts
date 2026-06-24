@@ -28,6 +28,12 @@ export interface S3Config {
   forcePathStyle: boolean;
 }
 
+/** Cloudflare Turnstile 人机校验（可选，默认关）。 */
+export interface TurnstileConfig {
+  siteKey: string; // 公开：随 /api/auth/config 下发给前端渲染
+  secretKey: string; // 服务端 siteverify 用，绝不下发前端
+}
+
 export interface Config {
   port: number;
   dataDir: string;
@@ -45,6 +51,8 @@ export interface Config {
   adminPassword?: string;
   /** 社交登录(可与 password/oidc 同时启用);空数组 = 未配置 */
   socialProviders: SocialProvider[];
+  /** Cloudflare Turnstile 人机校验(可选,默认关);配齐 site+secret 才启用,加在 signup/login。 */
+  turnstile?: TurnstileConfig;
   secret: string;
   sessionTtlH: number;
   oidc?: OidcConfig;
@@ -178,6 +186,17 @@ export function loadConfig(env: Env): Config {
     socialProviders.push({ id, clientId, clientSecret });
   }
 
+  // Turnstile 人机校验(可选,默认关):两值齐全才启用,缺一即报错(避免半配置静默放过机器人)。
+  let turnstile: TurnstileConfig | undefined;
+  const tsSite = env.PAGEPIN_TURNSTILE_SITE_KEY;
+  const tsSecret = env.PAGEPIN_TURNSTILE_SECRET_KEY;
+  if (tsSite || tsSecret) {
+    if (!tsSite || !tsSecret) {
+      throw new Error('Turnstile 需同时设置 PAGEPIN_TURNSTILE_SITE_KEY 与 PAGEPIN_TURNSTILE_SECRET_KEY');
+    }
+    turnstile = { siteKey: tsSite, secretKey: tsSecret };
+  }
+
   const secret = str(env, 'PAGEPIN_SECRET', '');
   if (!secret) {
     // Node 入口会先从 {dataDir}/secret 落盘/读取后再调本函数;走到这说明两边都没给
@@ -198,15 +217,17 @@ export function loadConfig(env: Env): Config {
     adminEmail: env.PAGEPIN_ADMIN_EMAIL || undefined,
     adminPassword: env.PAGEPIN_ADMIN_PASSWORD || undefined,
     socialProviders,
+    turnstile,
     secret,
     sessionTtlH: num(env, 'PAGEPIN_SESSION_TTL_H', 8),
     oidc,
     storage,
     s3,
+    // 面向公开免费档的偏紧默认；自托管/团队实例按需用 env 调大。
     maxFileMb: num(env, 'PAGEPIN_MAX_FILE_MB', 25),
-    maxSiteMb: num(env, 'PAGEPIN_MAX_SITE_MB', 1024),
+    maxSiteMb: num(env, 'PAGEPIN_MAX_SITE_MB', 200),
     maxFiles: num(env, 'PAGEPIN_MAX_FILES', 2000),
-    freeUserMb: num(env, 'PAGEPIN_FREE_USER_MB', 5120),
+    freeUserMb: num(env, 'PAGEPIN_FREE_USER_MB', 1024),
     keepVersions: num(env, 'PAGEPIN_KEEP_VERSIONS', 3),
     deployTtlH: num(env, 'PAGEPIN_DEPLOY_TTL_H', 2),
     publicMaxHours: num(env, 'PAGEPIN_PUBLIC_MAX_HOURS', 168),
