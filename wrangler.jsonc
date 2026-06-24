@@ -61,7 +61,9 @@
     // 授权跳转 URL 里本就公开);client_secret 走 wrangler secret put,不入库。
     "PAGEPIN_OAUTH_PROVIDERS": "google,github",
     "PAGEPIN_OAUTH_GOOGLE_CLIENT_ID": "974221109512-aujd3vag1n1kqp35lggu4mrr3sob0v0u.apps.googleusercontent.com",
-    "PAGEPIN_OAUTH_GITHUB_CLIENT_ID": "Ov23li04pZvNLBhiG7oC"
+    // GitHub 改用 GitHub App(非经典 OAuth App):一个 App 可挂多个回调,app.pagepin.ai 与
+    // pagepin.page 两个 callback 同属此 App,故双平面共用这一套 client_id/secret(client_id 形如 Iv23…)。
+    "PAGEPIN_OAUTH_GITHUB_CLIENT_ID": "Iv23liEgAOje7DnqVf2a"
   }
 
   // secrets(wrangler secret put):PAGEPIN_SECRET、PAGEPIN_ADMIN_EMAIL、PAGEPIN_ADMIN_PASSWORD、PAGEPIN_OIDC_CLIENT_SECRET、

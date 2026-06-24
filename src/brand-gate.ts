@@ -47,6 +47,10 @@ h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em}
   border-radius:9px;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer}
 .btn-primary{background:#0f7c72;color:#fff}.btn-primary:hover{background:#0b6358}
 .btn-ghost{background:#fff;border:1px solid #e1e4e6;color:#3a424b}.btn-ghost:hover{border-color:#0f7c72;color:#0f7c72}
+/* 社交登录按钮 + or 分隔线 —— 内容域登录墙复用,与控制台社交按钮同一视觉(白底描边) */
+.btn-social{background:#fff;border:1px solid #e1e4e6;color:#1b2127;gap:9px}.btn-social:hover{border-color:#0f7c72;color:#0f7c72}
+.social{margin-top:18px}.social .btn{margin-top:0}.social .btn + .btn{margin-top:10px}
+.or{display:flex;align-items:center;gap:10px;margin:16px 0 0;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#9aa1a9}.or::before,.or::after{content:"";flex:1;height:1px;background:#e7e9eb}
 .row{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12.5px;color:#9aa1a9}
 .avatar{width:22px;height:22px;border-radius:999px;background:#0f7c72;color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700}
 .foot{margin-top:16px;font-size:11px;color:#c3c8cd}

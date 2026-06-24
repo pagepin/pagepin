@@ -112,10 +112,31 @@ function turnstileToken(body: Record<string, string>): string {
   return body['cf-turnstile-response'] ?? body['turnstile_token'] ?? '';
 }
 
+// 社交登录品牌标(与 console/src/components/Login.tsx 同一份 SVG;内容域登录墙是纯 HTML,内联）。
+const GOOGLE_MARK = `<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.27c0-.79-.07-1.54-.2-2.27H12v4.51h6.47a5.53 5.53 0 0 1-2.4 3.63v3h3.88c2.27-2.09 3.55-5.17 3.55-8.87Z"/><path fill="#34A853" d="M12 24c3.24 0 5.96-1.08 7.95-2.91l-3.88-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09A12 12 0 0 0 12 24Z"/><path fill="#FBBC05" d="M5.27 14.29a7.2 7.2 0 0 1 0-4.58V6.62H1.29a12 12 0 0 0 0 10.76l3.98-3.09Z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.43-3.43C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75Z"/></svg>`;
+const GITHUB_MARK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="#1b2127" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.47-2.39 1.24-3.23-.13-.31-.54-1.53.12-3.19 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.25 2.88.12 3.19.77.84 1.24 1.92 1.24 3.23 0 4.62-2.81 5.64-5.49 5.94.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/></svg>`;
+const SOCIAL_MARK: Record<string, string> = { google: GOOGLE_MARK, github: GITHUB_MARK };
+const SOCIAL_LABEL: Record<string, string> = { google: 'Continue with Google', github: 'Continue with GitHub' };
+
+/** 内容域登录墙的社交登录按钮区:纯 <a> GET 起跳到 /auth/social/<id>（按 Host 拼回调,
+ *  从 pagepin.page 发起即回 pagepin.page;无需 JS）。无 provider 时返回空串。 */
+function socialButtonsHtml(social: string[], next: string): string {
+  if (!social.length) return '';
+  const buttons = social
+    .map((id) => {
+      const mark = SOCIAL_MARK[id] ?? '';
+      const label = SOCIAL_LABEL[id] ?? `Continue with ${id}`;
+      const href = `/auth/social/${encodeURIComponent(id)}?next=${encodeURIComponent(next)}`;
+      return `  <a class="btn btn-social" href="${href}">${mark}${escapeHtml(label)}</a>`;
+    })
+    .join('\n');
+  return `<div class="social">\n${buttons}\n</div>\n<div class="or">or</div>\n`;
+}
+
 /** 双域内容平面的 password 登录页:复用 brand-gate 品牌壳(与私有门页同一视觉),自包含、
  * 无控制台资产依赖。提交走内联 fetch → JSON,失败行内报错(不再把 401 的 {detail} 甩成裸 JSON 页);
  * 成功跳回 next。JS 不可用时 <form> 仍原生 POST 兜底(成功 302 回跳,失败退化为旧的 JSON 页)。 */
-function loginPage(next: string, turnstileSiteKey?: string): string {
+function loginPage(next: string, social: string[], turnstileSiteKey?: string): string {
   const tsWidget = turnstileSiteKey
     ? `  <div class="cf-turnstile" data-sitekey="${escapeHtml(turnstileSiteKey)}"></div>\n`
     : '';
@@ -127,7 +148,7 @@ function loginPage(next: string, turnstileSiteKey?: string): string {
     `<div class="chip chip-teal">${LOCK_SVG}</div>
 <h1>Sign in to view</h1>
 <p class="body">Sign in to your pagepin account to continue.</p>
-<form id="f" method="post" action="/auth/password">
+${socialButtonsHtml(social, next)}<form id="f" method="post" action="/auth/password">
   <input type="hidden" name="next" value="${escapeHtml(next)}">
   <label>Email<input name="email" type="email" autocomplete="username" required autofocus></label>
   <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
@@ -254,7 +275,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     }
 
     // password:view 平面(双域内容域)直接渲染表单;session 平面 303 给 console SPA 的 /login
-    if (plane === 'view') return c.html(loginPage(next, cfg.turnstile?.siteKey));
+    if (plane === 'view') return c.html(loginPage(next, cfg.socialProviders.map((p) => p.id), cfg.turnstile?.siteKey));
     return c.redirect(`/login?next=${encodeURIComponent(next)}`, 303);
   });
 
