@@ -27,6 +27,12 @@ export interface ThreadComment {
   created_at: string;
 }
 
+/** 分批上传草稿里累计的文件清单项(rel→size,按 rel 去重;commit 时据此算 file_count/total_bytes)。 */
+export interface PendingFile {
+  rel: string;
+  size: number;
+}
+
 export const users = sqliteTable(
   'users',
   {
@@ -173,12 +179,39 @@ export const deviceAuths = sqliteTable(
   ],
 );
 
+/** 分批上传草稿会话 —— 大站点拆成多请求时,文件先按版本 id 落到唯一前缀,commit 才 flip current。
+ *
+ * 半成品永不外露:草稿版本在 commit 前不被 current_version_id 指向(原子性与单请求部署一致)。
+ * manifest 跨批累计(按 rel 去重,重传同 rel 覆盖不重复计数),commit 据此算 file_count/total_bytes。
+ * 与存储驱动无关(不依赖 list 能力,故 S3 BYO 桶也支持);未 commit 的草稿到 expires_at 由后续
+ * begin 顺手清理(删存储前缀 + 行),不长期占用 R2。 */
+export const deploySessions = sqliteTable(
+  'deploy_sessions',
+  {
+    id: text('id').primaryKey(), // = 未来的 version id(也是存储前缀里的 vid 段)
+    siteId: text('site_id').notNull(),
+    ownerId: text('owner_id').notNull(),
+    slug: text('slug').notNull(),
+    storagePrefix: text('storage_prefix').notNull(), // sites/<ownerId>/<slug>/<vid>/
+    title: text('title'),
+    manifest: text('manifest', { mode: 'json' }).$type<PendingFile[]>().notNull().default([]),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    expiresAt: text('expires_at').notNull(), // ISO;过期未 commit 即可回收
+  },
+  (t) => [
+    index('deploy_sessions_owner_idx').on(t.ownerId),
+    index('deploy_sessions_expires_idx').on(t.expiresAt),
+  ],
+);
+
 export type UserRow = typeof users.$inferSelect;
 export type SiteRow = typeof sites.$inferSelect;
 export type CommentThreadRow = typeof commentThreads.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
 export type DeviceAuthRow = typeof deviceAuths.$inferSelect;
+export type DeploySessionRow = typeof deploySessions.$inferSelect;
 
 /** site.versions 里找当前版本(对应 Site.current_version())。 */
 export function currentVersion(site: SiteRow): SiteVersion | null {

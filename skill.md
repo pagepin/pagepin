@@ -67,6 +67,8 @@ curl -X POST "{{CONSOLE_BASE}}/api/sites/my-demo/deploy" \
 
 The response is JSON; key fields: `url` (the link you can visit/share directly), `visibility`, `version_count`. After a successful deploy, give the `url` to the user.
 
+**Large sites (> ~90MB total): upload in batches.** A single `POST .../deploy` carries every file in one request body, which is capped at ~100MB on Cloudflare. For bigger sites use the 3-step batched flow (each step authenticates the same way): `POST .../deploys` `{"title":"..."}` → `{deploy_id}`; then one or more `POST .../deploys/{deploy_id}/files` (multipart `files`/`paths`, keep each request under ~90MB); then `POST .../deploys/{deploy_id}/commit` `{"title":"..."}` to publish atomically. `DELETE .../deploys/{deploy_id}` aborts a draft. The web console does this automatically.
+
 ## Other endpoints (all take a JSON body; base URL {{CONSOLE_BASE}})
 
 | Endpoint | Purpose |
@@ -160,7 +162,7 @@ Web-based AIs (claude.ai / ChatGPT) have no cross-session memory: use the ✨ bu
 
 ## Limits & error codes
 
-- Quotas (defaults; self-hosters can tune them via environment variables): single file ≤25MB, single site ≤200MB, ≤2000 files
+- Quotas (defaults; self-hosters can tune them via environment variables): single file ≤25MB, single site ≤1GB, ≤2000 files, plus a per-user total-storage quota (default 5GB across all your sites/versions)
   — **always defer to the `limits` returned by `GET /api/me`**.
 - The `public_hours` upper bound likewise follows server config (default 168 hours = 7 days); anything beyond is hard-clamped.
 - `401` invalid or revoked token; `404` site not found; `409` set a handle in the console first; `413` size limit exceeded; `422` invalid slug/path.

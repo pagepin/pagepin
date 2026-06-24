@@ -75,8 +75,11 @@ All configuration is via environment variables.
 | `PAGEPIN_S3_REGION` | `auto` | SigV4 region. |
 | `PAGEPIN_S3_FORCE_PATH_STYLE` | `true` | Path-style addressing (MinIO needs `true`). |
 | `PAGEPIN_MAX_FILE_MB` | `25` | Max size per uploaded file. |
-| `PAGEPIN_MAX_SITE_MB` | `200` | Max total size per deploy. |
-| `PAGEPIN_MAX_FILES` | `2000` | Max number of files per deploy. |
+| `PAGEPIN_MAX_SITE_MB` | `1024` | Max total size per site version. Sites over ~90MB upload in batches (see deploy below), so this is a pure policy cap, not a request-size limit. |
+| `PAGEPIN_MAX_FILES` | `2000` | Max number of files per site version. |
+| `PAGEPIN_FREE_USER_MB` | `5120` | Per-user total storage quota in MB (sum of all versions across all sites). Deploys that would exceed it are rejected with 413. Admins are exempt; `0` disables the quota. |
+| `PAGEPIN_KEEP_VERSIONS` | `3` | Versions retained per site; older ones are garbage-collected from storage after each deploy. `0` keeps all versions. |
+| `PAGEPIN_DEPLOY_TTL_H` | `2` | Lifetime (hours) of an unfinished batched-upload draft before it is reclaimed on the next deploy. |
 | `PAGEPIN_PUBLIC_MAX_HOURS` | `168` | Upper bound for the public-sharing window (hours). |
 
 ## Deploy & API for AI agents

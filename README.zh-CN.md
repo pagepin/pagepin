@@ -75,8 +75,11 @@ pnpm dev                                           # API 跑在 http://localhost
 | `PAGEPIN_S3_REGION` | `auto` | SigV4 region。 |
 | `PAGEPIN_S3_FORCE_PATH_STYLE` | `true` | path-style 寻址（MinIO 需要 `true`）。 |
 | `PAGEPIN_MAX_FILE_MB` | `25` | 单个上传文件的最大尺寸。 |
-| `PAGEPIN_MAX_SITE_MB` | `200` | 单次部署的最大总尺寸。 |
-| `PAGEPIN_MAX_FILES` | `2000` | 单次部署的最大文件数。 |
+| `PAGEPIN_MAX_SITE_MB` | `1024` | 单个站点版本的最大总尺寸。超过 ~90MB 的站点自动分批上传（见下方部署说明），故此项是纯策略上限、非请求体限制。 |
+| `PAGEPIN_MAX_FILES` | `2000` | 单个站点版本的最大文件数。 |
+| `PAGEPIN_FREE_USER_MB` | `5120` | 每用户总存储配额（MB，统计名下所有站点的全部版本字节和）。部署后将超出即拒（413）。管理员豁免；`0` 表示不限。 |
+| `PAGEPIN_KEEP_VERSIONS` | `3` | 每站点保留的版本数；每次部署后把更旧的版本从存储回收。`0` 表示保留全部版本。 |
+| `PAGEPIN_DEPLOY_TTL_H` | `2` | 未完成的分批上传草稿的有效期（小时）；超期后在下次部署时被回收。 |
 | `PAGEPIN_PUBLIC_MAX_HOURS` | `168` | 公开分享窗口的上限（小时）。 |
 
 ## 部署与面向 AI agent 的 API

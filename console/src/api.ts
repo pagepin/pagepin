@@ -296,27 +296,34 @@ export async function logout(): Promise<void> {
   location.href = loginPath() + '?next=' + encodeURIComponent('/');
 }
 
-/** 部署：用 XMLHttpRequest 以便拿到上传进度。 */
-export function deploySite(
-  slug: string,
-  files: CollectedFile[],
-  title: string | undefined,
-  onProgress: (percent: number) => void,
-): Promise<SiteOut> {
-  return new Promise((resolve, reject) => {
-    const fd = new FormData();
-    for (const { relPath, file } of files) {
-      fd.append('files', file, encodeURIComponent(relPath));
-      fd.append('paths', relPath);
-    }
-    if (title && title.trim()) fd.append('title', title.trim());
+// 单批上传上限：留余量避开 Cloudflare 100MB 请求体上限。总量 ≤ 此值走单请求，否则分批。
+const CHUNK_BYTES = 80 * 1024 * 1024;
 
+function filesToForm(files: CollectedFile[], title?: string): FormData {
+  const fd = new FormData();
+  for (const { relPath, file } of files) {
+    fd.append('files', file, encodeURIComponent(relPath));
+    fd.append('paths', relPath);
+  }
+  if (title && title.trim()) fd.append('title', title.trim());
+  return fd;
+}
+
+/** 单个 multipart 请求（XHR，带上传进度）。onProgress 收本请求的 (loaded,total)。 */
+function xhrPost(
+  url: string,
+  fd: FormData,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `/api/sites/${encodeURIComponent(slug)}/deploy`);
+    xhr.open('POST', url);
     xhr.setRequestHeader('X-CSRF-Token', getCsrf());
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-    };
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(e.loaded, e.total);
+      };
+    }
     xhr.onload = () => {
       if (xhr.status === 401) {
         redirectToLogin();
@@ -325,7 +332,7 @@ export function deploySite(
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          resolve(JSON.parse(xhr.responseText) as SiteOut);
+          resolve(xhr.responseText ? JSON.parse(xhr.responseText) : {});
         } catch {
           reject(new ApiError(xhr.status, '响应解析失败'));
         }
@@ -348,4 +355,76 @@ export function deploySite(
     xhr.onerror = () => reject(new ApiError(0, '网络错误，上传失败'));
     xhr.send(fd);
   });
+}
+
+/** 贪心打包：每批总字节 ≤ CHUNK_BYTES（单文件 ≤25MB，故批内必能容纳）。 */
+function packBatches(files: CollectedFile[]): CollectedFile[][] {
+  const batches: CollectedFile[][] = [];
+  let cur: CollectedFile[] = [];
+  let curBytes = 0;
+  for (const f of files) {
+    if (cur.length > 0 && curBytes + f.file.size > CHUNK_BYTES) {
+      batches.push(cur);
+      cur = [];
+      curBytes = 0;
+    }
+    cur.push(f);
+    curBytes += f.file.size;
+  }
+  if (cur.length > 0) batches.push(cur);
+  return batches;
+}
+
+/** 部署：总量小走单请求（curl 等价路径）；大走分批 begin→files…→commit，聚合上传进度。
+ *  分批解除 Cloudflare 单请求 100MB 上限——每批 <~90MB，最后 commit 原子发布。 */
+export async function deploySite(
+  slug: string,
+  files: CollectedFile[],
+  title: string | undefined,
+  onProgress: (percent: number) => void,
+): Promise<SiteOut> {
+  const totalBytes = files.reduce((s, f) => s + f.file.size, 0);
+  const base = `/api/sites/${encodeURIComponent(slug)}`;
+
+  // 小站点：一个 multipart 请求
+  if (totalBytes <= CHUNK_BYTES) {
+    const out = await xhrPost(`${base}/deploy`, filesToForm(files, title), (loaded, total) =>
+      onProgress(Math.round((loaded / total) * 100)),
+    );
+    return out as SiteOut;
+  }
+
+  // 大站点：分批传到同一草稿版本，最后 commit 原子切换；失败则 abort 回收
+  const titleBody = JSON.stringify(title && title.trim() ? { title: title.trim() } : {});
+  const begin = await request<{ deploy_id: string }>(`${base}/deploys`, {
+    method: 'POST',
+    body: titleBody,
+  });
+  const deployId = begin.deploy_id;
+  try {
+    const batches = packBatches(files);
+    let uploadedBytes = 0;
+    for (const b of batches) {
+      const bBytes = b.reduce((s, f) => s + f.file.size, 0);
+      await xhrPost(`${base}/deploys/${encodeURIComponent(deployId)}/files`, filesToForm(b), (loaded, total) => {
+        const frac = total > 0 ? loaded / total : 0;
+        onProgress(Math.min(99, Math.round(((uploadedBytes + frac * bBytes) / totalBytes) * 100)));
+      });
+      uploadedBytes += bBytes;
+      onProgress(Math.min(99, Math.round((uploadedBytes / totalBytes) * 100)));
+    }
+    const out = await request<SiteOut>(`${base}/deploys/${encodeURIComponent(deployId)}/commit`, {
+      method: 'POST',
+      body: titleBody,
+    });
+    onProgress(100);
+    return out;
+  } catch (err) {
+    try {
+      await request(`${base}/deploys/${encodeURIComponent(deployId)}`, { method: 'DELETE' });
+    } catch {
+      /* abort 尽力而为，失败不掩盖原错误 */
+    }
+    throw err;
+  }
 }
