@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(root, p), 'utf8');
+// 二进制资源 → base64 字符串常量(favicon.ico 在边缘按字节伺服,运行时 atob 解码)。
+const readB64 = (p) => readFileSync(join(root, p)).toString('base64');
 // 转义成模板字面量内容:反斜杠、反引号、${ 三处。
 const lit = (s) => '`' + s.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${') + '`';
 
@@ -15,7 +17,8 @@ const out =
   `/* eslint-disable */\n` +
   `export const COMMENTS_JS = ${lit(read('static/comments.js'))};\n` +
   `export const MARKED_JS = ${lit(read('static/marked.min.js'))};\n` +
-  `export const SKILL_MD = ${lit(read('skill.md'))};\n`;
+  `export const SKILL_MD = ${lit(read('skill.md'))};\n` +
+  `export const FAVICON_ICO_B64 = ${JSON.stringify(readB64('static/favicon.ico'))};\n`;
 
 mkdirSync(join(root, 'src/generated'), { recursive: true });
 writeFileSync(join(root, 'src/generated/edge-assets.ts'), out);

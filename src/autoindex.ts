@@ -5,6 +5,8 @@
  * 生成页不计入 file_count/total_bytes(与单 HTML 自动别名同一口径)。
  */
 
+import { FAVICON } from './brand-gate.js';
+
 const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif']);
 const CODE_EXTS = new Set([
   '.js', '.ts', '.jsx', '.tsx', '.css', '.html', '.htm', '.json', '.md', '.markdown',
@@ -66,7 +68,7 @@ export function redirectIndexHtml(rel: string): string {
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="0;url=./${escapeHtml(href)}">
-${FONTS}
+${FAVICON}${FONTS}
 <title>${name}</title></head>
 <body style="font-family:'Hanken Grotesk',system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;color:#6b7480;font-size:14px">
 <p>Opening <a href="./${escapeHtml(href)}" style="color:#0f7c72;font-family:'JetBrains Mono',monospace">${name}</a> …</p>
@@ -101,7 +103,7 @@ export function galleryIndexHtml(title: string, entries: IndexEntry[]): string {
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${FONTS}
+${FAVICON}${FONTS}
 <title>${t}</title>
 <style>
 :root{color-scheme:light}
@@ -136,7 +138,7 @@ body{font-family:'Hanken Grotesk',system-ui,sans-serif;color:#1b2127;max-width:1
 <div class="head">
   <span class="folder">${t}<span class="sl">/</span></span>
   <span class="count">${entries.length} item${entries.length === 1 ? '' : 's'}</span>
-  <span class="badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.6 6.6L21 9.3l-5 4.6L17.5 21 12 17.3 6.5 21 8 13.9l-5-4.6 6.4-.7z"/></svg>pagepin auto-generated index</span>
+  <span class="badge"><svg width="14" height="14" viewBox="0 0 100 100"><path fill="#0f7c72" d="M24,2 H76 A22,22 0 0 1 98,24 V76 A22,22 0 0 1 76,98 H24 A22,22 0 0 1 2,76 V24 A22,22 0 0 1 24,2 Z"/><path fill="#fff" d="M24,52 A26,26 0 1 1 50,78 L27,78 A2,2 0 0 1 25,76 Z"/><circle cx="49.7" cy="51" r="9" fill="#0f7c72"/></svg>pagepin auto-generated index</span>
 </div>
 <div class="grid">
 ${cards}
