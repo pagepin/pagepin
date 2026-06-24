@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 
 import { createApp } from './app.js';
+import { MemoryRateLimiter } from './ratelimit.js';
 import { mountConsoleStatic } from './console-static.js';
 import { bootstrapAdmin } from './auth/admin-bootstrap.js';
 import { consoleBase, contentBase, loadConfig } from './config.js';
@@ -55,7 +56,7 @@ async function main(): Promise<void> {
   const consoleDist = existsSync(consoleDistUrl) ? fileURLToPath(consoleDistUrl) : undefined;
 
   const app = await createApp(
-    { config: cfg, db, storage },
+    { config: cfg, db, storage, rateLimiter: new MemoryRateLimiter() },
     { consoleDist, skillMd, mountConsole: mountConsoleStatic },
   );
 

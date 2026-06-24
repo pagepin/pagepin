@@ -66,6 +66,8 @@ All configuration is via environment variables.
 | `PAGEPIN_OIDC_CLIENT_SECRET` | — | OIDC client secret. |
 | `PAGEPIN_OIDC_SCOPES` | `openid profile email` | OIDC scopes. |
 | `PAGEPIN_OIDC_AUTH_PARAMS` | — | JSON object of extra query params appended to the authorize URL. |
+| `PAGEPIN_TURNSTILE_SITE_KEY` | — | Cloudflare Turnstile site key (public). Set together with the secret to require human verification on signup + password login; leave both unset to disable. |
+| `PAGEPIN_TURNSTILE_SECRET_KEY` | — | Turnstile secret key (server-side `siteverify`, never sent to the browser). Both keys must be set together or startup throws. |
 | `PAGEPIN_STORAGE` | `fs` | `fs` (local disk) or `s3` (S3-compatible). |
 | `PAGEPIN_S3_ENDPOINT` | — | S3 endpoint (required in `s3` mode; scheme optional, defaults to `https://`). |
 | `PAGEPIN_S3_BUCKET` | — | S3 bucket. |
@@ -75,12 +77,14 @@ All configuration is via environment variables.
 | `PAGEPIN_S3_REGION` | `auto` | SigV4 region. |
 | `PAGEPIN_S3_FORCE_PATH_STYLE` | `true` | Path-style addressing (MinIO needs `true`). |
 | `PAGEPIN_MAX_FILE_MB` | `25` | Max size per uploaded file. |
-| `PAGEPIN_MAX_SITE_MB` | `1024` | Max total size per site version. Sites over ~90MB upload in batches (see deploy below), so this is a pure policy cap, not a request-size limit. |
+| `PAGEPIN_MAX_SITE_MB` | `200` | Max total size per site version. Sites over ~90MB upload in batches (see deploy below), so this is a pure policy cap, not a request-size limit. |
 | `PAGEPIN_MAX_FILES` | `2000` | Max number of files per site version. |
-| `PAGEPIN_FREE_USER_MB` | `5120` | Per-user total storage quota in MB (sum of all versions across all sites). Deploys that would exceed it are rejected with 413. Admins are exempt; `0` disables the quota. |
+| `PAGEPIN_FREE_USER_MB` | `1024` | Per-user total storage quota in MB (sum of all versions across all sites). Deploys that would exceed it are rejected with 413. Admins are exempt; `0` disables the quota. |
 | `PAGEPIN_KEEP_VERSIONS` | `3` | Versions retained per site; older ones are garbage-collected from storage after each deploy. `0` keeps all versions. |
 | `PAGEPIN_DEPLOY_TTL_H` | `2` | Lifetime (hours) of an unfinished batched-upload draft before it is reclaimed on the next deploy. |
 | `PAGEPIN_PUBLIC_MAX_HOURS` | `168` | Upper bound for the public-sharing window (hours). |
+
+The defaults above lean toward a public free tier; raise them via env for a trusted/team instance. Signup and password login are also rate-limited per IP at the app level (best-effort, and per-isolate on Workers). For real edge protection on a public deployment, add a Cloudflare **Rate Limiting Rule** on `/auth/signup` and `/auth/password` — that runs globally before the Worker.
 
 ## Deploy & API for AI agents
 

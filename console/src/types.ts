@@ -6,6 +6,8 @@ export interface AuthConfig {
   registration_mode: RegistrationMode;
   /** 已启用的社交登录 provider id(如 ['google','github']);缺省/空 = 无 */
   social_providers?: string[];
+  /** Cloudflare Turnstile site key;配了才下发,前端据此在 login/signup 渲染人机校验。 */
+  turnstile_site_key?: string | null;
 }
 
 export interface Limits {

@@ -24,6 +24,7 @@ import { nowIso, uuid, validEmail } from '../util.js';
 import { buildAuthorizeUrl, exchangeCode, OidcError, type OidcIdentity } from './oidc.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { exchangeSocialCode, socialAuthorizeUrl } from './social.js';
+import { verifyTurnstile } from './turnstile.js';
 import {
   clearLoginCookies,
   consumeOauthNonce,
@@ -97,10 +98,30 @@ async function readBody(c: Context): Promise<{ body: Record<string, string>; isJ
   return { body, isJson: false };
 }
 
+/** 取客户端 IP(限流/turnstile remoteip 用):CF 边缘给 cf-connecting-ip,其余取 x-forwarded-for 首段。 */
+function clientIp(c: Context): string {
+  const cf = c.req.header('cf-connecting-ip');
+  if (cf) return cf.trim();
+  const xff = c.req.header('x-forwarded-for');
+  if (xff) return (xff.split(',')[0] ?? xff).trim();
+  return 'unknown';
+}
+
+/** 从请求体取 Turnstile token:标准隐藏域 cf-turnstile-response,或 console SPA 显式传的 turnstile_token。 */
+function turnstileToken(body: Record<string, string>): string {
+  return body['cf-turnstile-response'] ?? body['turnstile_token'] ?? '';
+}
+
 /** 双域内容平面的 password 登录页:复用 brand-gate 品牌壳(与私有门页同一视觉),自包含、
  * 无控制台资产依赖。提交走内联 fetch → JSON,失败行内报错(不再把 401 的 {detail} 甩成裸 JSON 页);
  * 成功跳回 next。JS 不可用时 <form> 仍原生 POST 兜底(成功 302 回跳,失败退化为旧的 JSON 页)。 */
-function loginPage(next: string): string {
+function loginPage(next: string, turnstileSiteKey?: string): string {
+  const tsWidget = turnstileSiteKey
+    ? `  <div class="cf-turnstile" data-sitekey="${escapeHtml(turnstileSiteKey)}"></div>\n`
+    : '';
+  const tsScript = turnstileSiteKey
+    ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>\n`
+    : '';
   return gateDoc(
     'Sign in · pagepin',
     `<div class="chip chip-teal">${LOCK_SVG}</div>
@@ -110,10 +131,10 @@ function loginPage(next: string): string {
   <input type="hidden" name="next" value="${escapeHtml(next)}">
   <label>Email<input name="email" type="email" autocomplete="username" required autofocus></label>
   <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
-  <div id="err" class="err" hidden></div>
+${tsWidget}  <div id="err" class="err" hidden></div>
   <button type="submit" class="btn btn-primary">Sign in</button>
 </form>
-<div class="foot">Hosted on <span class="mono">pagepin</span></div>
+${tsScript}<div class="foot">Hosted on <span class="mono">pagepin</span></div>
 <script>
 (function(){
   var f=document.getElementById('f'),err=document.getElementById('err'),btn=f.querySelector('button');
@@ -233,13 +254,20 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     }
 
     // password:view 平面(双域内容域)直接渲染表单;session 平面 303 给 console SPA 的 /login
-    if (plane === 'view') return c.html(loginPage(next));
+    if (plane === 'view') return c.html(loginPage(next, cfg.turnstile?.siteKey));
     return c.redirect(`/login?next=${encodeURIComponent(next)}`, 303);
   });
 
   app.post('/auth/password', async (c) => {
     if (cfg.authMode !== 'password') return c.json({ detail: '未启用密码登录' }, 403);
     const { body, isJson } = await readBody(c);
+    // 限流:同一 IP 登录尝试节流(防撞库);边缘真正防护用 CF Rate Limiting Rules。
+    if (deps.rateLimiter && !(await deps.rateLimiter.check(`login:${clientIp(c)}`, 10, 600))) {
+      return c.json({ detail: '尝试过于频繁，请稍后再试' }, 429);
+    }
+    if (cfg.turnstile && !(await verifyTurnstile(cfg.turnstile.secretKey, turnstileToken(body), clientIp(c)))) {
+      return c.json({ detail: '人机校验失败，请重试' }, 403);
+    }
     const email = (body.email ?? '').trim();
     const password = body.password ?? '';
     const user = email
@@ -261,6 +289,13 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       return c.json({ detail: '注册未开放' }, 403);
     }
     const { body } = await readBody(c);
+    // 限流:同一 IP 批量注册节流(防机器人刷号);边缘真正防护用 CF Rate Limiting Rules。
+    if (deps.rateLimiter && !(await deps.rateLimiter.check(`signup:${clientIp(c)}`, 5, 3600))) {
+      return c.json({ detail: '注册过于频繁，请稍后再试' }, 429);
+    }
+    if (cfg.turnstile && !(await verifyTurnstile(cfg.turnstile.secretKey, turnstileToken(body), clientIp(c)))) {
+      return c.json({ detail: '人机校验失败，请重试' }, 403);
+    }
     const email = (body.email ?? '').trim();
     const password = body.password ?? '';
     const displayName = (body.display_name ?? '').trim();
@@ -379,6 +414,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       registration_mode: mode,
       allow_signup: mode === 'open', // 兼容旧字段
       social_providers: cfg.socialProviders.map((p) => p.id), // console 据此渲染社交登录按钮
+      turnstile_site_key: cfg.turnstile?.siteKey ?? null, // 配了才下发,console 据此渲染人机校验
     });
   });
 

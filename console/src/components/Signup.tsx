@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, Lock, UserPlus } from 'lucide-react';
 import { fetchAuthConfig, signup } from '../api';
 import { EMAIL_RE, type AuthConfig } from '../types';
+import { Turnstile } from './Turnstile';
 
 /** Open 模式自助注册屏（/signup，无 invite 参数）。仅 registration_mode==='open' 放行;
  *  否则显示「注册未开放」。handle 走首登确认。 */
@@ -12,6 +13,8 @@ export function Signup() {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileKey, setTurnstileKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,18 +60,23 @@ export function Signup() {
   }
 
   const tooShort = password.length > 0 && password.length < 8;
-  const ready = EMAIL_RE.test(email.trim()) && password.length >= 8;
+  const needsTurnstile = !!config.turnstile_site_key;
+  const ready =
+    EMAIL_RE.test(email.trim()) && password.length >= 8 && (!needsTurnstile || !!turnstileToken);
   const submit = () => {
     if (!ready || submitting) return;
     setSubmitting(true);
     setError(null);
-    signup(email.trim(), password, displayName)
+    signup(email.trim(), password, displayName, turnstileToken)
       .then(() => {
         location.href = '/';
       })
       .catch((e) => {
         setError(e instanceof Error ? e.message : 'Could not sign up');
         setSubmitting(false);
+        // token 一次性，失败后重置以重新挑战
+        setTurnstileToken('');
+        setTurnstileKey((k) => k + 1);
       });
   };
 
@@ -112,6 +120,14 @@ export function Signup() {
             onKeyDown={(e) => e.key === 'Enter' && submit()}
           />
         </div>
+
+        {config.turnstile_site_key && (
+          <Turnstile
+            key={turnstileKey}
+            siteKey={config.turnstile_site_key}
+            onToken={setTurnstileToken}
+          />
+        )}
 
         <div className="mt-2 min-h-[18px] text-xs">
           {error ? (

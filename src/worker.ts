@@ -11,6 +11,7 @@ import { createD1Db } from './db/d1.js';
 import { SKILL_MD } from './generated/edge-assets.js';
 import { htmlRewriterInject } from './serving-inject.js';
 import { R2Storage } from './storage/r2.js';
+import { MemoryRateLimiter } from './ratelimit.js';
 import type { AppDeps } from './types.js';
 
 export interface Env {
@@ -36,6 +37,8 @@ async function buildApp(env: Env): Promise<AppHandle> {
     config: cfg,
     db: createD1Db(env.DB),
     storage: new R2Storage(env.BUCKET),
+    // per-isolate 尽力而为限流；边缘真正防护用 CF Rate Limiting Rules。
+    rateLimiter: new MemoryRateLimiter(),
   };
   // admin bootstrap:每 isolate 一次(buildApp 经 appPromise 记忆化);
   // guarded —— 密码与库内哈希吻合即跳过,不每次冷启都重跑 scrypt+写库(见 admin-bootstrap.ts)。

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { KeyRound, Loader2, LogIn, UserPlus } from 'lucide-react';
 import { fetchAuthConfig, login, signup } from '../api';
 import type { AuthConfig } from '../types';
+import { Turnstile } from './Turnstile';
 
 /** 品牌标(lucide 已去掉品牌图标,内联 SVG)。 */
 function GoogleMark() {
@@ -73,6 +74,8 @@ export function Login() {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileKey, setTurnstileKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,18 +101,25 @@ export function Login() {
       setError('Password must be at least 8 characters');
       return;
     }
+    if (config?.turnstile_site_key && !turnstileToken) {
+      setError('Please complete the verification below');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       if (mode === 'signup') {
-        await signup(email.trim(), password, displayName);
+        await signup(email.trim(), password, displayName, turnstileToken);
       } else {
-        await login(email.trim(), password);
+        await login(email.trim(), password, turnstileToken);
       }
       location.href = next;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Request failed');
       setSubmitting(false);
+      // token 一次性，失败后重置以重新挑战
+      setTurnstileToken('');
+      setTurnstileKey((k) => k + 1);
     }
   }
 
@@ -227,6 +237,14 @@ export function Login() {
             />
           )}
         </div>
+
+        {config.turnstile_site_key && (
+          <Turnstile
+            key={turnstileKey}
+            siteKey={config.turnstile_site_key}
+            onToken={setTurnstileToken}
+          />
+        )}
 
         <div className="mt-2 min-h-[18px] text-xs">
           {error && <span className="text-red-600">{error}</span>}
