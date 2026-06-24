@@ -37,9 +37,15 @@ export const users = sqliteTable(
   'users',
   {
     id: text('id').primaryKey(),
-    email: text('email'),
+    email: text('email'), // 展示用(可重复;不再是账号键)。真正的键是 canonicalEmail。
+    // 账号键:canonicalEmail(NFKC+trim+lowercase 归一)唯一。大小写/Unicode 变体不再绕过唯一约束。
+    canonicalEmail: text('canonical_email'),
+    emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
     passwordHash: text('password_hash'),
+    // 旧的单一社交身份列 —— 仍写入作影子(二进制回滚兼容),真正的多身份在 identities 表。一版后删。
     oidcSub: text('oidc_sub'),
+    // 解绑身份/禁用账号时自增 → 内嵌进 JWT,每请求比对,使无状态会话可被主动失效(Phase 2 用)。
+    sessionEpoch: integer('session_epoch').notNull().default(0),
     handle: text('handle'), // 路径用户名(首登确认;唯一、URL 安全)
     displayName: text('display_name'),
     isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
@@ -48,9 +54,38 @@ export const users = sqliteTable(
     lastLoginAt: text('last_login_at'),
   },
   (t) => [
-    uniqueIndex('users_email_uq').on(t.email).where(sql`email IS NOT NULL`),
+    // 账号唯一性收口到归一后的 canonicalEmail(email 列改为可重复的展示字段)。
+    uniqueIndex('users_canonical_email_uq').on(t.canonicalEmail).where(sql`canonical_email IS NOT NULL`),
     uniqueIndex('users_oidc_sub_uq').on(t.oidcSub).where(sql`oidc_sub IS NOT NULL`),
     uniqueIndex('users_handle_uq').on(t.handle).where(sql`handle IS NOT NULL`),
+  ],
+);
+
+/** 登录身份(凭证)—— 一个 users.id 可挂多行:password + google + github 同属一人一账号。
+ *
+ * 取代「users 一行只装一个 oidc_sub」的旧模型:
+ * - 登录恒按 (provider, sub) 查这张表 → 解析出 userId。这是唯一的登录键。
+ * - social/oidc 的 sub 沿用历史命名空间值(与旧 oidc_sub 一致,如 'google:123'/'github:456');
+ *   password 的 sub = canonicalEmail。
+ * - email 仅展示/「连接提示」用,**永不**作跨账号自动并号键(IdP 验证过的邮箱只证明掌握邮箱、
+ *   不证明拥有账号)。唯一的跨账号挂载路径是「登录进目标账号后在设置里连接」(Phase 2)。 */
+export const identities = sqliteTable(
+  'identities',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    provider: text('provider').notNull(), // 'password' | 'google' | 'github' | 'oidc'
+    sub: text('sub').notNull(), // social/oidc:命名空间 sub;password:canonicalEmail
+    email: text('email'), // 该身份断言的邮箱(canonical;展示/提示用)
+    emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at').notNull(),
+    lastLoginAt: text('last_login_at'),
+  },
+  (t) => [
+    // 登录查找 + 挂载防并发的唯一键(取代 users_oidc_sub_uq 的登录职责)。
+    uniqueIndex('identities_provider_sub_uq').on(t.provider, t.sub),
+    index('identities_user_idx').on(t.userId),
+    index('identities_email_idx').on(t.email).where(sql`email IS NOT NULL`), // 仅「连接提示」查找,非唯一
   ],
 );
 
@@ -206,6 +241,7 @@ export const deploySessions = sqliteTable(
 );
 
 export type UserRow = typeof users.$inferSelect;
+export type IdentityRow = typeof identities.$inferSelect;
 export type SiteRow = typeof sites.$inferSelect;
 export type CommentThreadRow = typeof commentThreads.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;

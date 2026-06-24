@@ -24,6 +24,15 @@ export function validEmail(email: string): boolean {
   return EMAIL_RE.test(email);
 }
 
+/** 邮箱归一化为账号键：NFKC + trim + lowercase。
+ * 所有按邮箱比较/落库/查唯一的地方都必须先过这里，否则大小写/Unicode 变体会绕过唯一约束、
+ * 制造重复账号或抢占。空 / 仅空白返回 null（= 无可用邮箱键）。 */
+export function canonicalEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  const c = email.normalize('NFKC').trim().toLowerCase();
+  return c || null;
+}
+
 /**
  * 站点内相对路径归一化;非法(穿越/绝对/空段)返回 null。
  * 上传与 serving 都必须经这一个函数 —— 存储 key 永远落在

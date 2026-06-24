@@ -29,6 +29,8 @@ export interface OidcIdentity {
   /** 仅创建新用户时兜底用;刷新老用户资料不看它 */
   preferredUsername?: string;
   email?: string;
+  /** IdP 是否断言该邮箱已验证(email_verified claim);未验证的邮箱不得作账号键/并号提示。 */
+  emailVerified?: boolean;
 }
 
 const TIMEOUT_MS = 15_000; // IdP 请求 15s 超时
@@ -135,5 +137,6 @@ export async function exchangeCode(
       ? info.preferred_username
       : undefined;
   const email = typeof info.email === 'string' && info.email ? info.email : undefined;
-  return { sub: String(sub), name, preferredUsername, email };
+  const emailVerified = info.email_verified === true;
+  return { sub: String(sub), name, preferredUsername, email, emailVerified };
 }

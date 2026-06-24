@@ -13,6 +13,7 @@ export interface SocialIdentity {
   sub: string; // 带 provider 前缀
   name?: string;
   email?: string; // 仅 provider 标记 verified 才带
+  emailVerified?: boolean; // email 是否已验证(有 email 即为 true;无可用 email 键时 false)
 }
 
 interface ProviderDef {
@@ -57,10 +58,12 @@ const GOOGLE: ProviderDef = {
     );
     const sub = str(u, 'sub');
     if (!sub) throw new OidcError('Google userinfo 缺 sub');
+    const verified = u.email_verified === true;
     return {
       sub: `google:${sub}`,
       name: str(u, 'name'),
-      email: u.email_verified === true ? str(u, 'email') : undefined, // 仅 verified 才透传
+      email: verified ? str(u, 'email') : undefined, // 仅 verified 才透传
+      emailVerified: verified && !!str(u, 'email'),
     };
   },
 };
@@ -79,16 +82,16 @@ const GITHUB: ProviderDef = {
     const u = asRecord(await fetchJson('https://api.github.com/user', headers));
     const id = u.id;
     if (typeof id !== 'number' && typeof id !== 'string') throw new OidcError('GitHub user 缺 id');
-    // email 取 primary+verified(/user 的 email 可能为 null;需 user:email scope)
+    // email 仅取 primary+verified(/user 的 email 可能为 null;需 user:email scope);
+    // 排除 *.users.noreply.github.com —— 非真实可达邮箱,不能作账号键/连接提示(安全评审要求)。
     let email: string | undefined;
     try {
       const list = await fetchJson('https://api.github.com/user/emails', headers);
       if (Array.isArray(list)) {
         const rows = list.map(asRecord);
-        const pick =
-          rows.find((e) => e.primary === true && e.verified === true) ??
-          rows.find((e) => e.verified === true);
-        if (pick) email = str(pick, 'email');
+        const pick = rows.find((e) => e.primary === true && e.verified === true);
+        const picked = pick ? str(pick, 'email') : undefined;
+        if (picked && !picked.toLowerCase().endsWith('.users.noreply.github.com')) email = picked;
       }
     } catch {
       /* email 取不到不阻断登录 */
@@ -97,6 +100,7 @@ const GITHUB: ProviderDef = {
       sub: `github:${id}`,
       name: str(u, 'name') ?? str(u, 'login'),
       email,
+      emailVerified: !!email, // 仅 primary+verified 才落 email,故有 email 即已验证
     };
   },
 };

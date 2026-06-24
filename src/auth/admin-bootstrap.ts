@@ -11,32 +11,39 @@
 
 import { eq } from 'drizzle-orm';
 
-import { users, type UserRow } from '../db/index.js';
+import { identities, users, type UserRow } from '../db/index.js';
 import type { AppDeps } from '../types.js';
-import { nowIso, uuid } from '../util.js';
+import { canonicalEmail, nowIso, uuid } from '../util.js';
 import { hashPassword, verifyPassword } from './password.js';
 
-/** admin upsert:存在则刷新密码哈希并确保 isAdmin(不动其他字段);不存在则建号。
- * 并发双建由 users_email_uq 拦下,捕获后改 update,绝不冒重复行。
- * existing 由调用方预取(省一次 select);仅 insert 撞唯一索引时才二次 select。 */
+/** admin upsert:存在则刷新密码哈希并确保 isAdmin;不存在则建号。并发双建由 users_canonical_email_uq
+ * 拦下,捕获后改 update。建号/认领后补登 password identity(账号统一模型;连接账号列表用)。
+ * existing 由调用方预取(按 canonicalEmail);仅 insert 撞唯一索引时才二次 select。 */
 async function upsertAdmin(
   deps: AppDeps,
   email: string,
+  canonical: string,
   password: string,
   existing: UserRow | undefined,
 ): Promise<void> {
   const passwordHash = await hashPassword(password);
-  const promote = { passwordHash, isAdmin: true } as const;
   if (existing) {
-    await deps.db.update(users).set(promote).where(eq(users.id, existing.id)).run();
+    await deps.db
+      .update(users)
+      .set({ passwordHash, isAdmin: true, canonicalEmail: existing.canonicalEmail ?? canonical })
+      .where(eq(users.id, existing.id))
+      .run();
+    await ensureAdminPasswordIdentity(deps, existing.id, canonical);
     return;
   }
+  const id = uuid();
   try {
     await deps.db
       .insert(users)
       .values({
-        id: uuid(),
+        id,
         email,
+        canonicalEmail: canonical,
         passwordHash,
         displayName: email.split('@')[0] || email,
         isAdmin: true,
@@ -44,10 +51,35 @@ async function upsertAdmin(
       })
       .run();
   } catch (e) {
-    // 唯一索引兜并发同邮箱:落库失败后该邮箱已存在 → 改 update;否则真异常上抛
-    const now = await deps.db.select().from(users).where(eq(users.email, email)).get();
+    // 唯一索引兜并发同邮箱:落库失败后该 canonical 已存在 → 改 update;否则真异常上抛
+    const now = await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)).get();
     if (!now) throw e;
-    await deps.db.update(users).set(promote).where(eq(users.id, now.id)).run();
+    await deps.db.update(users).set({ passwordHash, isAdmin: true }).where(eq(users.id, now.id)).run();
+    await ensureAdminPasswordIdentity(deps, now.id, canonical);
+    return;
+  }
+  await ensureAdminPasswordIdentity(deps, id, canonical);
+}
+
+/** admin 账号的 password 身份(provider='password', sub=canonicalEmail);唯一索引兜并发,已存在即忽略。 */
+async function ensureAdminPasswordIdentity(
+  deps: AppDeps, userId: string, canonical: string,
+): Promise<void> {
+  try {
+    await deps.db
+      .insert(identities)
+      .values({
+        id: uuid(),
+        userId,
+        provider: 'password',
+        sub: canonical,
+        email: canonical,
+        emailVerified: false,
+        createdAt: nowIso(),
+      })
+      .run();
+  } catch {
+    /* 已存在 → 忽略 */
   }
 }
 
@@ -60,8 +92,10 @@ export async function bootstrapAdmin(
   const cfg = deps.config;
   if (!cfg.adminEmail || !cfg.adminPassword) return false;
   const email = cfg.adminEmail;
+  const canonical = canonicalEmail(email);
+  if (!canonical) return false; // admin 邮箱配置无效
   const password = cfg.adminPassword;
-  const existing = await deps.db.select().from(users).where(eq(users.email, email)).get();
+  const existing = await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)).get();
   if (
     opts.guarded &&
     existing &&
@@ -71,6 +105,6 @@ export async function bootstrapAdmin(
   ) {
     return false; // 已就绪、密码未变:跳过
   }
-  await upsertAdmin(deps, email, password, existing);
+  await upsertAdmin(deps, email, canonical, password, existing);
   return true;
 }
