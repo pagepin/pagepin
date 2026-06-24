@@ -23,11 +23,27 @@ export interface Me {
   handle: string | null;
   display_name: string;
   email: string;
+  email_verified: boolean;
+  has_password: boolean;
+  /** 实例是否配置了邮件发送（决定是否显示「验证邮箱」入口） */
+  mail_enabled?: boolean;
   is_admin: boolean;
   auth_mode: 'password' | 'oidc' | 'none';
+  /** 已启用的社交登录 provider id（设置页据此渲染「连接账号」按钮） */
+  social_providers?: string[];
   needs_handle: boolean;
   content_base: string;
   limits: Limits;
+}
+
+/** 一条已连接的登录身份（password / google / github / oidc）。 */
+export interface Identity {
+  id: string;
+  provider: string;
+  email: string | null;
+  email_verified: boolean;
+  created_at: string;
+  last_login_at: string | null;
 }
 
 export interface PerSiteUsage {

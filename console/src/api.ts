@@ -5,6 +5,7 @@ import type {
   AdminUser,
   AuthConfig,
   CollectedFile,
+  Identity,
   Invite,
   InviteCreated,
   Me,
@@ -218,6 +219,15 @@ export const api = {
     }),
 
   usage: () => request<Usage>('/api/me/usage'),
+
+  // ---- connected accounts (identities) ----
+  listIdentities: () => request<{ identities: Identity[] }>('/api/me/identities'),
+
+  disconnectIdentity: (id: string) =>
+    request<{ ok: true }>(`/api/me/identities/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /** 重发邮箱验证信（password 账号，邮箱未验证时）。 */
+  resendVerifyEmail: () => request<{ ok: true; sent: boolean }>('/api/me/verify-email/resend', { method: 'POST' }),
 
   // ---- admin ----
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),

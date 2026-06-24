@@ -23,6 +23,7 @@ export interface SessionClaims {
   sub: string; // = users.id
   hdl: string | null;
   pln: Plane;
+  epo: number; // users.session_epoch 快照;认证时与库内比对,不等即失效(断开身份/禁用时主动失效旧会话)
   iat: number;
   exp: number;
   csrf?: string;
@@ -32,10 +33,10 @@ export interface SessionClaims {
 const ttl = (cfg: Config) => cfg.sessionTtlH * 3600;
 
 export async function mint(
-  cfg: Config, plane: Plane, sub: string, handle: string | null, csrf?: string,
+  cfg: Config, plane: Plane, sub: string, handle: string | null, epoch: number, csrf?: string,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  const claims: SessionClaims = { sub, hdl: handle, pln: plane, iat: now, exp: now + ttl(cfg) };
+  const claims: SessionClaims = { sub, hdl: handle, pln: plane, epo: epoch, iat: now, exp: now + ttl(cfg) };
   if (csrf) claims.csrf = csrf;
   return sign(claims, cfg.secret, 'HS256');
 }
@@ -62,17 +63,17 @@ function randomHex(bytes: number): string {
 }
 
 export async function setLoginCookies(
-  c: Context, cfg: Config, plane: Plane, sub: string, handle: string | null,
+  c: Context, cfg: Config, plane: Plane, sub: string, handle: string | null, epoch: number,
 ): Promise<void> {
   const common = {
     httpOnly: true, secure: cfg.secureCookies, sameSite: 'Lax' as const,
     maxAge: ttl(cfg), path: '/',
   };
   if (plane === 'view') {
-    setCookie(c, VIEW_COOKIE, await mint(cfg, 'view', sub, handle), common);
+    setCookie(c, VIEW_COOKIE, await mint(cfg, 'view', sub, handle, epoch), common);
   } else {
     const csrf = randomHex(16);
-    setCookie(c, SESSION_COOKIE, await mint(cfg, 'session', sub, handle, csrf), common);
+    setCookie(c, SESSION_COOKIE, await mint(cfg, 'session', sub, handle, epoch, csrf), common);
     // csrf cookie 给 JS 读(双提交),其余属性与会话一致
     setCookie(c, CSRF_COOKIE, csrf, { ...common, httpOnly: false });
   }

@@ -28,6 +28,7 @@ import { verifyTurnstile } from './turnstile.js';
 import {
   clearLoginCookies,
   consumeOauthNonce,
+  readSession,
   setLoginCookies,
   setOauthNonce,
   type Plane,
@@ -41,11 +42,13 @@ async function sha256Hex(s: string): Promise<string> {
 }
 
 async function stateEncode(
-  secret: string, plane: Plane, nextPath: string, nonce: string,
+  secret: string, plane: Plane, nextPath: string, nonce: string, link?: string,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  // non = 与 host-only cookie 比对的登录态绑定 nonce(防 login CSRF)
-  return sign({ pln: plane, nxt: nextPath, non: nonce, iat: now, exp: now + STATE_TTL }, secret, 'HS256');
+  // non = 与 host-only cookie 比对的登录态绑定 nonce(防 login CSRF);lnk = sign-in-to-link 的目标 userId
+  const payload: Record<string, unknown> = { pln: plane, nxt: nextPath, non: nonce, iat: now, exp: now + STATE_TTL };
+  if (link) payload.lnk = link;
+  return sign(payload, secret, 'HS256');
 }
 
 async function stateDecode(secret: string, state: string): Promise<Record<string, unknown> | null> {
@@ -341,6 +344,72 @@ async function ensurePasswordIdentity(
   }
 }
 
+/** sign-in-to-link:把一条社交/OIDC 身份挂到「已登录的目标账号」(state 里签入的 userId)。
+ * 这是唯一的跨账号挂载路径 —— 调用方已确保请求者已登录进该账号。返回:
+ *   'ok'       已挂上(或幂等已属于该账号);
+ *   'conflict' 该 (provider, sub) 已绑到别的账号 —— 不抢;
+ *   'failed'   目标账号不存在/被禁用,或落库异常。 */
+export async function attachIdentity(
+  deps: AppDeps,
+  userId: string,
+  fed: { provider: string; sub: string; email?: string; emailVerified?: boolean },
+): Promise<'ok' | 'conflict' | 'failed'> {
+  const now = nowIso();
+  const canonical = fed.emailVerified ? canonicalEmail(fed.email) : null;
+  const target = await deps.db.select().from(users).where(eq(users.id, userId)).get();
+  if (!target || target.disabled) return 'failed';
+
+  const existing = await deps.db
+    .select()
+    .from(identities)
+    .where(and(eq(identities.provider, fed.provider), eq(identities.sub, fed.sub)))
+    .get();
+  if (existing) {
+    if (existing.userId !== userId) return 'conflict';
+    await deps.db
+      .update(identities)
+      .set({ email: canonical ?? existing.email, lastLoginAt: now })
+      .where(eq(identities.id, existing.id))
+      .run();
+    return 'ok';
+  }
+  try {
+    await deps.db
+      .insert(identities)
+      .values({
+        id: uuid(),
+        userId,
+        provider: fed.provider,
+        sub: fed.sub,
+        email: canonical,
+        emailVerified: !!canonical,
+        createdAt: now,
+        lastLoginAt: now,
+      })
+      .run();
+  } catch {
+    const taken = await deps.db
+      .select()
+      .from(identities)
+      .where(and(eq(identities.provider, fed.provider), eq(identities.sub, fed.sub)))
+      .get();
+    if (taken) return taken.userId === userId ? 'ok' : 'conflict';
+    return 'failed';
+  }
+  // 目标账号若还没 canonicalEmail 且该 email 空闲,顺手认领(展示用;条件 UPDATE 防并发抢占)
+  if (canonical && !target.canonicalEmail) {
+    const free = await canonicalFreeOrNull(deps, canonical, userId);
+    if (free) {
+      await deps.db
+        .update(users)
+        .set({ canonicalEmail: free, email: target.email ?? fed.email ?? null, emailVerified: true })
+        .where(and(eq(users.id, userId), isNull(users.canonicalEmail)))
+        .run();
+    }
+  }
+  return 'ok';
+}
+
 export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   const cfg = deps.config;
@@ -350,7 +419,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
 
     if (cfg.authMode === 'none') {
       const user = await upsertDevUser(deps);
-      await setLoginCookies(c, cfg, plane, user.id, user.handle);
+      await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
       return c.redirect(next, 302);
     }
 
@@ -390,7 +459,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     }
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     await deps.db.update(users).set({ lastLoginAt: nowIso() }).where(eq(users.id, user.id)).run();
-    await setLoginCookies(c, cfg, plane, user.id, user.handle);
+    await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
     if (isJson) return c.json({ ok: true });
     return c.redirect(safeNext(body.next), 302);
   });
@@ -445,7 +514,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       throw e;
     }
     await ensurePasswordIdentity(deps, created.id, canonical, now);
-    await setLoginCookies(c, cfg, plane, created.id, created.handle);
+    await setLoginCookies(c, cfg, plane, created.id, created.handle, created.sessionEpoch);
     return c.json({ ok: true });
   });
 
@@ -473,7 +542,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       emailVerified: info.emailVerified,
     });
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
-    await setLoginCookies(c, cfg, plane, user.id, user.handle);
+    await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
     return c.redirect(safeNext(typeof st.nxt === 'string' ? st.nxt : null), 302);
   });
 
@@ -484,7 +553,14 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const conf = cfg.socialProviders.find((p) => p.id === provider);
     if (!conf) return c.json({ detail: '未启用该登录方式' }, 404);
     const next = safeNext(c.req.query('next'));
-    const state = await stateEncode(cfg.secret, plane, next, setOauthNonce(c, cfg));
+    // link=1:把当前登录身份「连接」到已登录账号(sign-in-to-link)。须已登录,把目标 userId 签进 state。
+    let link: string | undefined;
+    if (c.req.query('link') === '1') {
+      const sess = await readSession(c, cfg, plane);
+      if (!sess) return c.redirect(`/auth/login?next=${encodeURIComponent(next)}`, 302);
+      link = sess.sub;
+    }
+    const state = await stateEncode(cfg.secret, plane, next, setOauthNonce(c, cfg), link);
     return c.redirect(
       socialAuthorizeUrl(provider, conf.clientId, socialRedirectUri(c, cfg, provider), state),
       302,
@@ -515,8 +591,21 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       if (e instanceof OidcError) return c.json({ detail: e.detail }, 502);
       throw e;
     }
-    // sub 带 provider 前缀(`google:…`/`github:…`),按 (provider, sub) 查 identities 解析账号;
-    // email 仅 verified 才带(social.ts 把关),**绝不**按 email 跨 provider 自动并号(见 upsertFederatedUser)。
+    const back = safeNext(typeof st.nxt === 'string' ? st.nxt : null);
+    // link=1 流程:把此身份挂到 state 里签入的已登录账号,不新建/不换登录态,回跳带结果参数。
+    if (typeof st.lnk === 'string' && st.lnk) {
+      const result = await attachIdentity(deps, st.lnk, {
+        provider,
+        sub: id.sub,
+        email: id.email,
+        emailVerified: id.emailVerified,
+      });
+      const sep = back.includes('?') ? '&' : '?';
+      const qp = result === 'ok' ? `linked=${encodeURIComponent(provider)}` : `link_error=${result}`;
+      return c.redirect(`${back}${sep}${qp}`, 302);
+    }
+    // 普通登录:sub 带 provider 前缀(`google:…`/`github:…`),按 (provider, sub) 查 identities 解析账号;
+    // **绝不**按 email 跨 provider 自动并号(见 upsertFederatedUser)。
     const user = await upsertFederatedUser(deps, {
       provider,
       sub: id.sub,
@@ -525,8 +614,8 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       emailVerified: id.emailVerified,
     });
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
-    await setLoginCookies(c, cfg, plane, user.id, user.handle);
-    return c.redirect(safeNext(typeof st.nxt === 'string' ? st.nxt : null), 302);
+    await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
+    return c.redirect(back, 302);
   });
 
   app.post('/auth/logout', (c) => {
@@ -623,7 +712,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       throw e;
     }
     await ensurePasswordIdentity(deps, created.id, canonical, now);
-    await setLoginCookies(c, cfg, plane, created.id, created.handle);
+    await setLoginCookies(c, cfg, plane, created.id, created.handle, created.sessionEpoch);
     return c.json({ ok: true });
   });
 

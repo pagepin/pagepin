@@ -75,6 +75,8 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     const user = await db.select().from(users).where(eq(users.id, claims.sub)).get();
     if (!user) return c.json({ detail: '用户不存在，请重新登录' }, 401);
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
+    // sessionEpoch 比对:断开身份/禁用会 bump epoch,旧会话(epo 不匹配)即失效(?? 0 兼容旧 token)
+    if ((claims.epo ?? 0) !== user.sessionEpoch) return c.json({ detail: '会话已失效，请重新登录' }, 401);
     c.set('sessionClaims', claims);
     c.set('authVia', 'cookie');
     c.set('user', user);

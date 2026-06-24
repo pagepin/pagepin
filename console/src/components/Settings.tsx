@@ -3,7 +3,7 @@ import { ArrowLeft, Loader2, Lock } from 'lucide-react';
 import { api } from '../api';
 import { formatBytes } from '../lib/format';
 import { useStore } from '../store';
-import type { Usage } from '../types';
+import type { Identity, Me, Usage } from '../types';
 import { PasswordDialog } from './PasswordDialog';
 import { toast, toastError } from './Toast';
 import { TokenManager } from './TokenManager';
@@ -48,6 +48,134 @@ function barColor(pct: number): string {
   if (pct > 80) return '#c0392b';
   if (pct > 50) return '#d98a16';
   return '#14958a';
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  password: 'Password',
+  google: 'Google',
+  github: 'GitHub',
+  oidc: 'SSO',
+};
+
+/** 「连接账号」区：列出已连接登录身份，可连接尚未连接的 provider、断开（保留至少一个）。 */
+function ConnectedAccounts({ me }: { me: Me }) {
+  const [items, setItems] = useState<Identity[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = () =>
+    api
+      .listIdentities()
+      .then((r) => setItems(r.identities))
+      .catch((e) => toastError(e, 'Failed to load connected accounts'));
+
+  useEffect(() => {
+    void load();
+    // 连接回跳结果（?linked= / ?link_error=）→ toast 并清理 URL，避免刷新重复提示
+    const q = new URLSearchParams(location.search);
+    const linked = q.get('linked');
+    const err = q.get('link_error');
+    if (linked) toast(`Connected ${PROVIDER_LABEL[linked] ?? linked}`);
+    else if (err)
+      toastError(
+        new Error(
+          err === 'conflict'
+            ? 'That account is already linked to a different pagepin user.'
+            : 'Could not connect that account.',
+        ),
+        'Connect failed',
+      );
+    if (linked || err) {
+      q.delete('linked');
+      q.delete('link_error');
+      const qs = q.toString();
+      history.replaceState(null, '', location.pathname + (qs ? `?${qs}` : ''));
+    }
+  }, []);
+
+  // 连接是整页跳转（OAuth 往返），不走 fetch：登录态由 pp_session 携带，回跳带 ?linked=/?link_error=
+  const connect = (provider: string) => {
+    location.href = `/auth/social/${encodeURIComponent(provider)}?link=1&next=${encodeURIComponent('/settings')}`;
+  };
+  const disconnect = (id: string) => {
+    setBusy(id);
+    api
+      .disconnectIdentity(id)
+      .then(() => {
+        toast('Disconnected');
+        return load();
+      })
+      .catch((e) => toastError(e, 'Disconnect failed'))
+      .finally(() => setBusy(null));
+  };
+
+  if (items === null) {
+    return (
+      <div className="flex items-center gap-2 py-2 text-xs text-ink-400">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+      </div>
+    );
+  }
+
+  const connected = new Set(items.map((i) => i.provider));
+  const available = (me.social_providers ?? []).filter((p) => !connected.has(p));
+  const onlyOne = items.length <= 1;
+
+  return (
+    <>
+      {items.map((it, idx) => (
+        <Row
+          key={it.id}
+          label={PROVIDER_LABEL[it.provider] ?? it.provider}
+          desc={it.email ?? 'Connected'}
+          last={idx === items.length - 1 && available.length === 0}
+        >
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={onlyOne || busy === it.id}
+            title={onlyOne ? 'Add another sign-in method before disconnecting this one' : undefined}
+            onClick={() => disconnect(it.id)}
+          >
+            {busy === it.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}
+          </button>
+        </Row>
+      ))}
+      {available.map((p, idx) => (
+        <Row key={p} label={PROVIDER_LABEL[p] ?? p} desc="Not connected" last={idx === available.length - 1}>
+          <button type="button" className="btn-primary" onClick={() => connect(p)}>
+            Connect
+          </button>
+        </Row>
+      ))}
+    </>
+  );
+}
+
+/** 邮箱未验证横幅（仅 password 账号 + 实例配了邮件发送时显示）。 */
+function VerifyEmailBanner({ me }: { me: Me }) {
+  const [sending, setSending] = useState(false);
+  if (!(me.auth_mode === 'password' && me.has_password && !me.email_verified && me.mail_enabled)) {
+    return null;
+  }
+  const resend = () => {
+    setSending(true);
+    api
+      .resendVerifyEmail()
+      .then((r) => toast(r.sent ? 'Verification email sent' : 'Email sending is not configured on this instance'))
+      .catch((e) => toastError(e, 'Could not send verification email'))
+      .finally(() => setSending(false));
+  };
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-amber-200 bg-amber-50 px-5 py-3.5">
+      <div className="text-sm text-amber-800">
+        <span className="font-semibold">Verify your email.</span> Confirm{' '}
+        <span className="font-mono">{me.email}</span> to secure your account.
+      </div>
+      <button type="button" className="btn-ghost shrink-0" disabled={sending} onClick={resend}>
+        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Resend email'}
+      </button>
+    </div>
+  );
 }
 
 export function Settings() {
@@ -108,6 +236,8 @@ export function Settings() {
       <main className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
         <h1 className="text-xl font-bold tracking-tight text-ink-900">Account &amp; settings</h1>
 
+        <VerifyEmailBanner me={me} />
+
         <Card title="Profile">
           <Row label="Handle" desc="Permanent — appears in every share link.">
             {me.handle ? (
@@ -139,16 +269,24 @@ export function Settings() {
               Save
             </button>
           </Row>
-          <Row label="Email" desc="Used for sign-in." last={me.auth_mode !== 'password'}>
+          <Row
+            label="Email"
+            desc="Used for sign-in."
+            last={!(me.auth_mode === 'password' && me.has_password)}
+          >
             <span className="text-sm text-ink-600">{me.email || '—'}</span>
           </Row>
-          {me.auth_mode === 'password' && (
+          {me.auth_mode === 'password' && me.has_password && (
             <Row label="Password" desc="Your sign-in password." last>
               <button type="button" className="btn-ghost" onClick={() => setShowPw(true)}>
                 Change password
               </button>
             </Row>
           )}
+        </Card>
+
+        <Card title="Connected accounts" sub="Ways to sign in to this account">
+          <ConnectedAccounts me={me} />
         </Card>
 
         <Card title="API tokens" sub="Deploy credentials for agents & CI">

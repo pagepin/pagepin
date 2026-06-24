@@ -533,11 +533,11 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     let viewerActive = false;
     if (claims !== null) {
       const u = await db
-        .select({ disabled: users.disabled })
+        .select({ disabled: users.disabled, sessionEpoch: users.sessionEpoch })
         .from(users)
         .where(eq(users.id, claims.sub))
         .get();
-      viewerActive = u !== undefined && !u.disabled;
+      viewerActive = u !== undefined && !u.disabled && (claims.epo ?? 0) === u.sessionEpoch;
     }
     if (!pub && !viewerActive) {
       // 品牌门页(不再裸 302):曾公开但窗口已关 → 过期页;否则私有 → 登录墙。

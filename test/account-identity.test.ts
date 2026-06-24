@@ -17,13 +17,31 @@ import { test } from 'node:test';
 
 import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
 
-import { makeAuthRoutes, upsertFederatedUser } from '../src/auth/routes.js';
+import { attachIdentity, makeAuthRoutes, upsertFederatedUser } from '../src/auth/routes.js';
+import type { AuthMw } from '../src/api/me.js';
+import { makeMeRoutes } from '../src/api/me.js';
 import { loadConfig } from '../src/config.js';
 import { identities, users } from '../src/db/index.js';
+import type { UserRow } from '../src/db/index.js';
 import { createLibsqlDb } from '../src/db/libsql.js';
 import { FsStorage } from '../src/storage/fs.js';
 import type { AppDeps, AppEnv } from '../src/types.js';
+
+/** 注入式 mw:绕过 Cookie/CSRF,直接放一个已登录用户进 context(测 /api/me/* 用)。 */
+function injectUser(user: UserRow): AuthMw {
+  const inject = createMiddleware<AppEnv>(async (c, next) => {
+    c.set('user', user);
+    c.set('authVia', 'cookie');
+    await next();
+  });
+  return { currentUser: inject, mutatingUser: inject, cookieUser: inject, cookieMutatingUser: inject };
+}
+
+function del(app: Hono<AppEnv>, path: string): Promise<Response> {
+  return Promise.resolve(app.fetch(new Request('http://localhost' + path, { method: 'DELETE' })));
+}
 
 async function setup(env: Record<string, string> = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'pagepin-ident-'));
@@ -119,4 +137,43 @@ test('federated: 不挂到同 email 的已存在 password 账号(无自动并号
   assert.equal(after.length, 2); // 社交登录建独立新账号
   assert.notEqual(g.id, before[0]!.id);
   assert.equal(after.find((r) => r.id === g.id)!.canonicalEmail, null); // canonical 被 password 账号占用
+});
+
+test('attach: 把第二个 provider 连接到已登录账号 → 同账号多身份', async () => {
+  const { deps, db } = await setup();
+  const u = await upsertFederatedUser(deps, { provider: 'google', sub: 'google:1', email: 'a@x.com', emailVerified: true });
+  assert.equal(await attachIdentity(deps, u.id, { provider: 'github', sub: 'github:2', email: 'a@x.com', emailVerified: true }), 'ok');
+  const ids = await db.select().from(identities).where(eq(identities.userId, u.id)).all();
+  assert.equal(ids.length, 2);
+  assert.deepEqual(ids.map((i) => i.provider).sort(), ['github', 'google']);
+});
+
+test('attach: 幂等(已属于本账号)与冲突(属于别的账号)', async () => {
+  const { deps } = await setup();
+  const a = await upsertFederatedUser(deps, { provider: 'google', sub: 'google:1', emailVerified: false });
+  await upsertFederatedUser(deps, { provider: 'github', sub: 'github:2', emailVerified: false });
+  assert.equal(await attachIdentity(deps, a.id, { provider: 'google', sub: 'google:1' }), 'ok'); // 幂等
+  assert.equal(await attachIdentity(deps, a.id, { provider: 'github', sub: 'github:2' }), 'conflict'); // 已绑别人
+});
+
+test('disconnect: 不能断开最后一个身份;断开后清密码 + bump epoch', async () => {
+  const { app, deps, db } = await setup();
+  await postJson(app, '/auth/signup', { email: 'eve@example.com', password: 'password123' });
+  const u = (await db.select().from(users).get())!;
+  const me = makeMeRoutes(deps, injectUser(u));
+  const list = (await (await me.fetch(new Request('http://localhost/api/me/identities'))).json()) as {
+    identities: { id: string; provider: string }[];
+  };
+  assert.equal(list.identities.length, 1);
+  const pwId = list.identities[0]!.id;
+  assert.equal((await del(me, `/api/me/identities/${pwId}`)).status, 409); // 最后一个 → 拒
+
+  await attachIdentity(deps, u.id, { provider: 'google', sub: 'google:eve', email: 'eve@example.com', emailVerified: true });
+  assert.equal((await del(makeMeRoutes(deps, injectUser(u)), `/api/me/identities/${pwId}`)).status, 200);
+  const after = (await db.select().from(users).where(eq(users.id, u.id)).get())!;
+  assert.equal(after.passwordHash, null); // 断开 password → 清本地密码
+  assert.equal(after.sessionEpoch, 1); // 其它会话失效
+  const ids = await db.select().from(identities).where(eq(identities.userId, u.id)).all();
+  assert.equal(ids.length, 1);
+  assert.equal(ids[0]!.provider, 'google');
 });

@@ -10,7 +10,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { contentBase } from '../config.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { setLoginCookies } from '../auth/sessions.js';
-import { apiTokens, commentThreads, currentVersion, sites, users } from '../db/index.js';
+import { apiTokens, commentThreads, currentVersion, identities, sites, users } from '../db/index.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { validHandle } from '../util.js';
 
@@ -59,8 +59,11 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       handle: user.handle,
       display_name: user.displayName,
       email: user.email,
+      email_verified: user.emailVerified,
+      has_password: !!user.passwordHash,
       is_admin: user.isAdmin,
       auth_mode: cfg.authMode,
+      social_providers: cfg.socialProviders.map((p) => p.id), // 设置页据此渲染「连接账号」按钮
       needs_handle: user.handle === null,
       content_base: contentBase(cfg),
       limits: limitsJson(),
@@ -108,6 +111,45 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     }
     const passwordHash = await hashPassword(next);
     await db.update(users).set({ passwordHash }).where(eq(users.id, user.id)).run();
+    return c.json({ ok: true });
+  });
+
+  /** 已连接的登录身份(password / google / github)。Account & Settings 的「连接账号」区。 */
+  app.get('/api/me/identities', mw.currentUser, async (c) => {
+    const user = c.get('user');
+    const rows = await db.select().from(identities).where(eq(identities.userId, user.id)).all();
+    return c.json({
+      identities: rows
+        .map((r) => ({
+          id: r.id,
+          provider: r.provider,
+          email: r.email,
+          email_verified: r.emailVerified,
+          created_at: r.createdAt,
+          last_login_at: r.lastLoginAt,
+        }))
+        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    });
+  });
+
+  /** 断开一个登录身份。不能断开最后一个(否则锁死账号);断开 password 同时清掉本地密码。
+   *  断开后 bump session_epoch 使其它会话失效,并给当前会话重发 Cookie(当前会话不掉线)。
+   *  仅 Cookie 会话可调(PAT 不管身份,限制泄露半径)。 */
+  app.delete('/api/me/identities/:id', mw.cookieMutatingUser, async (c) => {
+    const user = c.get('user');
+    const id = c.req.param('id');
+    const rows = await db.select().from(identities).where(eq(identities.userId, user.id)).all();
+    const target = rows.find((r) => r.id === id);
+    if (!target) return c.json({ detail: '身份不存在' }, 404);
+    if (rows.length <= 1) return c.json({ detail: '不能断开最后一个登录方式' }, 409);
+    await db.delete(identities).where(and(eq(identities.id, id), eq(identities.userId, user.id))).run();
+    // 断开 password 身份 → 同时清掉 users.passwordHash(否则仍能密码登录,与「断开」不符)
+    if (target.provider === 'password') {
+      await db.update(users).set({ passwordHash: null }).where(eq(users.id, user.id)).run();
+    }
+    const newEpoch = user.sessionEpoch + 1; // 使其它会话(旧 epo)失效
+    await db.update(users).set({ sessionEpoch: newEpoch }).where(eq(users.id, user.id)).run();
+    await setLoginCookies(c, cfg, 'session', user.id, user.handle, newEpoch); // 当前会话重发新 epo
     return c.json({ ok: true });
   });
 
@@ -180,7 +222,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     if (await handleTaken(handle)) return c.json({ detail: 'handle 已被占用' }, 409);
     await db.update(users).set({ handle }).where(eq(users.id, user.id)).run();
     // handle 进了会话 JWT —— 旧 Cookie 里 hdl=null,刷新一份
-    await setLoginCookies(c, cfg, 'session', user.id, handle);
+    await setLoginCookies(c, cfg, 'session', user.id, handle, user.sessionEpoch);
     return c.json({ handle });
   });
 
