@@ -19,6 +19,8 @@
     "typecheck": "pnpm gen:assets && tsc --noEmit",
     "typecheck:workers": "pnpm gen:assets && tsc -p tsconfig.workers.json --noEmit",
     "gen:assets": "node scripts/gen-edge-assets.mjs",
+    "gen:migrations:pg": "node --import tsx ./node_modules/drizzle-kit/bin.cjs generate --config drizzle.config.pg.ts",
+    "gen:migrations:mysql": "node --import tsx ./node_modules/drizzle-kit/bin.cjs generate --config drizzle.config.mysql.ts",
     "cf:dev": "pnpm gen:assets && wrangler dev",
     "cf:deploy": "pnpm gen:assets && wrangler d1 migrations apply pagepin --remote && wrangler deploy",
     "test": "pnpm test:unit && pnpm test:e2e",
