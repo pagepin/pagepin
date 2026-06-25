@@ -26,7 +26,9 @@ PP_TOKEN="${PAGEPIN_TOKEN:-$(cat ~/.config/pagepin/token 2>/dev/null)}"
   `$PAGEPIN_BASE`, or `~/.config/pagepin/host`, or **ask the user for their
   pagepin host once** and save it: `mkdir -p ~/.config/pagepin && printf '%s' "https://HOST" > ~/.config/pagepin/host`.
 - **Token.** If `PP_TOKEN` is empty, run *First-time login* below — **never ask
-  the user to paste a token, and never print it.**
+  the user to paste a token, and never print it.** If any later call returns
+  `401`, the token is expired or revoked: re-run *First-time login*, save the new
+  token, and retry the request — don't fall back to asking the user to paste one.
 
 Verify the token and look up the handle / quota any time:
 
