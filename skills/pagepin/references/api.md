@@ -72,8 +72,8 @@ thread you can't judge, relay it to the user rather than resolving it yourself.
 ## Limits & error codes
 
 - Quotas (defaults; self-hosters tune them via environment variables): single
-  file ≤25MB, single site ≤1GB, ≤2000 files, plus a per-user total-storage quota
-  (default 5GB across all your sites/versions). **Always defer to the `limits`
+  file ≤25MB, single site ≤200MB, ≤2000 files, plus a per-user total-storage quota
+  (default 1GB across all your sites/versions). **Always defer to the `limits`
   returned by `GET /api/me`.**
 - The `public_hours` upper bound follows server config (default 168 hours =
   7 days); anything beyond is hard-clamped.

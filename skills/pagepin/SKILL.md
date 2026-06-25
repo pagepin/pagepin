@@ -1,6 +1,6 @@
 ---
 name: pagepin
-description: Deploy HTML/static sites to a pagepin host and get a shareable URL, then run the pin-point review-comment loop (read comments, fix, redeploy, resolve). Use when the user wants to publish, share, preview, host, or update a static page / site / report, "deploy to pagepin", get a link for an HTML file, or address review comments on a hosted page. 需要把 HTML/静态页面部署到 pagepin、生成可分享链接、或处理页面评论时使用。
+description: Deploy an HTML page, Markdown file, image, or multi-file static site to a pagepin host and get a shareable URL — pagepin renders Markdown and images in a viewer — then run the pin-point review-comment loop (read comments, fix, redeploy, resolve). Use when the user wants to publish, share, preview, host, or update a page / site / report / README / .md / .html file, "deploy to pagepin", get a link for a file, or address review comments on a hosted page. 需要把 HTML、Markdown、图片或静态站点部署到 pagepin、生成可分享链接、或处理页面评论时使用。
 ---
 
 # pagepin — deploy static pages from your agent
@@ -77,6 +77,11 @@ curl -fsS -X POST "$PAGEPIN_BASE/api/sites/my-demo/deploy" \
 The JSON response includes `url` (the link to share), `visibility`, and
 `version_count`. **Give `url` to the user after a successful deploy.** Add
 `-F "title=My report"` to set the display name.
+
+pagepin renders Markdown and images, so you can deploy them directly — e.g.
+`-F "files=@report.md" -F "paths=index.md"` serves a rendered Markdown page
+(append `?raw` for the source). A single file with no `index.html` gets an
+auto-generated index that opens it.
 
 Make it publicly viewable (auto-reverts to private when the window expires):
 
