@@ -15,6 +15,7 @@ data/
 *.db-shm
 .env
 .env.*
+!.env.example
 .dev.vars
 
 # e2e artifacts

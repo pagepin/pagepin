@@ -62,54 +62,25 @@ Claude Code 也可作为插件安装：
 
 ## 配置
 
-所有配置均通过环境变量完成。
+所有配置均通过环境变量完成。下表是最常用的几项；**完整清单**——双域托管、OIDC、社交登录、Turnstile、邮件、S3 以及全部上传/配额限制——见 [`.env.example`](.env.example)，按类别分组并带默认值和行内注释。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `PAGEPIN_PORT` | `8000` | HTTP 监听端口。 |
 | `PAGEPIN_DATA_DIR` | `./data` | 数据根目录：SQLite 数据库、生成的 secret 以及 `fs` 存储。 |
+| `PAGEPIN_DB_URL` | — | libSQL 连接。未设置 → 本地 SQLite 文件（开箱即用）。设为 `libsql://…`（配 `PAGEPIN_DB_AUTH_TOKEN`）可接 Turso 等托管 libSQL。 |
 | `PAGEPIN_BASE_URL` | `http://localhost:8000` | 实例的公开 URL（单域模式）。 |
-| `PAGEPIN_CONSOLE_HOST` | — | 控制台主机名。**同时**设置两个 host 变量即切换到双域模式。 |
-| `PAGEPIN_CONTENT_HOST` | — | 内容（托管页面）主机名。 |
-| `PAGEPIN_EXTERNAL_SCHEME` | `https` | 双域模式下构建外部 URL 所用的 scheme。 |
+| `PAGEPIN_ADMIN_EMAIL` / `…_PASSWORD` | — | 两者都设则启动时 upsert 一个管理员；否则首个注册者成为管理员。 |
 | `PAGEPIN_AUTH_MODE` | `password` | `password`、`oidc` 或 `none`（仅开发：自动以管理员身份登录）。 |
-| `PAGEPIN_REGISTRATION_MODE` | — | `open` / `invite` / `closed`。设置后即在控制台 UI 锁定注册模式；不设时由控制台（DB）设置决定，并以 `PAGEPIN_ALLOW_SIGNUP` 兜底。 |
-| `PAGEPIN_ALLOW_SIGNUP` | `true` | 自助注册的兜底默认（password 模式），仅当既无 `PAGEPIN_REGISTRATION_MODE` 也无控制台设置时生效；不再锁定 UI。 |
-| `PAGEPIN_ADMIN_EMAIL` | — | 若与密码一并设置，启动时 upsert 一个管理员用户。否则首个注册者成为管理员。 |
-| `PAGEPIN_ADMIN_PASSWORD` | — | 引导管理员密码。 |
-| `PAGEPIN_SECRET` | 自动 | 会话签名密钥。未设置 → 首次生成一次并存储在 `{PAGEPIN_DATA_DIR}/secret`。 |
-| `PAGEPIN_SESSION_TTL_H` | `8` | 会话有效期（小时）。 |
-| `PAGEPIN_DEVICE_TOKEN_TTL_DAYS` | `90` | 经浏览器设备登录流程（`/api/device`，agent skill 使用）铸出的 token 有效期（天）。`0` = 不过期；普通 PAT 不受影响。 |
-| `PAGEPIN_OIDC_ISSUER` | — | OIDC issuer URL（`oidc` 模式必填；通过 `/.well-known/openid-configuration` 发现）。 |
-| `PAGEPIN_OIDC_CLIENT_ID` | — | OIDC client id。 |
-| `PAGEPIN_OIDC_CLIENT_SECRET` | — | OIDC client secret。 |
-| `PAGEPIN_OIDC_SCOPES` | `openid profile email` | OIDC scopes。 |
-| `PAGEPIN_OIDC_AUTH_PARAMS` | — | 追加到 authorize URL 的额外 query 参数（JSON 对象）。 |
-| `PAGEPIN_OAUTH_PROVIDERS` | — | 启用的社交登录 provider（逗号分隔：`google`、`github`）；与 `password` / `oidc` 并存。 |
-| `PAGEPIN_OAUTH_<ID>_CLIENT_ID` | — | 各 provider 的 OAuth client id（如 `PAGEPIN_OAUTH_GOOGLE_CLIENT_ID`）。id 与 secret 必须成对设置，否则启动报错。 |
-| `PAGEPIN_OAUTH_<ID>_CLIENT_SECRET` | — | 各 provider 的 OAuth client secret（如 `PAGEPIN_OAUTH_GITHUB_CLIENT_SECRET`）。 |
-| `PAGEPIN_TURNSTILE_SITE_KEY` | — | Cloudflare Turnstile site key（公开）。与 secret 一并设置即在注册 + 密码登录时要求人机校验；两者都不设则关闭。 |
-| `PAGEPIN_TURNSTILE_SECRET_KEY` | — | Turnstile secret key（服务端 `siteverify`，绝不下发到浏览器）。两值必须同时设置，否则启动报错。 |
-| `PAGEPIN_MAIL_PROVIDER` | — | `resend` 或 `log`。启用邮件发送（如验证邮件）；不设则关闭，邮箱保持未验证。 |
-| `PAGEPIN_MAIL_FROM` | — | 发件地址；启用邮件时必填。 |
-| `PAGEPIN_RESEND_API_KEY` | — | Resend API key；`PAGEPIN_MAIL_PROVIDER=resend` 时必填。 |
 | `PAGEPIN_STORAGE` | `fs` | `fs`（本地磁盘）或 `s3`（S3 兼容）。 |
-| `PAGEPIN_S3_ENDPOINT` | — | S3 endpoint（`s3` 模式必填；scheme 可选，默认 `https://`）。 |
-| `PAGEPIN_S3_BUCKET` | — | S3 bucket。 |
-| `PAGEPIN_S3_ACCESS_KEY` | — | S3 access key。 |
-| `PAGEPIN_S3_SECRET_KEY` | — | S3 secret key。 |
-| `PAGEPIN_S3_PREFIX` | `pagepin/` | bucket 内的 key 前缀。 |
-| `PAGEPIN_S3_REGION` | `auto` | SigV4 region。 |
-| `PAGEPIN_S3_FORCE_PATH_STYLE` | `true` | path-style 寻址（MinIO 需要 `true`）。 |
-| `PAGEPIN_MAX_FILE_MB` | `25` | 单个上传文件的最大尺寸。 |
-| `PAGEPIN_MAX_SITE_MB` | `200` | 单个站点版本的最大总尺寸。超过 ~90MB 的站点自动分批上传（见下方部署说明），故此项是纯策略上限、非请求体限制。 |
-| `PAGEPIN_MAX_FILES` | `2000` | 单个站点版本的最大文件数。 |
-| `PAGEPIN_FREE_USER_MB` | `1024` | 每用户总存储配额（MB，统计名下所有站点的全部版本字节和）。部署后将超出即拒（413）。管理员豁免；`0` 表示不限。 |
-| `PAGEPIN_KEEP_VERSIONS` | `3` | 每站点保留的版本数；每次部署后把更旧的版本从存储回收。`0` 表示保留全部版本。 |
-| `PAGEPIN_DEPLOY_TTL_H` | `2` | 未完成的分批上传草稿的有效期（小时）；超期后在下次部署时被回收。 |
-| `PAGEPIN_PUBLIC_MAX_HOURS` | `168` | 公开分享窗口的上限（小时）。 |
 
-上表默认值偏向公开免费档；自托管/团队实例可按需用 env 调大。注册与密码登录在应用层还按 IP 做了限流（尽力而为，Workers 上为每 isolate 维度）。面向公开部署、需要真正的边缘防护时，建议在 `/auth/signup` 与 `/auth/password` 上加一条 Cloudflare **Rate Limiting Rule** —— 它在 Worker 之前全局生效。
+复制模板即可开始：
+
+```bash
+cp .env.example .env   # 然后编辑；用 `docker run --env-file .env` 或 compose 的 `env_file:` 传入
+```
+
+`.env.example` 里的上传/配额限制默认偏向公开免费档；自托管/团队实例可按需用 env 调大。注册与密码登录在应用层还按 IP 做了限流（尽力而为，Workers 上为每 isolate 维度）。面向公开部署、需要真正的边缘防护时，建议在 `/auth/signup` 与 `/auth/password` 上加一条 Cloudflare **Rate Limiting Rule** —— 它在 Worker 之前全局生效。
 
 ## 部署与面向 AI agent 的 API
 

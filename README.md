@@ -62,54 +62,25 @@ See [`install.md`](install.md) for the full options (scripted/CI install, suppor
 
 ## Configuration
 
-All configuration is via environment variables.
+All configuration is via environment variables. The most common settings are below; the **full list** — dual-domain hosting, OIDC, social login, Turnstile, email, S3, and all upload/quota limits — lives in [`.env.example`](.env.example), grouped by category with defaults and inline comments.
 
 | Variable | Default | Description |
 |---|---|---|
 | `PAGEPIN_PORT` | `8000` | HTTP listen port. |
 | `PAGEPIN_DATA_DIR` | `./data` | Data root: SQLite DB, generated secret, and `fs` storage. |
+| `PAGEPIN_DB_URL` | — | libSQL connection. Unset → local SQLite file (zero-config). Set `libsql://…` (+ `PAGEPIN_DB_AUTH_TOKEN`) for managed libSQL / Turso. |
 | `PAGEPIN_BASE_URL` | `http://localhost:8000` | Public URL of the instance (single-domain mode). |
-| `PAGEPIN_CONSOLE_HOST` | — | Console hostname. Setting **both** host vars switches to dual-domain mode. |
-| `PAGEPIN_CONTENT_HOST` | — | Content (hosted pages) hostname. |
-| `PAGEPIN_EXTERNAL_SCHEME` | `https` | Scheme used to build external URLs in dual-domain mode. |
+| `PAGEPIN_ADMIN_EMAIL` / `…_PASSWORD` | — | Set both to upsert an admin at startup; otherwise the first signup becomes admin. |
 | `PAGEPIN_AUTH_MODE` | `password` | `password`, `oidc`, or `none` (dev only: auto-login as an admin). |
-| `PAGEPIN_REGISTRATION_MODE` | — | `open` / `invite` / `closed`. When set, it locks the registration mode in the console UI; when unset, the console (DB) setting governs, falling back to `PAGEPIN_ALLOW_SIGNUP`. |
-| `PAGEPIN_ALLOW_SIGNUP` | `true` | Fallback default for self-service signup (password mode), used only when neither `PAGEPIN_REGISTRATION_MODE` nor a console setting is present. No longer locks the UI. |
-| `PAGEPIN_ADMIN_EMAIL` | — | If set with the password, an admin user is upserted at startup. Otherwise the first signup becomes admin. |
-| `PAGEPIN_ADMIN_PASSWORD` | — | Bootstrap admin password. |
-| `PAGEPIN_SECRET` | auto | Session signing key. Unset → generated once and stored at `{PAGEPIN_DATA_DIR}/secret`. |
-| `PAGEPIN_SESSION_TTL_H` | `8` | Session lifetime in hours. |
-| `PAGEPIN_DEVICE_TOKEN_TTL_DAYS` | `90` | Lifetime (days) of tokens minted via the browser device-login flow (`/api/device`, used by the agent skill). `0` = never expires; regular PATs are unaffected. |
-| `PAGEPIN_OIDC_ISSUER` | — | OIDC issuer URL (required in `oidc` mode; discovery via `/.well-known/openid-configuration`). |
-| `PAGEPIN_OIDC_CLIENT_ID` | — | OIDC client id. |
-| `PAGEPIN_OIDC_CLIENT_SECRET` | — | OIDC client secret. |
-| `PAGEPIN_OIDC_SCOPES` | `openid profile email` | OIDC scopes. |
-| `PAGEPIN_OIDC_AUTH_PARAMS` | — | JSON object of extra query params appended to the authorize URL. |
-| `PAGEPIN_OAUTH_PROVIDERS` | — | Comma list of social login providers to enable (`google`, `github`); coexists with `password` / `oidc`. |
-| `PAGEPIN_OAUTH_<ID>_CLIENT_ID` | — | OAuth client id per enabled provider (e.g. `PAGEPIN_OAUTH_GOOGLE_CLIENT_ID`). Id + secret must be set together or startup throws. |
-| `PAGEPIN_OAUTH_<ID>_CLIENT_SECRET` | — | OAuth client secret per enabled provider (e.g. `PAGEPIN_OAUTH_GITHUB_CLIENT_SECRET`). |
-| `PAGEPIN_TURNSTILE_SITE_KEY` | — | Cloudflare Turnstile site key (public). Set together with the secret to require human verification on signup + password login; leave both unset to disable. |
-| `PAGEPIN_TURNSTILE_SECRET_KEY` | — | Turnstile secret key (server-side `siteverify`, never sent to the browser). Both keys must be set together or startup throws. |
-| `PAGEPIN_MAIL_PROVIDER` | — | `resend` or `log`. Enables email sending (e.g. verification mail); unset disables it and emails stay unverified. |
-| `PAGEPIN_MAIL_FROM` | — | From address; required when mail is enabled. |
-| `PAGEPIN_RESEND_API_KEY` | — | Resend API key; required when `PAGEPIN_MAIL_PROVIDER=resend`. |
 | `PAGEPIN_STORAGE` | `fs` | `fs` (local disk) or `s3` (S3-compatible). |
-| `PAGEPIN_S3_ENDPOINT` | — | S3 endpoint (required in `s3` mode; scheme optional, defaults to `https://`). |
-| `PAGEPIN_S3_BUCKET` | — | S3 bucket. |
-| `PAGEPIN_S3_ACCESS_KEY` | — | S3 access key. |
-| `PAGEPIN_S3_SECRET_KEY` | — | S3 secret key. |
-| `PAGEPIN_S3_PREFIX` | `pagepin/` | Key prefix inside the bucket. |
-| `PAGEPIN_S3_REGION` | `auto` | SigV4 region. |
-| `PAGEPIN_S3_FORCE_PATH_STYLE` | `true` | Path-style addressing (MinIO needs `true`). |
-| `PAGEPIN_MAX_FILE_MB` | `25` | Max size per uploaded file. |
-| `PAGEPIN_MAX_SITE_MB` | `200` | Max total size per site version. Sites over ~90MB upload in batches (see deploy below), so this is a pure policy cap, not a request-size limit. |
-| `PAGEPIN_MAX_FILES` | `2000` | Max number of files per site version. |
-| `PAGEPIN_FREE_USER_MB` | `1024` | Per-user total storage quota in MB (sum of all versions across all sites). Deploys that would exceed it are rejected with 413. Admins are exempt; `0` disables the quota. |
-| `PAGEPIN_KEEP_VERSIONS` | `3` | Versions retained per site; older ones are garbage-collected from storage after each deploy. `0` keeps all versions. |
-| `PAGEPIN_DEPLOY_TTL_H` | `2` | Lifetime (hours) of an unfinished batched-upload draft before it is reclaimed on the next deploy. |
-| `PAGEPIN_PUBLIC_MAX_HOURS` | `168` | Upper bound for the public-sharing window (hours). |
 
-The defaults above lean toward a public free tier; raise them via env for a trusted/team instance. Signup and password login are also rate-limited per IP at the app level (best-effort, and per-isolate on Workers). For real edge protection on a public deployment, add a Cloudflare **Rate Limiting Rule** on `/auth/signup` and `/auth/password` — that runs globally before the Worker.
+Copy the template to get started:
+
+```bash
+cp .env.example .env   # then edit; pass with `docker run --env-file .env` or compose `env_file:`
+```
+
+The upload and quota limits in `.env.example` lean toward a public free tier; raise them via env for a trusted/team instance. Signup and password login are also rate-limited per IP at the app level (best-effort, and per-isolate on Workers). For real edge protection on a public deployment, add a Cloudflare **Rate Limiting Rule** on `/auth/signup` and `/auth/password` — that runs globally before the Worker.
 
 ## Deploy & API for AI agents
 
