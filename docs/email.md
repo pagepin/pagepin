@@ -132,9 +132,9 @@ on the same domain needs no external-domain authorization.
 2. Add a Cloudflare Email Routing forward rule.
 3. Only then reference it in `pagepin-site` or anywhere user-facing.
 
-**Status / open items** (as of this doc)
-- [x] `PAGEPIN_MAIL_FROM` → `notifications@pagepin.ai` (`wrangler.jsonc`)
-- [ ] `pnpm cf:deploy` to apply the From change
-- [ ] Cloudflare Email Routing rules for `notifications@` + other role addresses + catch-all
-- [ ] Publish DMARC `_dmarc` TXT (`p=none` first)
-- [ ] (optional) `social@pagepin.ai` rule for the X account
+**Status / open items**
+- [x] `PAGEPIN_MAIL_FROM` → `notifications@pagepin.ai` (`wrangler.jsonc`, committed)
+- [ ] `pnpm cf:deploy` to apply the From change — **still pending**
+- [x] Email Routing live — root MX `route1/2/3.mx.cloudflare.net` published; rules for `social@` / `security@` / `abuse@` / `legal@` + catch-all → `fivesmallq@gmail.com` (destination verified). `notifications@` is covered by the catch-all (add an explicit rule if you ever disable catch-all).
+- [x] DMARC published — `_dmarc.pagepin.ai` TXT `v=DMARC1; p=none; rua=mailto:dmarc@pagepin.ai`. Ramp `none` → `quarantine` → `reject` after monitoring reports.
+- [x] `social@pagepin.ai` rule (for the X account)
