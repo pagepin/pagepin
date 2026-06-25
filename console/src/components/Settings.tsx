@@ -129,15 +129,22 @@ function ConnectedAccounts({ me }: { me: Me }) {
           desc={it.email ?? 'Connected'}
           last={idx === items.length - 1 && available.length === 0}
         >
-          <button
-            type="button"
-            className="btn-ghost"
-            disabled={onlyOne || busy === it.id}
-            title={onlyOne ? 'Add another sign-in method before disconnecting this one' : undefined}
-            onClick={() => disconnect(it.id)}
-          >
-            {busy === it.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}
-          </button>
+          {it.provider === 'password' ? (
+            // 邮箱密码是主登录方式，不可断开（账号锚点，且无重设入口）
+            <span className="inline-flex items-center gap-1 rounded-chip bg-ink-100 px-2 py-0.5 text-xs text-ink-500">
+              <Lock className="h-3 w-3" /> Primary
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={onlyOne || busy === it.id}
+              title={onlyOne ? 'Add another sign-in method before disconnecting this one' : undefined}
+              onClick={() => disconnect(it.id)}
+            >
+              {busy === it.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}
+            </button>
+          )}
         </Row>
       ))}
       {available.map((p, idx) => (

@@ -143,12 +143,11 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     const rows = await db.select().from(identities).where(eq(identities.userId, user.id)).all();
     const target = rows.find((r) => r.id === id);
     if (!target) return c.json({ detail: '身份不存在' }, 404);
+    // 邮箱密码是账号的主登录方式 / 锚点,不可断开(断了没有重设入口,且 canonicalEmail 挂在它上)。
+    // 只允许断开社交方式。
+    if (target.provider === 'password') return c.json({ detail: '邮箱登录方式不可断开' }, 409);
     if (rows.length <= 1) return c.json({ detail: '不能断开最后一个登录方式' }, 409);
     await db.delete(identities).where(and(eq(identities.id, id), eq(identities.userId, user.id))).run();
-    // 断开 password 身份 → 同时清掉 users.passwordHash(否则仍能密码登录,与「断开」不符)
-    if (target.provider === 'password') {
-      await db.update(users).set({ passwordHash: null }).where(eq(users.id, user.id)).run();
-    }
     const newEpoch = user.sessionEpoch + 1; // 使其它会话(旧 epo)失效
     await db.update(users).set({ sessionEpoch: newEpoch }).where(eq(users.id, user.id)).run();
     await setLoginCookies(c, cfg, 'session', user.id, user.handle, newEpoch); // 当前会话重发新 epo

@@ -263,6 +263,33 @@ export async function upsertFederatedUser(deps: AppDeps, fed: FederatedLogin): P
     return (await deps.db.select().from(users).where(eq(users.id, user.id)).get())!;
   }
 
+  // 自动合并(两边邮箱都已验证才安全):新身份的 verified 邮箱命中一个 emailVerified 的已有账号 →
+  // 挂上并登录进它(= Resend 那种「同邮箱直接进同一账号」)。已有账号邮箱「未验证」**绝不**作目标:
+  // 攻击者验证不了不属于自己的邮箱,其抢注账号 emailVerified 恒为 false,故挡住未验证邮箱抢注。
+  if (canonical) {
+    const match = await deps.db
+      .select()
+      .from(users)
+      .where(and(eq(users.canonicalEmail, canonical), eq(users.emailVerified, true)))
+      .get();
+    if (match && !match.disabled) {
+      const attached = await attachIdentity(deps, match.id, {
+        provider: fed.provider,
+        sub: fed.sub,
+        email: fed.email,
+        emailVerified: fed.emailVerified,
+      });
+      if (attached === 'ok') {
+        await deps.db
+          .update(users)
+          .set({ displayName: match.displayName ?? fed.name ?? null, lastLoginAt: now })
+          .where(eq(users.id, match.id))
+          .run();
+        return (await deps.db.select().from(users).where(eq(users.id, match.id)).get())!;
+      }
+    }
+  }
+
   // 从未见过的身份 → 建独立新账号
   const freeCanonical = await canonicalFreeOrNull(deps, canonical, null);
   const n = (await deps.db.select({ n: sql<number>`count(*)` }).from(users).get())?.n ?? 0;
