@@ -51,6 +51,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     max_file_mb: cfg.maxFileMb,
     max_site_mb: cfg.maxSiteMb,
     max_files: cfg.maxFiles,
+    free_user_mb: cfg.freeUserMb, // 每用户总存储配额(MB);0 = 不限。部署超配额回 413
     keep_versions: cfg.keepVersions,
     public_max_hours: cfg.publicMaxHours,
   });

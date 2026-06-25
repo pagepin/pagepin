@@ -73,8 +73,8 @@ thread you can't judge, relay it to the user rather than resolving it yourself.
 
 - Quotas (defaults; self-hosters tune them via environment variables): single
   file ≤25MB, single site ≤200MB, ≤2000 files, plus a per-user total-storage quota
-  (default 1GB across all your sites/versions). **Always defer to the `limits`
-  returned by `GET /api/me`.**
+  (the `free_user_mb` field, default 1GB across all your sites/versions; `0` =
+  unlimited). **Always defer to the `limits` returned by `GET /api/me`.**
 - The `public_hours` upper bound follows server config (default 168 hours =
   7 days); anything beyond is hard-clamped.
 - `401` invalid or revoked token · `404` site not found · `409` set a handle in
