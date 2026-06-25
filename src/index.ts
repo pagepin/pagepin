@@ -57,12 +57,13 @@ async function main(): Promise<void> {
   // skills/pagepin/SKILL.md 与 console/dist 均相对仓库根定位;src/index.ts 与 dist/index.js
   // 距仓库根同深(一层),'../' 在两种形态下都成立。
   const skillMd = readFileSync(new URL('../skills/pagepin/SKILL.md', import.meta.url), 'utf-8');
+  const apiMd = readFileSync(new URL('../skills/pagepin/references/api.md', import.meta.url), 'utf-8');
   const consoleDistUrl = new URL('../console/dist', import.meta.url);
   const consoleDist = existsSync(consoleDistUrl) ? fileURLToPath(consoleDistUrl) : undefined;
 
   const app = await createApp(
     { config: cfg, db, storage, mailer: createMailer(cfg.mail), rateLimiter: new MemoryRateLimiter() },
-    { consoleDist, skillMd, mountConsole: mountConsoleStatic },
+    { consoleDist, skillMd, apiMd, mountConsole: mountConsoleStatic },
   );
 
   serve({ fetch: app.fetch, port: cfg.port }, (info) => {

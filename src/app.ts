@@ -36,8 +36,11 @@ export interface CreateAppOptions {
   serveAssets?: (req: Request) => Response | Promise<Response>;
   /** HTML 评论层注入策略(Workers 注入 HTMLRewriter 流式注入器,去 >5MB 上限);透传给 serving。 */
   injectHtmlStream?: (resp: Response, tag: string) => Response;
-  /** skill.md 模板原文;serve 时按 config 渲染占位符 */
+  /** SKILL.md 原文(去 frontmatter 后按 /skill.md 伺服;host-agnostic,不做占位符替换) */
   skillMd?: string;
+  /** references/api.md 原文(按 /references/api.md 伺服 —— 即 SKILL.md 里相对链接的解析目标,
+   *  使 HTTP 取用者[无本地 skill 目录]也能拿到完整 API 参考) */
+  apiMd?: string;
 }
 
 export interface AppHandle {
@@ -57,17 +60,25 @@ function stripPort(host: string): string {
   return i === -1 ? host : host.slice(0, i);
 }
 
-/** GET /skill.md —— 给 AI/脚本的 API 使用说明(匿名可读,无敏感信息)。
+/** GET /skill.md(+ /references/api.md)—— 给 AI/脚本的 API 使用说明(匿名可读,无敏感信息)。
  * SKILL.md 本身 host-agnostic:agent 从抓取来源(或 ~/.config/pagepin/host)推断 base,
  * 双/单域都对(/skill.md 挂在 console 平面,API 即此 origin;内容 URL 由 deploy 响应回传)。
  * 同一份文件也作为可本地安装的 skill(npx skills add)分发,本地装无从替换占位符,
- * 故这里不做占位符替换 —— 只去掉 YAML frontmatter(HTTP 取用无意义)。 */
-function mountSkillMd(app: Hono<AppEnv>, skillMd: string): void {
+ * 故不做占位符替换 —— 只去掉 YAML frontmatter(HTTP 取用无意义)。
+ * api.md 按 SKILL.md 里的相对链接 `references/api.md` 同源伺服:本地安装走文件,HTTP 取用
+ * 把相对链接解析到 `https://HOST/references/api.md` —— 两种形态同一链接都能拿到完整参考。 */
+function mountSkillDocs(app: Hono<AppEnv>, skillMd: string, apiMd?: string): void {
   const rendered = skillMd.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
   app.get('/skill.md', (c) => {
     c.header('Content-Type', 'text/markdown; charset=utf-8');
     return c.body(rendered);
   });
+  if (apiMd) {
+    app.get('/references/api.md', (c) => {
+      c.header('Content-Type', 'text/markdown; charset=utf-8');
+      return c.body(apiMd);
+    });
+  }
 }
 
 /** 未捕获异常统一为 JSON 500(API 消费方拿到的错误体保持 {detail} 形状)。 */
@@ -109,7 +120,7 @@ async function mountConsolePlane(
   app.route('/', makeTokenRoutes(deps, mw));
   app.route('/', makeDeviceRoutes(deps, mw)); // OAuth2 设备授权(/api/device/*):AI/CLI 经浏览器登录换 token
   app.route('/', makeAdminRoutes(deps, mw));
-  if (opts.skillMd) mountSkillMd(app, opts.skillMd);
+  if (opts.skillMd) mountSkillDocs(app, opts.skillMd, opts.apiMd);
 }
 
 /** 单域模式:一个 app 全挂;评论 API 必须先于 serving 的通配路由注册。 */
