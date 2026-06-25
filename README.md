@@ -30,7 +30,7 @@ docker run -d --name pagepin \
   -v pagepin-data:/data \
   -e PAGEPIN_ADMIN_EMAIL=admin@example.com \
   -e PAGEPIN_ADMIN_PASSWORD=change-me-please \
-  ghcr.io/pagepin/pagepin:0.2.1
+  ghcr.io/pagepin/pagepin
 ```
 
 Open `http://localhost:8000`, log in as the admin, pick a handle, and create an API token (`pp_...`) from the console. A `docker-compose.yml` (with an optional MinIO block) is included in the repo.
