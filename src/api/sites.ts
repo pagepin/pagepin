@@ -29,7 +29,7 @@ import {
 import { purgeSiteStorage, type Storage } from '../storage/index.js';
 import { guessContentType } from '../storage/mime.js';
 import type { AppDeps, AppEnv } from '../types.js';
-import { normalizeSitePath, nowIso, uuid, validSlug } from '../util.js';
+import { normalizeSitePath, nowIso, tombstoneSlug, uuid, validSlug } from '../util.js';
 import type { AuthMiddleware } from './deps.js';
 
 function siteOut(deps: AppDeps, site: SiteRow, unresolved: number) {
@@ -668,7 +668,12 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const site = await ownedSite(db, user.id, c.req.param('slug'));
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     const now = nowIso();
-    await db.update(sites).set({ deletedAt: now, updatedAt: now }).where(eq(sites.id, site.id)).run();
+    // 软删:同时把 slug 改成墓碑名,让出活命名空间 → 普通唯一索引下同名 slug 可复用(跨方言通用)。
+    await db
+      .update(sites)
+      .set({ deletedAt: now, updatedAt: now, slug: tombstoneSlug(site.slug, site.id) })
+      .where(eq(sites.id, site.id))
+      .run();
     // 软删后回收存储(尽力而为;同名 slug 复用是新建,不与已删行的 storage 冲突)
     await purgeSiteStorage(storage, site.ownerId, site.slug);
     return c.json({ ok: true });

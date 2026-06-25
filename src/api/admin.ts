@@ -28,7 +28,7 @@ import {
   setRegistrationMode,
 } from '../instance-settings.js';
 import type { AppDeps, AppEnv } from '../types.js';
-import { nowIso, uuid, validEmail } from '../util.js';
+import { nowIso, tombstoneSlug, uuid, validEmail } from '../util.js';
 import type { AuthMiddleware } from './deps.js';
 import { reconcileByVerifiedEmail } from '../auth/reconcile.js';
 
@@ -277,7 +277,12 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const site = await liveSite(c.req.param('id'));
     if (!site) return c.json({ detail: '站点不存在' }, 404);
     const now = nowIso();
-    await db.update(sites).set({ deletedAt: now, updatedAt: now }).where(eq(sites.id, site.id)).run();
+    // 软删:slug 改墓碑名让出活命名空间(同 sites.ts 软删),普通唯一索引下同名 slug 可复用。
+    await db
+      .update(sites)
+      .set({ deletedAt: now, updatedAt: now, slug: tombstoneSlug(site.slug, site.id) })
+      .where(eq(sites.id, site.id))
+      .run();
     await purgeSiteStorage(storage, site.ownerId, site.slug);
     console.log(`admin-delete site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`);
     return c.json({ ok: true });

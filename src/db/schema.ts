@@ -6,7 +6,6 @@
  *   D1 用 `wrangler d1 migrations apply pagepin --remote`(见 package.json 的 cf:deploy)。
  */
 
-import { sql } from 'drizzle-orm';
 import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export interface SiteVersion {
@@ -55,9 +54,11 @@ export const users = sqliteTable(
   },
   (t) => [
     // 账号唯一性收口到归一后的 canonicalEmail(email 列改为可重复的展示字段)。
-    uniqueIndex('users_canonical_email_uq').on(t.canonicalEmail).where(sql`canonical_email IS NOT NULL`),
-    uniqueIndex('users_oidc_sub_uq').on(t.oidcSub).where(sql`oidc_sub IS NOT NULL`),
-    uniqueIndex('users_handle_uq').on(t.handle).where(sql`handle IS NOT NULL`),
+    // 普通唯一索引(非部分索引):SQLite/PG/MySQL 三家的唯一索引都允许多个 NULL,
+    // 故「可空但唯一」语义无需 WHERE ... IS NOT NULL —— 行为一致、跨方言通用。
+    uniqueIndex('users_canonical_email_uq').on(t.canonicalEmail),
+    uniqueIndex('users_oidc_sub_uq').on(t.oidcSub),
+    uniqueIndex('users_handle_uq').on(t.handle),
   ],
 );
 
@@ -85,7 +86,7 @@ export const identities = sqliteTable(
     // 登录查找 + 挂载防并发的唯一键(取代 users_oidc_sub_uq 的登录职责)。
     uniqueIndex('identities_provider_sub_uq').on(t.provider, t.sub),
     index('identities_user_idx').on(t.userId),
-    index('identities_email_idx').on(t.email).where(sql`email IS NOT NULL`), // 仅「连接提示」查找,非唯一
+    index('identities_email_idx').on(t.email), // 仅「连接提示」查找,非唯一(普通索引,跨方言通用)
   ],
 );
 
@@ -105,14 +106,16 @@ export const sites = sqliteTable(
     versions: text('versions', { mode: 'json' }).$type<SiteVersion[]>().notNull().default([]),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
-    deletedAt: text('deleted_at'), // 软删后同名 slug 可复用(唯一索引只约束未删行)
+    deletedAt: text('deleted_at'), // 软删时 slug 改名让出活命名空间(util.tombstoneSlug),故同名 slug 可复用
     // 管理员下架(可逆):非空 = serving 一律 451(对所有访问者,含站长/匿名公开),
     // 重新部署也不解除 —— 与软删互不影响(软删进墓碑,下架仍可恢复)。滥用处置开关。
     suspendedAt: text('suspended_at'),
     suspendedReason: text('suspended_reason'),
   },
   (t) => [
-    uniqueIndex('sites_handle_slug_uq').on(t.ownerHandle, t.slug).where(sql`deleted_at IS NULL`),
+    // 普通唯一索引(非部分索引):软删时把 slug 改名(util.tombstoneSlug)让出活命名空间,
+    // 墓碑行不再占用 (owner_handle, slug),故无需 WHERE deleted_at IS NULL → 跨 SQLite/PG/MySQL 通用。
+    uniqueIndex('sites_handle_slug_uq').on(t.ownerHandle, t.slug),
     index('sites_owner_idx').on(t.ownerId),
   ],
 );

@@ -18,6 +18,13 @@ export function validSlug(slug: string): boolean {
   return SLUG_RE.test(slug);
 }
 
+/** 软删墓碑的 slug —— 让出活命名空间,使同名 slug 可被新站复用。
+ *  ':' 在合法 slug 里不可能出现(见 SLUG_RE),拼 id 保证多次软删也互不相撞;
+ *  故 (owner_handle, slug) 用【普通】唯一索引即可跨 SQLite/PG/MySQL 通用,无需部分索引。 */
+export function tombstoneSlug(slug: string, id: string): string {
+  return `${slug}:deleted:${id}`;
+}
+
 /** 邮箱粗校验：@ 两侧非空、域名带点（拦下 a@b 这类）。与前端 EMAIL_RE 同义。 */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function validEmail(email: string): boolean {
