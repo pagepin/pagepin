@@ -20,11 +20,13 @@ import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
 import { attachIdentity, makeAuthRoutes, upsertFederatedUser } from '../src/auth/routes.js';
+import { reconcileByVerifiedEmail } from '../src/auth/reconcile.js';
 import type { AuthMw } from '../src/api/me.js';
 import { makeMeRoutes } from '../src/api/me.js';
 import { canPublish } from '../src/api/deps.js';
 import { loadConfig } from '../src/config.js';
-import { identities, users } from '../src/db/index.js';
+import { accountMerges, identities, sites, users } from '../src/db/index.js';
+import { nowIso, uuid } from '../src/util.js';
 import type { UserRow } from '../src/db/index.js';
 import { createLibsqlDb } from '../src/db/libsql.js';
 import type { MailMessage, Mailer } from '../src/mail/index.js';
@@ -262,4 +264,48 @@ test('gate: 无邮件实例 no-op;有 IdP 验证社交身份 → 放行', async 
   assert.equal(await canPublish(wm.deps, us), false); // 未验证
   await attachIdentity(wm.deps, us.id, { provider: 'google', sub: 'google:soc', email: 'soc@example.com', emailVerified: true });
   assert.equal(await canPublish(wm.deps, us), true); // 有 IdP 验证身份 → 放行(users.emailVerified 仍 false)
+});
+
+test('reconcile: 验证时把【空】password 账号并入【有内容】的社交账号(主 bug 修复)', async () => {
+  const { app, deps, db } = await setup({}, { send: async () => {} } as Mailer);
+  await postJson(app, '/auth/signup', { email: 'admin0@example.com', password: 'password123' }); // 首个=admin
+  await postJson(app, '/auth/signup', { email: 'zoe@example.com', password: 'password123' });
+  const A = (await db.select().from(users).where(eq(users.canonicalEmail, 'zoe@example.com')).get())!;
+  // 同邮箱社交登录:因 A 未验证 → 建独立账号 B
+  const B = await upsertFederatedUser(deps, { provider: 'github', sub: 'github:zoe', email: 'zoe@example.com', emailVerified: true });
+  assert.notEqual(A.id, B.id);
+  // B 有内容:handle + 站点
+  await db.update(users).set({ handle: 'zoe' }).where(eq(users.id, B.id)).run();
+  await db.insert(sites).values({ id: uuid(), ownerId: B.id, ownerHandle: 'zoe', slug: 's1', createdAt: nowIso(), updatedAt: nowIso() }).run();
+  // 模拟点验证信:A.emailVerified=true,然后 reconcile
+  await db.update(users).set({ emailVerified: true }).where(eq(users.id, A.id)).run();
+  await reconcileByVerifiedEmail(deps, 'zoe@example.com');
+
+  const aRow = (await db.select().from(users).where(eq(users.id, A.id)).get())!;
+  const bRow = (await db.select().from(users).where(eq(users.id, B.id)).get())!;
+  assert.equal(aRow.disabled, true); // 空账号 A 被吸收(禁用)
+  assert.equal(bRow.canonicalEmail, 'zoe@example.com'); // canonical 槽搬到了 B
+  assert.ok(bRow.passwordHash, 'B 带走了 A 的密码,可继续密码登录'); // 密码搬到 B
+  const bIds = await db.select().from(identities).where(eq(identities.userId, B.id)).all();
+  assert.deepEqual(bIds.map((i) => i.provider).sort(), ['github', 'password']); // 身份都在 B
+  assert.equal((await db.select().from(identities).where(eq(identities.userId, A.id)).all()).length, 0);
+});
+
+test('reconcile: 两边都有内容(两个 handle)→ 记 conflict,绝不自动合并', async () => {
+  const { deps, db } = await setup({}, { send: async () => {} } as Mailer);
+  const a = await upsertFederatedUser(deps, { provider: 'google', sub: 'google:t', email: 't@x.com', emailVerified: true });
+  await db.update(users).set({ handle: 'aaa' }).where(eq(users.id, a.id)).run();
+  await db.insert(sites).values({ id: uuid(), ownerId: a.id, ownerHandle: 'aaa', slug: 's', createdAt: nowIso(), updatedAt: nowIso() }).run();
+  // 第二个账号(模拟 pre-gate 历史):同 verified 邮箱身份 + 自己的 handle+站点
+  const bId = uuid();
+  await db.insert(users).values({ id: bId, email: 't@x.com', handle: 'bbb', createdAt: nowIso() }).run();
+  await db.insert(identities).values({ id: uuid(), userId: bId, provider: 'github', sub: 'github:t', email: 't@x.com', emailVerified: true, createdAt: nowIso() }).run();
+  await db.insert(sites).values({ id: uuid(), ownerId: bId, ownerHandle: 'bbb', slug: 's', createdAt: nowIso(), updatedAt: nowIso() }).run();
+
+  await reconcileByVerifiedEmail(deps, 't@x.com');
+
+  assert.equal((await db.select().from(users).where(eq(users.id, a.id)).get())!.disabled, false); // 两边都活
+  assert.equal((await db.select().from(users).where(eq(users.id, bId)).get())!.disabled, false);
+  const conflicts = await db.select().from(accountMerges).where(eq(accountMerges.status, 'conflict')).all();
+  assert.ok(conflicts.length >= 1, '记了 conflict 等人工');
 });

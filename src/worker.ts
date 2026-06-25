@@ -9,6 +9,7 @@ import { bootstrapAdmin } from './auth/admin-bootstrap.js';
 import { loadConfig } from './config.js';
 import { createD1Db } from './db/d1.js';
 import { createMailer } from './mail/factory.js';
+import { resumeSweep } from './auth/reconcile.js';
 import { SKILL_MD } from './generated/edge-assets.js';
 import { htmlRewriterInject } from './serving-inject.js';
 import { R2Storage } from './storage/r2.js';
@@ -49,6 +50,12 @@ async function buildApp(env: Env): Promise<AppHandle> {
     await bootstrapAdmin(deps, { guarded: true });
   } catch (e) {
     console.error('admin bootstrap 失败(继续启动,下次冷启重试):', e);
+  }
+  // 续跑卡在中途的账号合并(尽力而为;无 moving 行即一次轻量查询)。
+  try {
+    await resumeSweep(deps);
+  } catch (e) {
+    console.error('reconcile resumeSweep 失败:', e);
   }
   // console SPA 走 Static Assets binding(env.ASSETS):未命中 API/serving 的 GET 转交它(host 感知,
   //   故 wrangler run_worker_first=true 全量过 worker,再按 Host 决定 console/content)。

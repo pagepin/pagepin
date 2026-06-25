@@ -18,6 +18,7 @@ import { bootstrapAdmin } from './auth/admin-bootstrap.js';
 import { consoleBase, contentBase, loadConfig } from './config.js';
 import { createLibsqlDb } from './db/libsql.js';
 import { createMailer } from './mail/factory.js';
+import { resumeSweep } from './auth/reconcile.js';
 import { createStorage } from './storage/factory.js';
 
 async function main(): Promise<void> {
@@ -49,6 +50,9 @@ async function main(): Promise<void> {
   if (await bootstrapAdmin({ config: cfg, db, storage })) {
     console.log(`admin 账号就绪:${cfg.adminEmail}`);
   }
+
+  // 续跑任何卡在中途的账号合并(崩溃恢复;无 moving 行即 no-op)。
+  await resumeSweep({ config: cfg, db, storage }).catch((e) => console.error('reconcile resumeSweep 失败:', e));
 
   // skill.md 与 console/dist 均相对仓库根定位;src/index.ts 与 dist/index.js
   // 距仓库根同深(一层),'../' 在两种形态下都成立。

@@ -240,8 +240,25 @@ export const deploySessions = sqliteTable(
   ],
 );
 
+/** 账号合并日志 + 冲突标记(reconcile 用)。loserId 唯一 = 一个账号只会被吸收一次的闩锁;
+ *  status: moving(进行中,可恢复)| done | conflict(两边都有内容,需人工)。 */
+export const accountMerges = sqliteTable(
+  'account_merges',
+  {
+    id: text('id').primaryKey(),
+    loserId: text('loser_id').notNull(),
+    survivorId: text('survivor_id').notNull(),
+    emailKey: text('email_key').notNull(),
+    status: text('status').notNull().default('moving'),
+    createdAt: text('created_at').notNull(),
+    finishedAt: text('finished_at'),
+  },
+  (t) => [uniqueIndex('account_merges_loser_uq').on(t.loserId)],
+);
+
 export type UserRow = typeof users.$inferSelect;
 export type IdentityRow = typeof identities.$inferSelect;
+export type AccountMergeRow = typeof accountMerges.$inferSelect;
 export type SiteRow = typeof sites.$inferSelect;
 export type CommentThreadRow = typeof commentThreads.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;

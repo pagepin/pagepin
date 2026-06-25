@@ -30,6 +30,7 @@ import {
 import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso, uuid, validEmail } from '../util.js';
 import type { AuthMiddleware } from './deps.js';
+import { reconcileByVerifiedEmail } from '../auth/reconcile.js';
 
 const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -202,6 +203,8 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
       .set({ emailVerified: true })
       .where(and(eq(identities.userId, target.id), eq(identities.provider, 'password')))
       .run();
+    // 管理员手动验证也是可信的「掌握邮箱」证明 → 顺手收编同邮箱的空账号。
+    await reconcileByVerifiedEmail(deps, target.canonicalEmail);
     return c.json({ ok: true });
   });
 

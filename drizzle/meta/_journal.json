@@ -43,6 +43,13 @@
       "when": 1782308899793,
       "tag": "0005_account_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1782354336969,
+      "tag": "0006_account_merges",
+      "breakpoints": true
     }
   ]
 }

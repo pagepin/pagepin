@@ -24,6 +24,7 @@ import { canonicalEmail, nowIso, uuid, validEmail } from '../util.js';
 import { buildAuthorizeUrl, exchangeCode, OidcError, type OidcIdentity } from './oidc.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { exchangeSocialCode, socialAuthorizeUrl } from './social.js';
+import { reconcileByVerifiedEmail } from './reconcile.js';
 import { readVerifyToken, sendVerificationEmail } from '../mail/verify.js';
 import { verifyTurnstile } from './turnstile.js';
 import {
@@ -690,6 +691,8 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
         .where(and(eq(identities.userId, user.id), eq(identities.provider, 'password')))
         .run();
     }
+    // 验证就是「本账号自证掌握邮箱」—— 唯一安全的收编触发点。无条件调(重新点链接也能续跑未完成的合并)。
+    await reconcileByVerifiedEmail(deps, user.canonicalEmail);
     return c.html(
       gateDoc(
         'Email verified · pagepin',
