@@ -4,6 +4,24 @@ All notable changes to pagepin are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-06-26
+
+### Added
+
+- Remote libSQL / Turso support: set `PAGEPIN_DB_URL` (+ `PAGEPIN_DB_AUTH_TOKEN`)
+  to point the Node server at a managed libSQL such as Turso (`libsql://…`).
+  Unset keeps the zero-config local SQLite file. Workers (D1) are unaffected.
+
+### Changed
+
+- Docker image slimmed from ~344MB to ~194MB: alpine runtime, with production
+  `node_modules` built in a dedicated stage and drizzle-orm's unused optional
+  peer drivers (better-sqlite3, gel, type-only packages) plus the redundant glibc
+  libSQL binary pruned. Multi-arch (amd64 + arm64) preserved.
+- Configuration docs: the full environment-variable list now lives in a grouped,
+  commented `.env.example` (single source of truth); both READMEs keep a short
+  essentials table that links to it.
+
 ## [0.2.1] — 2026-06-25
 
 ### Fixed
@@ -60,6 +78,7 @@ and the agent deploy → review → fix loop. One Hono app on two runtimes (Node
 Cloudflare Workers) by dependency injection; pluggable storage (FS / S3 / R2) and
 auth (password / OIDC / none); atomic versioned deploys with rollback.
 
+[0.2.2]: https://github.com/pagepin/pagepin/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pagepin/pagepin/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pagepin/pagepin/releases/tag/v0.2.0
 [0.1.0]: https://github.com/pagepin/pagepin/releases/tag/v0.1.0
