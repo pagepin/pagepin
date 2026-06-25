@@ -119,15 +119,22 @@ function ConnectedAccounts({ me }: { me: Me }) {
   const connected = new Set(items.map((i) => i.provider));
   const available = (me.social_providers ?? []).filter((p) => !connected.has(p));
   const onlyOne = items.length <= 1;
+  // Password 是主登录方式 / 账号锚点(不可断开),固定排在最上面;其余按后端给的 created_at 顺序。
+  const ordered = [...items].sort((a, b) => {
+    if (a.provider === b.provider) return 0;
+    if (a.provider === 'password') return -1;
+    if (b.provider === 'password') return 1;
+    return 0;
+  });
 
   return (
     <>
-      {items.map((it, idx) => (
+      {ordered.map((it, idx) => (
         <Row
           key={it.id}
           label={PROVIDER_LABEL[it.provider] ?? it.provider}
           desc={it.email ?? 'Connected'}
-          last={idx === items.length - 1 && available.length === 0}
+          last={idx === ordered.length - 1 && available.length === 0}
         >
           {it.provider === 'password' ? (
             // 邮箱密码是主登录方式，不可断开（账号锚点，且无重设入口）
