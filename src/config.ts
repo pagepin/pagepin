@@ -44,6 +44,11 @@ export interface MailConfig {
 export interface Config {
   port: number;
   dataDir: string;
+  /** libSQL 连接(Node 自托管)。未设置 → 本地文件 file:{dataDir}/pagepin.db(开箱即用默认);
+   *  设为 libsql://… / https://… 可接 Turso 等托管 libSQL(配 dbAuthToken)。Workers 用 D1,忽略此项。 */
+  dbUrl?: string;
+  /** 远程 libSQL/Turso 的鉴权 token;本地 file: 或无鉴权的自建 sqld 留空。 */
+  dbAuthToken?: string;
   /** 单域模式对外地址(含 scheme,无尾斜杠) */
   baseUrl: string;
   consoleHost?: string;
@@ -233,6 +238,8 @@ export function loadConfig(env: Env): Config {
   return {
     port: num(env, 'PAGEPIN_PORT', 8000),
     dataDir: str(env, 'PAGEPIN_DATA_DIR', './data'),
+    dbUrl: env.PAGEPIN_DB_URL || undefined,
+    dbAuthToken: env.PAGEPIN_DB_AUTH_TOKEN || undefined,
     baseUrl,
     consoleHost,
     contentHost,

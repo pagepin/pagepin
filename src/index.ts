@@ -40,9 +40,13 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig({ ...process.env, PAGEPIN_SECRET: secret });
-  // libSQL(纯 JS,无 native 构建);启动自动应用 drizzle 迁移(./drizzle,cwd 相对)
-  mkdirSync(cfg.dataDir, { recursive: true }); // libSQL 不会自建父目录
-  const db = await createLibsqlDb(`file:${join(cfg.dataDir, 'pagepin.db')}`);
+  // libSQL(纯 JS,无 native 构建);启动自动应用 drizzle 迁移(./drizzle,cwd 相对)。
+  // 默认本地文件(开箱即用);PAGEPIN_DB_URL 可指向 Turso 等托管 libSQL(配 PAGEPIN_DB_AUTH_TOKEN)。
+  mkdirSync(cfg.dataDir, { recursive: true }); // 本地 file: 模式 libSQL 不会自建父目录
+  const db = await createLibsqlDb(
+    cfg.dbUrl ?? `file:${join(cfg.dataDir, 'pagepin.db')}`,
+    cfg.dbAuthToken,
+  );
   const storage = await createStorage(cfg);
 
   // admin bootstrap:配置了邮箱+密码则 upsert(存在则刷新密码哈希并确保 isAdmin,不动其他字段);

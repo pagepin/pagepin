@@ -13,6 +13,10 @@ services:
     #   PAGEPIN_ADMIN_PASSWORD: change-me-please
     #   PAGEPIN_BASE_URL: https://pages.example.com # public URL in single-domain mode
     #
+    #   # --- managed libSQL / Turso instead of the local SQLite file (optional) ---
+    #   # PAGEPIN_DB_URL: libsql://your-db.turso.io
+    #   # PAGEPIN_DB_AUTH_TOKEN: your-turso-token
+    #
     #   # --- dual-domain mode (isolate hosted content from the console) ---
     #   # PAGEPIN_CONSOLE_HOST: pagepin.example.com
     #   # PAGEPIN_CONTENT_HOST: pages.example.com
