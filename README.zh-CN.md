@@ -30,7 +30,7 @@ docker run -d --name pagepin \
   -v pagepin-data:/data \
   -e PAGEPIN_ADMIN_EMAIL=admin@example.com \
   -e PAGEPIN_ADMIN_PASSWORD=change-me-please \
-  ghcr.io/pagepin/pagepin
+  ghcr.io/pagepin/pagepin:0.2.0
 ```
 
 打开 `http://localhost:8000`，用管理员身份登录，设置一个 handle，并在控制台创建一个 API token（`pp_...`）。仓库中附带了 `docker-compose.yml`（含可选的 MinIO 配置块）。
