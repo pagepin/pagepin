@@ -1,6 +1,6 @@
 services:
   pagepin:
-    image: ghcr.io/pagepin/pagepin
+    image: ghcr.io/pagepin/pagepin:0.2.0
     # build: .   # or build from source instead of pulling the published image
     ports:
       - "8000:8000"
