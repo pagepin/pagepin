@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "pagepin — system architecture",
+    "subtitle": "One Hono app · single / dual-domain · Node + Workers · agent deploy→review→fix loop",
+    "output": "architecture.html"
+  },
+  "components": [
+    { "id": "agent", "type": "external", "label": "Coding agent", "sublabel": "skill · plugin · /skill.md", "tag": "device-login → pp_ token", "pos": [40, 150], "size": [175, 76] },
+    { "id": "reviewer", "type": "external", "label": "Reviewers & viewers", "sublabel": "browser session", "pos": [40, 440], "size": [175, 74] },
+    { "id": "api", "type": "backend", "label": "JSON API", "sublabel": "deploy · comments · device", "pos": [330, 120], "size": [195, 72] },
+    { "id": "serving", "type": "backend", "label": "Static serving", "sublabel": "overlay inject · viewer shells", "pos": [330, 300], "size": [195, 72] },
+    { "id": "console", "type": "frontend", "label": "Admin console", "sublabel": "React 19 + Vite", "pos": [330, 480], "size": [195, 70] },
+    { "id": "auth", "type": "security", "label": "Auth & sessions", "sublabel": "JWT planes · PAT · OIDC / social", "tag": "Turnstile (opt)", "pos": [575, 480], "size": [205, 86] },
+    { "id": "db", "type": "database", "label": "SQLite · Drizzle", "sublabel": "libSQL / D1 · one schema", "pos": [890, 120], "size": [185, 72] },
+    { "id": "storage", "type": "cloud", "label": "Object storage", "sublabel": "FS / S3 / R2", "pos": [890, 300], "size": [185, 72] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "One Hono app · createApp (edge-safe, host-routed)", "wraps": ["api", "serving", "console", "auth"] },
+    { "kind": "region", "label": "Injected per runtime · Node index.ts / Workers worker.ts", "wraps": ["db", "storage"] }
+  ],
+  "connections": [
+    { "from": "agent", "to": "api", "label": "② deploy (Bearer pp_)", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "from": "api", "to": "agent", "label": "④ comments JSON", "variant": "dashed", "fromSide": "top", "toSide": "top", "via": [[427, 78], [127, 78]], "labelAt": [250, 66] },
+    { "from": "reviewer", "to": "serving", "label": "③ pin comments", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "from": "reviewer", "to": "console", "label": "admin UI", "fromSide": "bottom", "toSide": "left", "labelAt": [268, 542] },
+    { "from": "serving", "to": "auth", "label": "verify · JWT / PAT", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "from": "api", "to": "db", "label": "threads · versions", "fromSide": "right", "toSide": "left" },
+    { "from": "api", "to": "storage", "label": "files", "fromSide": "bottom", "toSide": "top" },
+    { "from": "serving", "to": "storage", "label": "read files", "fromSide": "right", "toSide": "left" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Deploy → review → fix loop", "items": [
+      "① Agent installs the skill (npx skills add / Claude Code plugin) or fetches /skill.md; browser device-login mints a pp_ token",
+      "② POST /api/sites/{slug}/deploy → atomic, versioned release",
+      "③ Reviewers pin element-level comments (selector · kind · resolved)",
+      "④ Agent reads GET /api/sites/{slug}/comments as JSON (stale flag · deep-link)",
+      "⑤ Fix → redeploy → reply & resolve"
+    ] },
+    { "dot": "cyan", "title": "One app, two runtimes", "items": [
+      "createApp is platform-neutral & edge-safe (dependency-injected)",
+      "Node entry: @hono/node-server · libSQL · FS / S3",
+      "Workers entry: D1 · R2 · ASSETS · run_worker_first"
+    ] },
+    { "dot": "violet", "title": "Serving & storage", "items": [
+      "Comment overlay injected into HTML — byte-level ≤5MB, HTMLRewriter stream >5MB",
+      "Markdown & images get branded viewer shells (?raw escapes)",
+      "Atomic publish: conditional UPDATE on current_version_id · soft deletes"
+    ] },
+    { "dot": "rose", "title": "Auth & sessions", "items": [
+      "Modes: password / oidc / none + Google·GitHub social + Turnstile",
+      "JWT cookies: pp_view (content) · pp_session + pp_csrf (console, double-submit)",
+      "Programmatic deploy/comment APIs: pp_ PAT via Bearer"
+    ] }
+  ]
+}

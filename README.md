@@ -15,7 +15,7 @@ Deploy any HTML report or static site with one `curl`, share the link, and let r
 - **Private by default** — viewing requires login; sites can be made public for a bounded time window (default max 7 days) and auto-revert to private.
 - **Markdown & image viewer shells** — `.md` files and images get a readable viewer page (append `?raw` for the raw file).
 - **SPA fallback** — opt-in per site for client-side routed apps.
-- **Pluggable auth** — built-in email/password (with optional signup), any OIDC provider, or `none` for local dev.
+- **Pluggable auth** — built-in email/password (with optional signup), Google/GitHub social login, any OIDC provider, or `none` for local dev.
 - **Pluggable storage** — local filesystem or any S3-compatible object store (MinIO, R2, ...).
 - **Small footprint** — one Node process + SQLite; single Docker image with a React console included.
 - **Single- or dual-domain serving** — run everything on one origin, or isolate hosted content on a separate content domain (see [Architecture](#architecture)).
@@ -43,6 +43,23 @@ pnpm -C console install && pnpm -C console build   # optional: build the web con
 pnpm dev                                           # API on http://localhost:8000
 ```
 
+### Agent skill (for AI coding agents)
+
+Teach your coding agent to deploy and run the review loop. Install the skill once — it works in every project and session, signs in through the browser (device-login), and never pastes a token into chat:
+
+```bash
+npx skills add pagepin/pagepin -g
+```
+
+Claude Code can alternatively install it as a plugin:
+
+```text
+/plugin marketplace add pagepin/pagepin
+/plugin install pagepin@pagepin
+```
+
+See [`install.md`](install.md) for the full options (scripted/CI install, supported agents). Agents with no local skill directory can instead be pointed at the live guide served at **`/skill.md`**.
+
 ## Configuration
 
 All configuration is via environment variables.
@@ -56,18 +73,26 @@ All configuration is via environment variables.
 | `PAGEPIN_CONTENT_HOST` | — | Content (hosted pages) hostname. |
 | `PAGEPIN_EXTERNAL_SCHEME` | `https` | Scheme used to build external URLs in dual-domain mode. |
 | `PAGEPIN_AUTH_MODE` | `password` | `password`, `oidc`, or `none` (dev only: auto-login as an admin). |
-| `PAGEPIN_ALLOW_SIGNUP` | `true` | Allow self-service signup (password mode). |
+| `PAGEPIN_REGISTRATION_MODE` | — | `open` / `invite` / `closed`. When set, it locks the registration mode in the console UI; when unset, the console (DB) setting governs, falling back to `PAGEPIN_ALLOW_SIGNUP`. |
+| `PAGEPIN_ALLOW_SIGNUP` | `true` | Fallback default for self-service signup (password mode), used only when neither `PAGEPIN_REGISTRATION_MODE` nor a console setting is present. No longer locks the UI. |
 | `PAGEPIN_ADMIN_EMAIL` | — | If set with the password, an admin user is upserted at startup. Otherwise the first signup becomes admin. |
 | `PAGEPIN_ADMIN_PASSWORD` | — | Bootstrap admin password. |
 | `PAGEPIN_SECRET` | auto | Session signing key. Unset → generated once and stored at `{PAGEPIN_DATA_DIR}/secret`. |
 | `PAGEPIN_SESSION_TTL_H` | `8` | Session lifetime in hours. |
+| `PAGEPIN_DEVICE_TOKEN_TTL_DAYS` | `90` | Lifetime (days) of tokens minted via the browser device-login flow (`/api/device`, used by the agent skill). `0` = never expires; regular PATs are unaffected. |
 | `PAGEPIN_OIDC_ISSUER` | — | OIDC issuer URL (required in `oidc` mode; discovery via `/.well-known/openid-configuration`). |
 | `PAGEPIN_OIDC_CLIENT_ID` | — | OIDC client id. |
 | `PAGEPIN_OIDC_CLIENT_SECRET` | — | OIDC client secret. |
 | `PAGEPIN_OIDC_SCOPES` | `openid profile email` | OIDC scopes. |
 | `PAGEPIN_OIDC_AUTH_PARAMS` | — | JSON object of extra query params appended to the authorize URL. |
+| `PAGEPIN_OAUTH_PROVIDERS` | — | Comma list of social login providers to enable (`google`, `github`); coexists with `password` / `oidc`. |
+| `PAGEPIN_OAUTH_<ID>_CLIENT_ID` | — | OAuth client id per enabled provider (e.g. `PAGEPIN_OAUTH_GOOGLE_CLIENT_ID`). Id + secret must be set together or startup throws. |
+| `PAGEPIN_OAUTH_<ID>_CLIENT_SECRET` | — | OAuth client secret per enabled provider (e.g. `PAGEPIN_OAUTH_GITHUB_CLIENT_SECRET`). |
 | `PAGEPIN_TURNSTILE_SITE_KEY` | — | Cloudflare Turnstile site key (public). Set together with the secret to require human verification on signup + password login; leave both unset to disable. |
 | `PAGEPIN_TURNSTILE_SECRET_KEY` | — | Turnstile secret key (server-side `siteverify`, never sent to the browser). Both keys must be set together or startup throws. |
+| `PAGEPIN_MAIL_PROVIDER` | — | `resend` or `log`. Enables email sending (e.g. verification mail); unset disables it and emails stay unverified. |
+| `PAGEPIN_MAIL_FROM` | — | From address; required when mail is enabled. |
+| `PAGEPIN_RESEND_API_KEY` | — | Resend API key; required when `PAGEPIN_MAIL_PROVIDER=resend`. |
 | `PAGEPIN_STORAGE` | `fs` | `fs` (local disk) or `s3` (S3-compatible). |
 | `PAGEPIN_S3_ENDPOINT` | — | S3 endpoint (required in `s3` mode; scheme optional, defaults to `https://`). |
 | `PAGEPIN_S3_BUCKET` | — | S3 bucket. |
@@ -105,7 +130,11 @@ The agent-facing skill lives in [`skills/pagepin`](skills/pagepin/SKILL.md) — 
 
 ## Architecture
 
-One Node process (Hono) + SQLite + pluggable object storage, serving three things: the JSON API, the React console, and the hosted sites (with the comments overlay injected into HTML).
+![pagepin architecture](docs/architecture.svg)
+
+*Interactive version (dark/light toggle, PNG/SVG export): [`docs/architecture.html`](docs/architecture.html); regenerate from [`docs/architecture.json`](docs/architecture.json).*
+
+One Node process (Hono) + SQLite + pluggable object storage, serving three things: the JSON API, the React console, and the hosted sites (with the comments overlay injected into HTML). The same `createApp` runs on Cloudflare Workers (D1 + R2) by dependency injection.
 
 - **Single-domain mode** (default): everything on `PAGEPIN_BASE_URL`; hosted sites live under `/p/{handle}/{slug}/`. Zero-DNS setup, ideal for trusted teams.
 - **Dual-domain mode**: set `PAGEPIN_CONSOLE_HOST` + `PAGEPIN_CONTENT_HOST` and the same process splits by `Host` header — console/API on one origin, hosted content on `https://{content-host}/{handle}/{slug}/` with its own viewer session cookie.

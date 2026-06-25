@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1145 654" width="1145" height="654" role="img" aria-label="pagepin — system architecture — One Hono app · single / dual-domain · Node + Workers · agent deploy→review→fix loop (architecture diagram)">
+<style>
+:root {
+--bg: #020617;
+      --grid: #1e293b;
+      --text: #ffffff;
+      --text-muted: #94a3b8;
+      --text-dim: #475569;
+      /* UI chrome (menu hints, footer) needs more contrast than SVG .t-dim accents */
+      --text-faint: #7d8da1;
+
+      --panel: rgba(15, 23, 42, 0.5);
+      --panel-border: #1e293b;
+      --lane-fill: rgba(15, 23, 42, 0.22);
+      --lane-stroke: #334155;
+
+      --arrow: #64748b;
+      --arrow-emphasis: #34d399;
+
+      /* Opaque mask color used behind semi-transparent component fills
+         so the arrows drawn underneath are properly hidden. */
+      --mask: #0f172a;
+
+      --frontend-fill:    rgba(8, 51, 68, 0.4);
+      --frontend-stroke:  #22d3ee;
+      --backend-fill:     rgba(6, 78, 59, 0.4);
+      --backend-stroke:   #34d399;
+      --database-fill:    rgba(76, 29, 149, 0.4);
+      --database-stroke:  #a78bfa;
+      --cloud-fill:       rgba(120, 53, 15, 0.3);
+      --cloud-stroke:     #fbbf24;
+      --security-fill:    rgba(136, 19, 55, 0.4);
+      --security-stroke:  #fb7185;
+      --messagebus-fill:  rgba(251, 146, 60, 0.3);
+      --messagebus-stroke:#fb923c;
+      --external-fill:    rgba(30, 41, 59, 0.5);
+      --external-stroke:  #94a3b8;
+
+      --toolbar-bg:       rgba(15, 23, 42, 0.8);
+      --toolbar-border:   #334155;
+      --toolbar-text:     #e2e8f0;
+      --toolbar-hover:    rgba(15, 23, 42, 0.95);
+      --toolbar-menu-bg:  #0f172a;
+}
+@media (prefers-color-scheme: light) {
+:root {
+--bg: #f8fafc;
+      --grid: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --text-dim: #94a3b8;
+      --text-faint: #64748b;
+
+      --panel: #ffffff;
+      --panel-border: #e2e8f0;
+      --lane-fill: rgba(248, 250, 252, 0.65);
+      --lane-stroke: #cbd5e1;
+
+      --arrow: #94a3b8;
+      --arrow-emphasis: #059669;
+
+      --mask: #ffffff;
+
+      --frontend-fill:    rgba(34, 211, 238, 0.15);
+      --frontend-stroke:  #0891b2;
+      --backend-fill:     rgba(52, 211, 153, 0.18);
+      --backend-stroke:   #059669;
+      --database-fill:    rgba(167, 139, 250, 0.2);
+      --database-stroke:  #7c3aed;
+      --cloud-fill:       rgba(251, 191, 36, 0.18);
+      --cloud-stroke:     #d97706;
+      --security-fill:    rgba(251, 113, 133, 0.15);
+      --security-stroke:  #e11d48;
+      --messagebus-fill:  rgba(251, 146, 60, 0.15);
+      --messagebus-stroke:#ea580c;
+      --external-fill:    rgba(148, 163, 184, 0.18);
+      --external-stroke:  #64748b;
+
+      --toolbar-bg:       rgba(255, 255, 255, 0.92);
+      --toolbar-border:   #cbd5e1;
+      --toolbar-text:     #334155;
+      --toolbar-hover:    #ffffff;
+      --toolbar-menu-bg:  #ffffff;
+}
+}
+svg { width: 100%;
+      min-width: min(900px, 100%);
+      display: block; }
+/* ==========================================================
+       SVG SEMANTIC CLASSES — use these instead of inline fill/stroke
+       ========================================================== */
+    .c-grid { stroke: var(--grid); fill: none; }
+.c-mask { fill: var(--mask); stroke: none; }
+.c-frontend { fill: var(--frontend-fill);   stroke: var(--frontend-stroke); }
+.c-backend { fill: var(--backend-fill);    stroke: var(--backend-stroke); }
+.c-database { fill: var(--database-fill);   stroke: var(--database-stroke); }
+.c-cloud { fill: var(--cloud-fill);      stroke: var(--cloud-stroke); }
+.c-security { fill: var(--security-fill);   stroke: var(--security-stroke); }
+.c-messagebus { fill: var(--messagebus-fill); stroke: var(--messagebus-stroke); }
+.c-external { fill: var(--external-fill);   stroke: var(--external-stroke); }
+/* Text helpers */
+    .t-primary { fill: var(--text); }
+.t-muted { fill: var(--text-muted); }
+.t-dim { fill: var(--text-dim); }
+.t-frontend { fill: var(--frontend-stroke); }
+.t-backend { fill: var(--backend-stroke); }
+.t-database { fill: var(--database-stroke); }
+.t-cloud { fill: var(--cloud-stroke); }
+.t-security { fill: var(--security-stroke); }
+.t-messagebus { fill: var(--messagebus-stroke); }
+.t-external { fill: var(--external-stroke); }
+/* Arrows */
+    .a-default { stroke: var(--arrow); fill: none; }
+.a-emphasis { stroke: var(--arrow-emphasis); fill: none; }
+.a-security { stroke: var(--security-stroke); fill: none; stroke-dasharray: 5,5; }
+.a-dashed { stroke: var(--database-stroke); fill: none; stroke-dasharray: 4,4; }
+/* Arrowhead markers reference these */
+    .m-default { fill: var(--arrow); }
+.m-emphasis { fill: var(--arrow-emphasis); }
+.m-security { fill: var(--security-stroke); }
+.m-dashed { fill: var(--database-stroke); }
+/* Dashed boundary variants */
+    .c-security-group { fill: transparent; stroke: var(--security-stroke); stroke-dasharray: 4,4; }
+.c-region { fill: rgba(251, 191, 36, 0.05); stroke: var(--cloud-stroke); stroke-dasharray: 8,4; }
+.c-lane { fill: var(--lane-fill); stroke: var(--lane-stroke); stroke-dasharray: 6,6; }
+</style>
+<rect width="100%" height="100%" fill="var(--bg)"/>
+        <!-- Definitions -->
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-default" />
+          </marker>
+          <marker id="arrowhead-emphasis" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-emphasis" />
+          </marker>
+          <marker id="arrowhead-security" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-security" />
+          </marker>
+          <marker id="arrowhead-dashed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-dashed" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" class="c-grid" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- Boundaries (behind everything) -->
+        <rect x="300" y="90" width="510" height="496" rx="12" class="c-region" stroke-width="1"/>
+        <text x="308" y="108" class="t-cloud" font-size="9" font-weight="600">One Hono app · createApp (edge-safe, host-routed)</text>
+
+        <rect x="860" y="90" width="245" height="302" rx="12" class="c-region" stroke-width="1"/>
+        <text x="868" y="108" class="t-cloud" font-size="9" font-weight="600">Injected per runtime · Node index.ts / Workers worker.ts</text>
+
+        <!-- Connection paths (before components for correct z-order) -->
+        <path d="M 215 188 L 264.5 188 Q 272.5 188 272.5 180 L 272.5 164 Q 272.5 156 280.5 156 L 330 156" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path d="M 427.5 120 L 427.0952313472241 85.99943316682538 Q 427 78 419 78 L 135 78 Q 127 78 127.0555542160121 85.99980710574219 L 127.5 150" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path d="M 215 477 L 264.5 477 Q 272.5 477 272.5 469 L 272.5 344 Q 272.5 336 280.5 336 L 330 336" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path d="M 127.5 514 L 330 515" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path d="M 427.5 372 L 544.5 372 Q 552.5 372 552.5 380 L 552.5 472 Q 552.5 480 560.5 480 L 677.5 480" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+        <path d="M 525 156 L 890 156" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path d="M 427.5 192 L 697 192 Q 705 192 705 200 L 705 292 Q 705 300 713 300 L 982.5 300" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path d="M 525 336 L 890 336" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Components -->
+        <rect x="40" y="150" width="175" height="76" rx="6" class="c-mask"/>
+        <rect x="40" y="150" width="175" height="76" rx="6" class="c-external" stroke-width="1.5"/>
+        <text x="127.5" y="186" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Coding agent</text>
+        <text x="127.5" y="202" class="t-muted" font-size="9" text-anchor="middle">skill · plugin · /skill.md</text>
+        <text x="127.5" y="218" class="t-external" font-size="7" text-anchor="middle">device-login → pp_ token</text>
+
+        <rect x="40" y="440" width="175" height="74" rx="6" class="c-mask"/>
+        <rect x="40" y="440" width="175" height="74" rx="6" class="c-external" stroke-width="1.5"/>
+        <text x="127.5" y="475" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Reviewers &amp; viewers</text>
+        <text x="127.5" y="491" class="t-muted" font-size="9" text-anchor="middle">browser session</text>
+
+        <rect x="330" y="120" width="195" height="72" rx="6" class="c-mask"/>
+        <rect x="330" y="120" width="195" height="72" rx="6" class="c-backend" stroke-width="1.5"/>
+        <text x="427.5" y="154" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">JSON API</text>
+        <text x="427.5" y="170" class="t-muted" font-size="9" text-anchor="middle">deploy · comments · device</text>
+
+        <rect x="330" y="300" width="195" height="72" rx="6" class="c-mask"/>
+        <rect x="330" y="300" width="195" height="72" rx="6" class="c-backend" stroke-width="1.5"/>
+        <text x="427.5" y="334" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Static serving</text>
+        <text x="427.5" y="350" class="t-muted" font-size="9" text-anchor="middle">overlay inject · viewer shells</text>
+
+        <rect x="330" y="480" width="195" height="70" rx="6" class="c-mask"/>
+        <rect x="330" y="480" width="195" height="70" rx="6" class="c-frontend" stroke-width="1.5"/>
+        <text x="427.5" y="513" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Admin console</text>
+        <text x="427.5" y="529" class="t-muted" font-size="9" text-anchor="middle">React 19 + Vite</text>
+
+        <rect x="575" y="480" width="205" height="86" rx="6" class="c-mask"/>
+        <rect x="575" y="480" width="205" height="86" rx="6" class="c-security" stroke-width="1.5"/>
+        <text x="677.5" y="521" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Auth &amp; sessions</text>
+        <text x="677.5" y="537" class="t-muted" font-size="9" text-anchor="middle">JWT planes · PAT · OIDC / social</text>
+        <text x="677.5" y="558" class="t-security" font-size="7" text-anchor="middle">Turnstile (opt)</text>
+
+        <rect x="890" y="120" width="185" height="72" rx="6" class="c-mask"/>
+        <rect x="890" y="120" width="185" height="72" rx="6" class="c-database" stroke-width="1.5"/>
+        <text x="982.5" y="154" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">SQLite · Drizzle</text>
+        <text x="982.5" y="170" class="t-muted" font-size="9" text-anchor="middle">libSQL / D1 · one schema</text>
+
+        <rect x="890" y="300" width="185" height="72" rx="6" class="c-mask"/>
+        <rect x="890" y="300" width="185" height="72" rx="6" class="c-cloud" stroke-width="1.5"/>
+        <text x="982.5" y="334" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Object storage</text>
+        <text x="982.5" y="350" class="t-muted" font-size="9" text-anchor="middle">FS / S3 / R2</text>
+
+        <!-- Connection labels -->
+        <rect x="217.1" y="152" width="110.8" height="14" rx="3" class="c-mask"/>
+        <text x="272.5" y="162" class="t-backend" font-size="8" text-anchor="middle">② deploy (Bearer pp_)</text>
+        <rect x="209" y="56" width="82" height="14" rx="3" class="c-mask"/>
+        <text x="250" y="66" class="t-messagebus" font-size="8" text-anchor="middle">④ comments JSON</text>
+        <rect x="233.9" y="386.5" width="77.2" height="14" rx="3" class="c-mask"/>
+        <text x="272.5" y="396.5" class="t-backend" font-size="8" text-anchor="middle">③ pin comments</text>
+        <rect x="243.8" y="532" width="48.4" height="14" rx="3" class="c-mask"/>
+        <text x="268" y="542" class="t-muted" font-size="8" text-anchor="middle">admin UI</text>
+        <rect x="504.3" y="406" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+        <text x="552.5" y="416" class="t-security" font-size="8" text-anchor="middle">verify · JWT / PAT</text>
+        <rect x="659.3" y="136" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+        <text x="707.5" y="146" class="t-muted" font-size="8" text-anchor="middle">threads · versions</text>
+        <rect x="688" y="226" width="34" height="14" rx="3" class="c-mask"/>
+        <text x="705" y="236" class="t-muted" font-size="8" text-anchor="middle">files</text>
+        <rect x="678.5" y="316" width="58" height="14" rx="3" class="c-mask"/>
+        <text x="707.5" y="326" class="t-muted" font-size="8" text-anchor="middle">read files</text>
+
+        <!-- Legend -->
+        <text x="40" y="625" class="t-primary" font-size="9" font-weight="600">Legend</text>
+        <rect x="40" y="630" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
+        <text x="60" y="638" class="t-muted" font-size="8">External</text>
+        <rect x="138" y="630" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
+        <text x="158" y="638" class="t-muted" font-size="8">Backend</text>
+        <rect x="231" y="630" width="14" height="9" rx="2" class="c-frontend" stroke-width="1"/>
+        <text x="251" y="638" class="t-muted" font-size="8">Frontend</text>
+        <rect x="329" y="630" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
+        <text x="349" y="638" class="t-muted" font-size="8">Security</text>
+        <rect x="427" y="630" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
+        <text x="447" y="638" class="t-muted" font-size="8">Database</text>
+        <rect x="525" y="630" width="14" height="9" rx="2" class="c-cloud" stroke-width="1"/>
+        <text x="545" y="638" class="t-muted" font-size="8">Cloud</text>
+      </svg>
