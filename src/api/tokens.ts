@@ -19,6 +19,7 @@ export interface AuthMw {
   mutatingUser: MiddlewareHandler<AppEnv>;
   cookieUser: MiddlewareHandler<AppEnv>;
   cookieMutatingUser: MiddlewareHandler<AppEnv>;
+  requireVerified: MiddlewareHandler<AppEnv>;
 }
 
 export const MAX_TOKENS_PER_USER = 10;
@@ -111,7 +112,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     return c.json({ tokens: toks.map(out) });
   });
 
-  app.post('/api/tokens', mw.cookieMutatingUser, async (c) => {
+  app.post('/api/tokens', mw.cookieMutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const name = (await readNameField(c)).trim();
     if (name.length < 1 || name.length > 64) return c.json({ detail: '名称需 1-64 字符' }, 422);
@@ -126,7 +127,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   });
 
   /** 原地换新值(名字/记录不变):旧明文立即失效,正在用它的 AI/脚本需换新 token。 */
-  app.post('/api/tokens/:tokenId/rotate', mw.cookieMutatingUser, async (c) => {
+  app.post('/api/tokens/:tokenId/rotate', mw.cookieMutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const rec = await ownedToken(c.req.param('tokenId'), user);
     if (!rec) return c.json({ detail: 'token 不存在' }, 404);

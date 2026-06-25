@@ -12,6 +12,7 @@ import type { Context } from 'hono';
 import { consoleBase, siteUrl } from '../config.js';
 import {
   currentVersion,
+  identities,
   invites,
   sites,
   users,
@@ -188,6 +189,20 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const allSites = await db.select().from(sites).where(isNull(sites.deletedAt)).all();
     const usage = ownerUsage(allSites).get(target.id) ?? { count: 0, bytes: 0 };
     return c.json(userOut({ ...target, isAdmin: resAdmin, disabled: resDisabled }, usage));
+  });
+
+  /** 管理员手动标记某用户邮箱已验证 —— 救援:邮箱退信 / 死域 / GitHub noreply 等无法自助验证时,
+   *  否则该账号会被门槛永久挡在「不能建站」之外。置 users.emailVerified + password 身份 verified。 */
+  r.post('/users/:id/verify-email', mw.adminMutatingUser, async (c) => {
+    const target = await db.select().from(users).where(eq(users.id, c.req.param('id'))).get();
+    if (!target) return c.json({ detail: '用户不存在' }, 404);
+    await db.update(users).set({ emailVerified: true }).where(eq(users.id, target.id)).run();
+    await db
+      .update(identities)
+      .set({ emailVerified: true })
+      .where(and(eq(identities.userId, target.id), eq(identities.provider, 'password')))
+      .run();
+    return c.json({ ok: true });
   });
 
   // ---- 站点审核(列出全实例站点 / 下架 / 恢复 / 强删) ----

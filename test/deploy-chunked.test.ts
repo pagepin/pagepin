@@ -37,6 +37,7 @@ function injectUser(user: UserRow): AuthMiddleware {
     mutatingUser: inject,
     cookieUser: inject,
     cookieMutatingUser: inject,
+    requireVerified: inject,
     adminUser: inject,
     adminMutatingUser: inject,
   } as AuthMiddleware;

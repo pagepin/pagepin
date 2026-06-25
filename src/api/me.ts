@@ -10,6 +10,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { contentBase } from '../config.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { sendVerificationEmail } from '../mail/verify.js';
+import { canPublish } from './deps.js';
 import { setLoginCookies } from '../auth/sessions.js';
 import { apiTokens, commentThreads, currentVersion, identities, sites, users } from '../db/index.js';
 import type { AppDeps, AppEnv } from '../types.js';
@@ -21,6 +22,7 @@ export interface AuthMw {
   mutatingUser: MiddlewareHandler<AppEnv>;
   cookieUser: MiddlewareHandler<AppEnv>;
   cookieMutatingUser: MiddlewareHandler<AppEnv>;
+  requireVerified: MiddlewareHandler<AppEnv>;
 }
 
 /** 读 JSON body 里的 handle 字段;缺失/非法 JSON/非字符串 → null(对应 pydantic 422)。 */
@@ -53,7 +55,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     public_max_hours: cfg.publicMaxHours,
   });
 
-  app.get('/api/me', mw.currentUser, (c) => {
+  app.get('/api/me', mw.currentUser, async (c) => {
     const user = c.get('user');
     return c.json({
       sub: user.id,
@@ -66,6 +68,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       auth_mode: cfg.authMode,
       social_providers: cfg.socialProviders.map((p) => p.id), // 设置页据此渲染「连接账号」按钮
       mail_enabled: !!deps.mailer, // 配了邮件才显示「验证邮箱」入口
+      can_publish: await canPublish(deps, user), // false → 前端把 claim handle/建站 引导去验证邮箱
       needs_handle: user.handle === null,
       content_base: contentBase(cfg),
       limits: limitsJson(),
@@ -229,8 +232,8 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     });
   });
 
-  /** 首登确认 handle。一经确认不可改。 */
-  app.post('/api/me/handle', mw.mutatingUser, async (c) => {
+  /** 首登确认 handle。一经确认不可改。须先验证邮箱(handle 是不可变 URL 前缀,不让未验证账号占)。 */
+  app.post('/api/me/handle', mw.mutatingUser, mw.requireVerified, async (c) => {
     const raw = await readHandleField(c);
     if (raw === null) return c.json({ detail: '请求体需包含 handle 字段' }, 422);
     const user = c.get('user');

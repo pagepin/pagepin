@@ -27,6 +27,8 @@ export interface Me {
   has_password: boolean;
   /** 实例是否配置了邮件发送（决定是否显示「验证邮箱」入口） */
   mail_enabled?: boolean;
+  /** 能否发布内容（claim handle / 建站 / 发 token）；false → 先去验证邮箱 */
+  can_publish: boolean;
   is_admin: boolean;
   auth_mode: 'password' | 'oidc' | 'none';
   /** 已启用的社交登录 provider id（设置页据此渲染「连接账号」按钮） */

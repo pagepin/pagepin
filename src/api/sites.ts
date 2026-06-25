@@ -425,7 +425,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
 
   // ---- 部署(单请求 multipart;小站点一行 curl 即可。>~90MB 的大站点走分批 /deploys) ----
   // 注:单请求整站塞进一个 body,受 Cloudflare 100MB 请求体上限约束(Free/Pro);超过请用分批端点。
-  r.post('/:slug/deploy', mw.mutatingUser, async (c) => {
+  r.post('/:slug/deploy', mw.mutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const slug = c.req.param('slug');
     if (user.handle == null) return c.json({ detail: '请先设置 handle' }, 409);
@@ -480,7 +480,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
 
   // ---- 分批部署 begin:开一个草稿版本,文件后续分多请求推上来,commit 才发布 ----
   // 解除单请求 100MB 上限:大站点把文件分批(每批 <~90MB)推到同一版本前缀,最后 commit 原子切换。
-  r.post('/:slug/deploys', mw.mutatingUser, async (c) => {
+  r.post('/:slug/deploys', mw.mutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const slug = c.req.param('slug');
     if (user.handle == null) return c.json({ detail: '请先设置 handle' }, 409);

@@ -11,13 +11,28 @@ import { createMiddleware } from 'hono/factory';
 import { and, eq, isNull } from 'drizzle-orm';
 
 import { csrfOk, readSession } from '../auth/sessions.js';
-import { apiTokens, users } from '../db/index.js';
+import { apiTokens, identities, users } from '../db/index.js';
+import type { UserRow } from '../db/index.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso } from '../util.js';
 
 async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** 能否发布内容(claim handle / 建站 / 发 token)。判定 = 已验证邮箱,或持有 IdP 验证过的社交身份
+ *  (社交账号天生过关)。豁免:dev 模式 / admin / 未配邮件的实例(否则把自托管单人实例锁死)。
+ *  也用于 /api/me 的 can_publish 下发,与 requireVerified 同一判定。 */
+export async function canPublish(deps: AppDeps, user: UserRow): Promise<boolean> {
+  const { db, config: cfg } = deps;
+  if (cfg.authMode === 'none' || user.isAdmin || user.emailVerified || !deps.mailer) return true;
+  const ident = await db
+    .select({ id: identities.id })
+    .from(identities)
+    .where(and(eq(identities.userId, user.id), eq(identities.emailVerified, true)))
+    .get();
+  return !!ident;
 }
 
 export interface AuthMiddleware {
@@ -33,6 +48,8 @@ export interface AuthMiddleware {
   adminUser: MiddlewareHandler<AppEnv>;
   /** 仅 Cookie 会话 + CSRF + 管理员校验(admin 写接口;PAT 不能做管理动作,限制泄露半径)。 */
   adminMutatingUser: MiddlewareHandler<AppEnv>;
+  /** 须先认证(链在某个 *User 之后):账号未验证邮箱 → 403,挡住未验证账号攒内容(handle/站点/token)。 */
+  requireVerified: MiddlewareHandler<AppEnv>;
 }
 
 export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
@@ -141,5 +158,21 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     await next();
   });
 
-  return { currentUser, mutatingUser, cookieUser, cookieMutatingUser, adminUser, adminMutatingUser };
+  // 须链在某个 *User 之后(读 c.get('user'));未验证账号(且无验证社交身份)拒创建内容。
+  const requireVerified = createMiddleware<AppEnv>(async (c, next) => {
+    if (!(await canPublish(deps, c.get('user')))) {
+      return c.json({ detail: '请先验证邮箱后再创建内容', code: 'email_unverified' }, 403);
+    }
+    await next();
+  });
+
+  return {
+    currentUser,
+    mutatingUser,
+    cookieUser,
+    cookieMutatingUser,
+    adminUser,
+    adminMutatingUser,
+    requireVerified,
+  };
 }

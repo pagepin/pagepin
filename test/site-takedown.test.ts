@@ -40,6 +40,7 @@ function injectAdmin(admin: typeof users.$inferSelect): AuthMiddleware {
     mutatingUser: inject,
     cookieUser: inject,
     cookieMutatingUser: inject,
+    requireVerified: inject,
     adminUser: inject,
     adminMutatingUser: inject,
   } as AuthMiddleware;

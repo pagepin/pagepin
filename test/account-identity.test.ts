@@ -22,6 +22,7 @@ import { createMiddleware } from 'hono/factory';
 import { attachIdentity, makeAuthRoutes, upsertFederatedUser } from '../src/auth/routes.js';
 import type { AuthMw } from '../src/api/me.js';
 import { makeMeRoutes } from '../src/api/me.js';
+import { canPublish } from '../src/api/deps.js';
 import { loadConfig } from '../src/config.js';
 import { identities, users } from '../src/db/index.js';
 import type { UserRow } from '../src/db/index.js';
@@ -37,7 +38,7 @@ function injectUser(user: UserRow): AuthMw {
     c.set('authVia', 'cookie');
     await next();
   });
-  return { currentUser: inject, mutatingUser: inject, cookieUser: inject, cookieMutatingUser: inject };
+  return { currentUser: inject, mutatingUser: inject, cookieUser: inject, cookieMutatingUser: inject, requireVerified: inject };
 }
 
 function del(app: Hono<AppEnv>, path: string): Promise<Response> {
@@ -234,4 +235,31 @@ test('verify-email: 篡改/过期 token → 400,不改状态', async () => {
   assert.equal(r.status, 400);
   const u = (await db.select().from(users).where(eq(users.canonicalEmail, 'grace@example.com')).get())!;
   assert.equal(u.emailVerified, false);
+});
+
+test('gate: 非 admin 未验证 password + 配邮件 → canPublish false;验证后 true', async () => {
+  const { app, deps, db } = await setup({}, { send: async () => {} } as Mailer);
+  await postJson(app, '/auth/signup', { email: 'admin@example.com', password: 'password123' }); // 首个=admin
+  await postJson(app, '/auth/signup', { email: 'user@example.com', password: 'password123' });
+  const u = (await db.select().from(users).where(eq(users.canonicalEmail, 'user@example.com')).get())!;
+  assert.equal(u.isAdmin, false);
+  assert.equal(await canPublish(deps, u), false); // 未验证 + 配邮件 + 非 admin → 挡
+  assert.equal(await canPublish(deps, { ...u, emailVerified: true }), true); // 验证后放行
+  assert.equal(await canPublish(deps, { ...u, isAdmin: true }), true); // admin 豁免
+});
+
+test('gate: 无邮件实例 no-op;有 IdP 验证社交身份 → 放行', async () => {
+  const noMail = await setup(); // 无 mailer
+  await postJson(noMail.app, '/auth/signup', { email: 'a@example.com', password: 'password123' });
+  await postJson(noMail.app, '/auth/signup', { email: 'b@example.com', password: 'password123' });
+  const ub = (await noMail.db.select().from(users).where(eq(users.canonicalEmail, 'b@example.com')).get())!;
+  assert.equal(await canPublish(noMail.deps, ub), true); // 没配邮件 → 不锁死
+
+  const wm = await setup({}, { send: async () => {} } as Mailer);
+  await postJson(wm.app, '/auth/signup', { email: 'admin2@example.com', password: 'password123' });
+  await postJson(wm.app, '/auth/signup', { email: 'soc@example.com', password: 'password123' });
+  const us = (await wm.db.select().from(users).where(eq(users.canonicalEmail, 'soc@example.com')).get())!;
+  assert.equal(await canPublish(wm.deps, us), false); // 未验证
+  await attachIdentity(wm.deps, us.id, { provider: 'google', sub: 'google:soc', email: 'soc@example.com', emailVerified: true });
+  assert.equal(await canPublish(wm.deps, us), true); // 有 IdP 验证身份 → 放行(users.emailVerified 仍 false)
 });

@@ -55,6 +55,7 @@ async function setup(): Promise<{ app: Hono<AppEnv>; deps: AppDeps }> {
     mutatingUser: inject,
     cookieUser: inject,
     cookieMutatingUser: inject,
+    requireVerified: inject,
     adminUser: inject,
     adminMutatingUser: inject,
   } as AuthMiddleware;
