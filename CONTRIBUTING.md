@@ -16,7 +16,7 @@ hosted pages. Contributions of all sizes are welcome.
 
 ## Prerequisites
 
-- Node.js >= 20
+- Node.js >= 22 (authoritative `engines` value in `package.json`)
 - pnpm 10.18.1 (`corepack enable` picks it up from `packageManager`)
 
 The three folders (`.`, `console/`, `e2e/`) are independent pnpm projects —
@@ -27,8 +27,8 @@ install each as needed.
 ```bash
 pnpm install                       # server deps
 pnpm -C console install            # console deps (first time)
-pnpm -C console build              # build the console into console/dist (served by the API)
-pnpm dev                           # API + console on http://localhost:8000
+pnpm -C console build              # optional: build the admin UI into console/dist (served by the API)
+pnpm dev                           # API on http://localhost:8000 (+ console if built)
 ```
 
 `pnpm dev` runs in `password` auth mode by default. To bootstrap an admin on
