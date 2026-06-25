@@ -4,6 +4,16 @@ All notable changes to pagepin are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-06-25
+
+### Fixed
+
+- Docker image crashed on startup with `Can't find meta/_journal.json` — the
+  `drizzle/` migrations directory wasn't bundled into the image, so libSQL's
+  boot-time auto-migration had nothing to read. The runtime stage now
+  `COPY drizzle/`. Verified by building and running the image. If you pulled
+  `0.2.0`, use `0.2.1` (or `:latest`).
+
 ## [0.2.0] — 2026-06-25
 
 First release since 0.1.0. It also makes the Docker image buildable again — it
@@ -50,5 +60,6 @@ and the agent deploy → review → fix loop. One Hono app on two runtimes (Node
 Cloudflare Workers) by dependency injection; pluggable storage (FS / S3 / R2) and
 auth (password / OIDC / none); atomic versioned deploys with rollback.
 
+[0.2.1]: https://github.com/pagepin/pagepin/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pagepin/pagepin/releases/tag/v0.2.0
 [0.1.0]: https://github.com/pagepin/pagepin/releases/tag/v0.1.0
