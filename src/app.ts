@@ -24,7 +24,6 @@ import { makeSiteRoutes } from './api/sites.js';
 import { makeTokenRoutes } from './api/tokens.js';
 import { makeAuthRoutes } from './auth/routes.js';
 import { makeCommentRoutes } from './comments.js';
-import { consoleBase, contentBase, siteUrl } from './config.js';
 import { makeServingRoutes } from './serving.js';
 import type { AppDeps, AppEnv } from './types.js';
 
@@ -59,15 +58,12 @@ function stripPort(host: string): string {
 }
 
 /** GET /skill.md —— 给 AI/脚本的 API 使用说明(匿名可读,无敏感信息)。
- * 占位符按当前部署形态渲染一次(config 进程内不变)。 */
-function mountSkillMd(app: Hono<AppEnv>, deps: AppDeps, skillMd: string): void {
-  const cfg = deps.config;
-  const rendered = skillMd
-    // 去掉 SKILL.md 的 YAML frontmatter(仅本地 skill 安装时需要,HTTP 取用无意义)。
-    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
-    .replaceAll('{{CONSOLE_BASE}}', consoleBase(cfg))
-    .replaceAll('{{CONTENT_BASE}}', contentBase(cfg))
-    .replaceAll('{{SITE_URL_EXAMPLE}}', siteUrl(cfg, 'your-handle', 'my-demo'));
+ * SKILL.md 本身 host-agnostic:agent 从抓取来源(或 ~/.config/pagepin/host)推断 base,
+ * 双/单域都对(/skill.md 挂在 console 平面,API 即此 origin;内容 URL 由 deploy 响应回传)。
+ * 同一份文件也作为可本地安装的 skill(npx skills add)分发,本地装无从替换占位符,
+ * 故这里不做占位符替换 —— 只去掉 YAML frontmatter(HTTP 取用无意义)。 */
+function mountSkillMd(app: Hono<AppEnv>, skillMd: string): void {
+  const rendered = skillMd.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
   app.get('/skill.md', (c) => {
     c.header('Content-Type', 'text/markdown; charset=utf-8');
     return c.body(rendered);
@@ -113,7 +109,7 @@ async function mountConsolePlane(
   app.route('/', makeTokenRoutes(deps, mw));
   app.route('/', makeDeviceRoutes(deps, mw)); // OAuth2 设备授权(/api/device/*):AI/CLI 经浏览器登录换 token
   app.route('/', makeAdminRoutes(deps, mw));
-  if (opts.skillMd) mountSkillMd(app, deps, opts.skillMd);
+  if (opts.skillMd) mountSkillMd(app, opts.skillMd);
 }
 
 /** 单域模式:一个 app 全挂;评论 API 必须先于 serving 的通配路由注册。 */
