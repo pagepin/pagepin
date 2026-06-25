@@ -59,6 +59,8 @@ COPY --from=web /web/dist/ console/dist/
 # index.ts reads skills/pagepin/SKILL.md + references/api.md at runtime (serves /skill.md and
 # /references/api.md). The comments/marked/favicon assets are already inlined into the bundle.
 COPY skills/ skills/
+# libSQL auto-applies migrations at startup: migrate() reads ./drizzle relative to WORKDIR (/app).
+COPY drizzle/ drizzle/
 
 VOLUME /data
 EXPOSE 8000
