@@ -30,8 +30,14 @@ RUN pnpm install \
       && rm -rf /var/lib/apt/lists/* \
       && pnpm install)
 COPY tsconfig.json ./
+# gen:assets inlines static/* + skills/pagepin/* into src/generated/edge-assets.ts, which
+# serving.ts statically imports — so it must exist before tsup bundles index.ts (a clean
+# checkout has no generated file). Hence we COPY the sources it reads and run it first.
+COPY scripts/ scripts/
+COPY static/ static/
+COPY skills/ skills/
 COPY src/ src/
-RUN npx tsup src/index.ts --format esm --target node20
+RUN pnpm gen:assets && npx tsup src/index.ts --format esm --target node22
 
 # ------------------------------------------------------------ stage: runtime
 FROM node:22-slim AS runtime
@@ -50,8 +56,9 @@ RUN pnpm install --prod \
       && pnpm install --prod)
 COPY --from=build /app/dist/ dist/
 COPY --from=web /web/dist/ console/dist/
-COPY static/ static/
-COPY skill.md ./
+# index.ts reads skills/pagepin/SKILL.md + references/api.md at runtime (serves /skill.md and
+# /references/api.md). The comments/marked/favicon assets are already inlined into the bundle.
+COPY skills/ skills/
 
 VOLUME /data
 EXPOSE 8000
