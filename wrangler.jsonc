@@ -68,7 +68,7 @@
     // 启用:把 PAGEPIN_MAIL_PROVIDER 改 "resend",在 Resend 验证 pagepin.ai 发件域后
     //   `wrangler secret put PAGEPIN_RESEND_API_KEY` 放 key,再 cf:deploy;PAGEPIN_MAIL_FROM 须用该域地址。
     "PAGEPIN_MAIL_PROVIDER": "resend",
-    "PAGEPIN_MAIL_FROM": "pagepin <noreply@pagepin.ai>"
+    "PAGEPIN_MAIL_FROM": "pagepin <notifications@pagepin.ai>"
   }
 
   // secrets(wrangler secret put):PAGEPIN_SECRET、PAGEPIN_ADMIN_EMAIL、PAGEPIN_ADMIN_PASSWORD、PAGEPIN_OIDC_CLIENT_SECRET、
