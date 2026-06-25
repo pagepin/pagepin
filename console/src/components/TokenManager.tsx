@@ -6,11 +6,11 @@ import { copyText, formatRelative } from '../lib/format';
 import type { TokenItem } from '../types';
 import { toast, toastError } from './Toast';
 
-/** A ready-to-paste, one-line instruction for an agent.
- * Deliberately TOKEN-FREE: the agent gets the token from $PAGEPIN_TOKEN / ~/.config/pagepin/token,
- * or via browser device-login (see skill.md) — so the secret never lands in a chat transcript. */
+/** A ready-to-paste, one-line install command for the pagepin agent skill.
+ * Deliberately TOKEN-FREE: the agent gets the token via browser device-login (see skill.md),
+ * so the secret never lands in a chat transcript. */
 function aiPrompt(): string {
-  return `Read ${location.origin}/skill.md and follow it to deploy/update pages with pagepin.`;
+  return 'npx skills add pagepin/pagepin -g';
 }
 
 /** API token 列表 + 创建 + 复制/轮换/吊销 —— 不带任何外框，供 TokenDialog 与 Settings 复用。 */
@@ -92,13 +92,16 @@ export function TokenManager() {
     <div>
       <p className="text-xs leading-relaxed text-ink-400">
         Deploy credentials for agents &amp; CI, scoped to your sites. The{' '}
-        <Sparkles className="inline h-3 w-3 -translate-y-px text-tide-500" /> button copies a
-        ready-to-paste prompt linking the{' '}
+        <Sparkles className="inline h-3 w-3 -translate-y-px text-tide-500" /> button copies the
+        one-line{' '}
+        <a href="https://github.com/vercel-labs/skills" target="_blank" rel="noreferrer" className="text-tide-600 underline">
+          npx skills
+        </a>{' '}
+        install command (or read the{' '}
         <a href="/skill.md" target="_blank" rel="noreferrer" className="text-tide-600 underline">
           skill guide
         </a>
-        . The token stays out of it — the agent reads it from a local file or via browser login, so it
-        never lands in a chat.
+        ). The token stays out of it — the agent gets it via browser login, so it never lands in a chat.
       </p>
 
       <div className="mt-4 flex gap-2">
@@ -141,7 +144,7 @@ export function TokenManager() {
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
-                  title="Copy AI-ready prompt (token-free)"
+                  title="Copy install command (token-free)"
                   className="rounded-chip p-2 text-tide-500 hover:bg-tide-50 hover:text-tide-700"
                   onClick={() => copy(aiPrompt(), `${t.id}:prompt`)}
                 >

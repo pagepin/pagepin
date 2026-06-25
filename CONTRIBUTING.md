@@ -12,7 +12,7 @@ hosted pages. Contributions of all sizes are welcome.
 | `static/comments.js` | The review overlay injected into hosted pages (vanilla JS, no build step) |
 | `console/` | React + Vite admin console (its own `package.json`) |
 | `e2e/` | Playwright tests for the comments overlay — self-contained, stubs the API, no backend or DB needed (its own `package.json`) |
-| `skill.md` | Agent-facing API guide, served at `/skill.md` with placeholders rendered at runtime |
+| `skills/pagepin/SKILL.md` | Agent-facing skill (installable via `npx skills add pagepin/pagepin`); also served at `/skill.md` |
 
 ## Prerequisites
 

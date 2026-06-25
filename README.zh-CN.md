@@ -97,7 +97,7 @@ curl -sf "http://localhost:8000/api/sites/my-report/comments" \
 
 部署响应中包含可分享的 `url`。评论响应列出未解决的线程，带 `selector`、`kind`、`page_path` 和深链 `url` —— 处理它们、重新部署，搞定。
 
-完整的、随实例自适应的 API 参考托管在 **`/skill.md`** —— 让你的 agent 指向它（例如把引用它的片段贴进 `CLAUDE.md` / `AGENTS.md`），agent 即可自行驱动完整的「部署 → 评审 → 修改」闭环。
+面向 agent 的 skill 在 [`skills/pagepin`](skills/pagepin/SKILL.md) —— 用 `npx skills add pagepin/pagepin -g` 一行安装（见 [`install.md`](install.md)），agent 即可自行驱动完整的「部署 → 评审 → 修改」闭环。同一份指南也实时托管在 **`/skill.md`**，供没有本地 skill 目录的 agent 使用。
 
 ## 架构
 

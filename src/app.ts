@@ -63,6 +63,8 @@ function stripPort(host: string): string {
 function mountSkillMd(app: Hono<AppEnv>, deps: AppDeps, skillMd: string): void {
   const cfg = deps.config;
   const rendered = skillMd
+    // 去掉 SKILL.md 的 YAML frontmatter(仅本地 skill 安装时需要,HTTP 取用无意义)。
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
     .replaceAll('{{CONSOLE_BASE}}', consoleBase(cfg))
     .replaceAll('{{CONTENT_BASE}}', contentBase(cfg))
     .replaceAll('{{SITE_URL_EXAMPLE}}', siteUrl(cfg, 'your-handle', 'my-demo'));

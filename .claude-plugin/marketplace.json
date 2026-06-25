@@ -1,0 +1,16 @@
+{
+  "name": "pagepin",
+  "owner": { "name": "pagepin" },
+  "metadata": {
+    "description": "pagepin — static page hosting with pin-point review comments"
+  },
+  "plugins": [
+    {
+      "name": "pagepin",
+      "source": "./",
+      "description": "Deploy HTML/static sites to pagepin, get a shareable URL, and run the pin-point review-comment loop.",
+      "category": "deployment",
+      "keywords": ["deploy", "static-site", "hosting", "review", "comments"]
+    }
+  ]
+}

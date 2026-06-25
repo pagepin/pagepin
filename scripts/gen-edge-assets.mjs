@@ -1,4 +1,4 @@
-// 把 static/comments.js、static/marked.min.js、skill.md 内联成 TS 字符串常量,供 Workers 入口用。
+// 把 static/comments.js、static/marked.min.js、skills/pagepin/SKILL.md 内联成 TS 字符串常量,供 Workers 入口用。
 // Workers 无 fs;serving.ts 顶层 readFileSync 在 edge 会在 import 时崩 isolate。
 // 用法:pnpm gen:assets  →  写 src/generated/edge-assets.ts
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -17,7 +17,7 @@ const out =
   `/* eslint-disable */\n` +
   `export const COMMENTS_JS = ${lit(read('static/comments.js'))};\n` +
   `export const MARKED_JS = ${lit(read('static/marked.min.js'))};\n` +
-  `export const SKILL_MD = ${lit(read('skill.md'))};\n` +
+  `export const SKILL_MD = ${lit(read('skills/pagepin/SKILL.md'))};\n` +
   `export const FAVICON_ICO_B64 = ${JSON.stringify(readB64('static/favicon.ico'))};\n`;
 
 mkdirSync(join(root, 'src/generated'), { recursive: true });

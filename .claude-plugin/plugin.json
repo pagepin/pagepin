@@ -1,0 +1,8 @@
+{
+  "name": "pagepin",
+  "description": "Deploy static pages to pagepin and run the review-comment feedback loop",
+  "author": { "name": "pagepin" },
+  "homepage": "https://github.com/pagepin/pagepin",
+  "repository": "https://github.com/pagepin/pagepin",
+  "keywords": ["deploy", "static-site", "hosting", "review", "comments"]
+}

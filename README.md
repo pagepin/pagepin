@@ -101,7 +101,7 @@ curl -sf "http://localhost:8000/api/sites/my-report/comments" \
 
 The deploy response contains the shareable `url`. The comments response lists unresolved threads with `selector`, `kind`, `page_path` and a deep-link `url` — process them, redeploy, done.
 
-The complete, instance-aware API reference is served at **`/skill.md`** — point your agent at it (e.g. paste a snippet referencing it into `CLAUDE.md` / `AGENTS.md`), and the agent can drive the full deploy → review → fix loop on its own.
+The agent-facing skill lives in [`skills/pagepin`](skills/pagepin/SKILL.md) — install it once with `npx skills add pagepin/pagepin -g` (see [`install.md`](install.md)) and the agent can drive the full deploy → review → fix loop on its own. The same guide is served live at **`/skill.md`** for agents without a local skill directory.
 
 ## Architecture
 

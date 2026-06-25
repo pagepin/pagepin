@@ -54,9 +54,9 @@ async function main(): Promise<void> {
   // 续跑任何卡在中途的账号合并(崩溃恢复;无 moving 行即 no-op)。
   await resumeSweep({ config: cfg, db, storage }).catch((e) => console.error('reconcile resumeSweep 失败:', e));
 
-  // skill.md 与 console/dist 均相对仓库根定位;src/index.ts 与 dist/index.js
+  // skills/pagepin/SKILL.md 与 console/dist 均相对仓库根定位;src/index.ts 与 dist/index.js
   // 距仓库根同深(一层),'../' 在两种形态下都成立。
-  const skillMd = readFileSync(new URL('../skill.md', import.meta.url), 'utf-8');
+  const skillMd = readFileSync(new URL('../skills/pagepin/SKILL.md', import.meta.url), 'utf-8');
   const consoleDistUrl = new URL('../console/dist', import.meta.url);
   const consoleDist = existsSync(consoleDistUrl) ? fileURLToPath(consoleDistUrl) : undefined;
 
