@@ -240,6 +240,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  /** 管理员手动标记某用户邮箱已验证（救援:退信/死域/noreply 无法自助验证时）。 */
+  verifyUserEmail: (id: string) =>
+    request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/verify-email`, { method: 'POST' }),
+
   adminSettings: () => request<AdminSettings>('/api/admin/settings'),
 
   setRegistrationMode: (mode: RegistrationMode) =>

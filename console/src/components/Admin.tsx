@@ -189,6 +189,19 @@ export function Admin() {
       .finally(() => setBusy(null));
   };
 
+  // 救援:邮箱退信/死域等无法自助验证时,管理员手动标记已验证(否则被门槛挡住不能建站)。
+  const verifyUser = (u: AdminUser) => {
+    setBusy(u.id);
+    api
+      .verifyUserEmail(u.id)
+      .then(() => {
+        setUsers((prev) => (prev ?? []).map((x) => (x.id === u.id ? { ...x, email_verified: true } : x)));
+        toast('Email verified');
+      })
+      .catch((e) => toastError(e, 'Verify failed'))
+      .finally(() => setBusy(null));
+  };
+
   const toggleDisabled = async (u: AdminUser) => {
     if (!u.disabled) {
       const ok = await confirmDanger({
@@ -509,6 +522,17 @@ export function Admin() {
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     {busy === u.id && <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-400" />}
+                    {!u.email_verified && (
+                      <button
+                        type="button"
+                        className="rounded-chip px-2 py-1 text-xs text-tide-600 hover:bg-tide-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                        disabled={busy === u.id}
+                        title="Mark this email verified (rescue: bounced/dead address)"
+                        onClick={() => verifyUser(u)}
+                      >
+                        Verify email
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="rounded-chip px-2 py-1 text-xs text-ink-500 hover:bg-ink-100 hover:text-ink-700 disabled:opacity-40 disabled:hover:bg-transparent"

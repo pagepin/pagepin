@@ -73,6 +73,7 @@ function userOut(u: UserRow, usage: { count: number; bytes: number }) {
     email: u.email,
     display_name: u.displayName,
     is_admin: u.isAdmin,
+    email_verified: u.emailVerified,
     disabled: u.disabled,
     created_at: u.createdAt,
     last_login_at: u.lastLoginAt,

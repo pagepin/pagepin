@@ -119,6 +119,7 @@ export interface AdminUser {
   email: string | null;
   display_name: string | null;
   is_admin: boolean;
+  email_verified: boolean;
   disabled: boolean;
   created_at: string;
   last_login_at: string | null;
