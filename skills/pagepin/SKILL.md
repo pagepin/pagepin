@@ -126,5 +126,7 @@ of resolving it yourself.
 
 Full endpoint list, large-site (>~90MB) batched upload, version/rollback/delete,
 the exact comment-anchor fields, and limits / error codes are in
-[`references/api.md`](references/api.md) (installed alongside this skill).
+[`references/api.md`](references/api.md) — bundled with the installed skill, and
+also served over HTTP at the same relative path (resolve `references/api.md`
+against this guide's URL, e.g. `https://HOST/skill.md` → `https://HOST/references/api.md`).
 Authoritative quotas always come from `GET /api/me`.
