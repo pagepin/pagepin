@@ -67,7 +67,7 @@
     // 邮箱验证(Phase 3):none = 不发信、邮箱保持未验证(安全降级,不影响登录)。
     // 启用:把 PAGEPIN_MAIL_PROVIDER 改 "resend",在 Resend 验证 pagepin.ai 发件域后
     //   `wrangler secret put PAGEPIN_RESEND_API_KEY` 放 key,再 cf:deploy;PAGEPIN_MAIL_FROM 须用该域地址。
-    "PAGEPIN_MAIL_PROVIDER": "none",
+    "PAGEPIN_MAIL_PROVIDER": "resend",
     "PAGEPIN_MAIL_FROM": "pagepin <noreply@pagepin.ai>"
   }
 
