@@ -38,8 +38,9 @@ function liveSite(id: string, slug: string) {
 
 test('postgres end-to-end: migrations + dialect-switched tables + core semantics', { skip: !PG_URL }, async () => {
   process.env.PAGEPIN_DB_URL = PG_URL; // db/index.ts 据此在模块加载期选 pg 表
-  const { sites, users } = await import('../src/db/index.js');
+  const { sites, users, instanceSettings } = await import('../src/db/index.js');
   const { createPostgresDb } = await import('../src/db/postgres.js');
+  const { writtenCount, upsert } = await import('../src/db/ops.js');
   const { and, eq, isNull } = await import('drizzle-orm');
   const { tombstoneSlug } = await import('../src/util.js');
 
@@ -48,6 +49,7 @@ test('postgres end-to-end: migrations + dialect-switched tables + core semantics
   // 干净起点(可重复跑)
   await db.delete(sites);
   await db.delete(users);
+  await db.delete(instanceSettings);
 
   // 1) 建用户 + 站点(await 风格在真实 PG 上生效)
   await db.insert(users).values({ id: 'u1', handle: 'alice', createdAt: new Date().toISOString() });
@@ -111,4 +113,25 @@ test('postgres end-to-end: migrations + dialect-switched tables + core semantics
   // 7) boolean 列映射成 JS true
   const b = (await db.select({ ce: sites.commentsEnabled }).from(sites).where(eq(sites.id, 's3')))[0];
   assert.equal(b?.ce, true, 'boolean column maps to JS true on PG');
+
+  // 8) db/ops 在 PG 上的分支:writtenCount 走 .returning()、upsert 走 onConflictDoUpdate
+  const hit = await writtenCount(
+    db
+      .update(sites)
+      .set({ currentVersionId: 'v9', updatedAt: new Date().toISOString() })
+      .where(and(eq(sites.id, 's3'), eq(sites.currentVersionId, 'v1'))),
+  );
+  assert.equal(hit, 1, 'writtenCount reports 1 via .returning() when the guard holds on PG');
+  const miss = await writtenCount(
+    db
+      .update(sites)
+      .set({ currentVersionId: 'v8', updatedAt: new Date().toISOString() })
+      .where(and(eq(sites.id, 's3'), isNull(sites.currentVersionId))),
+  );
+  assert.equal(miss, 0, 'writtenCount reports 0 when the guard fails on PG');
+
+  await upsert(db.insert(instanceSettings).values({ key: 'k', value: 'a' }), instanceSettings.key, { value: 'a' });
+  await upsert(db.insert(instanceSettings).values({ key: 'k', value: 'b' }), instanceSettings.key, { value: 'b' });
+  const setting = (await db.select().from(instanceSettings).where(eq(instanceSettings.key, 'k')))[0];
+  assert.equal(setting?.value, 'b', 'upsert (ON CONFLICT) updates the value on PG');
 });

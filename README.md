@@ -68,7 +68,7 @@ All configuration is via environment variables. The most common settings are bel
 |---|---|---|
 | `PAGEPIN_PORT` | `8000` | HTTP listen port. |
 | `PAGEPIN_DATA_DIR` | `./data` | Data root: SQLite DB, generated secret, and `fs` storage. |
-| `PAGEPIN_DB_URL` | — | libSQL connection. Unset → local SQLite file (zero-config). Set `libsql://…` (+ `PAGEPIN_DB_AUTH_TOKEN`) for managed libSQL / Turso. |
+| `PAGEPIN_DB_URL` | — | DB connection (self-hosted). Unset → local SQLite file. Scheme picks the driver: `libsql://`/`file:` (SQLite/Turso, + `PAGEPIN_DB_AUTH_TOKEN`), `postgres://`, or `mysql://` (8.0+). |
 | `PAGEPIN_BASE_URL` | `http://localhost:8000` | Public URL of the instance (single-domain mode). |
 | `PAGEPIN_ADMIN_EMAIL` / `…_PASSWORD` | — | Set both to upsert an admin at startup; otherwise the first signup becomes admin. |
 | `PAGEPIN_AUTH_MODE` | `password` | `password`, `oidc`, or `none` (dev only: auto-login as an admin). |

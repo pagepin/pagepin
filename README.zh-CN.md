@@ -68,7 +68,7 @@ Claude Code 也可作为插件安装：
 |---|---|---|
 | `PAGEPIN_PORT` | `8000` | HTTP 监听端口。 |
 | `PAGEPIN_DATA_DIR` | `./data` | 数据根目录：SQLite 数据库、生成的 secret 以及 `fs` 存储。 |
-| `PAGEPIN_DB_URL` | — | libSQL 连接。未设置 → 本地 SQLite 文件（开箱即用）。设为 `libsql://…`（配 `PAGEPIN_DB_AUTH_TOKEN`）可接 Turso 等托管 libSQL。 |
+| `PAGEPIN_DB_URL` | — | 数据库连接（自托管）。未设置 → 本地 SQLite 文件。按 scheme 选驱动：`libsql://`/`file:`（SQLite/Turso，配 `PAGEPIN_DB_AUTH_TOKEN`）、`postgres://`、`mysql://`（8.0+）。 |
 | `PAGEPIN_BASE_URL` | `http://localhost:8000` | 实例的公开 URL（单域模式）。 |
 | `PAGEPIN_ADMIN_EMAIL` / `…_PASSWORD` | — | 两者都设则启动时 upsert 一个管理员；否则首个注册者成为管理员。 |
 | `PAGEPIN_AUTH_MODE` | `password` | `password`、`oidc` 或 `none`（仅开发：自动以管理员身份登录）。 |
