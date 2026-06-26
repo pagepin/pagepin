@@ -25,7 +25,8 @@
     "cf:deploy": "pnpm gen:assets && wrangler d1 migrations apply pagepin --remote && wrangler deploy",
     "test": "pnpm test:unit && pnpm test:e2e",
     "test:unit": "node --import tsx --test test/*.test.ts",
-    "test:e2e": "pnpm -C e2e test"
+    "test:e2e": "pnpm -C e2e test",
+    "test:pg": "node --import tsx --test --test-force-exit test/pg-integration.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
