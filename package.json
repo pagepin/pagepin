@@ -1,6 +1,6 @@
 {
   "name": "pagepin",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Self-hosted static page hosting with built-in pin-point review comments and an AI feedback loop.",
   "type": "module",
   "license": "Apache-2.0",

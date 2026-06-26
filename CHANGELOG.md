@@ -4,6 +4,31 @@ All notable changes to pagepin are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-26
+
+### Added
+
+- **PostgreSQL and MySQL support** for self-hosted Node deployments, alongside the
+  default SQLite/libSQL. The driver is inferred from `PAGEPIN_DB_URL`'s scheme
+  (`postgres://`, `mysql://`, or `libsql://`/`file:`), overridable with
+  `PAGEPIN_DB_DRIVER`. One schema definition generates the DDL for all three
+  dialects (a cross-dialect column factory); per-dialect drizzle migrations live
+  under `drizzle/pg` and `drizzle/mysql`. The drivers (`postgres`, `mysql2`) are
+  optional dependencies, lazy-loaded only when selected. The published Docker image
+  runs on all three out of the box (verified end-to-end). Workers (D1) are unaffected.
+- Gated Docker integration tests: `pnpm test:pg` / `pnpm test:mysql`.
+
+### Changed
+
+- The query layer is now dialect-neutral: SQLite-only `.get()/.all()/.run()`
+  terminals were replaced with the `await`/`[0]` form that works on all three
+  engines. MySQL's lack of `RETURNING` and its different upsert syntax are handled
+  in one place (`db/ops.ts`: `writtenCount` via affectedRows, `upsert` via
+  ON DUPLICATE KEY UPDATE).
+- Soft-delete now renames a site's slug (vacating the live namespace), so the four
+  former partial unique indexes become plain unique indexes that all three dialects
+  support — same slug-reuse behavior, without `WHERE`-filtered indexes.
+
 ## [0.2.2] — 2026-06-26
 
 ### Added
@@ -78,6 +103,7 @@ and the agent deploy → review → fix loop. One Hono app on two runtimes (Node
 Cloudflare Workers) by dependency injection; pluggable storage (FS / S3 / R2) and
 auth (password / OIDC / none); atomic versioned deploys with rollback.
 
+[0.3.0]: https://github.com/pagepin/pagepin/releases/tag/v0.3.0
 [0.2.2]: https://github.com/pagepin/pagepin/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pagepin/pagepin/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pagepin/pagepin/releases/tag/v0.2.0
