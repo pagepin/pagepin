@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a problem with pagepin
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! Please **do not** report security vulnerabilities
+        here — see [SECURITY.md](https://github.com/pagepin/pagepin/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Deploy a site with ...
+        2. Open ...
+        3. See ...
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Deploy target
+      options:
+        - Self-hosted (Node)
+        - Self-hosted (Docker)
+        - Cloudflare Workers
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "0.3.0 or a git SHA"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / screenshots
+      render: shell
+    validations:
+      required: false
