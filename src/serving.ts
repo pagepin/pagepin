@@ -479,12 +479,12 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     cur.files = listed; // 本次响应即带导航,落库失败也不影响
     // 尽力而为回填(D1 无交互事务):重读 → 该版本仍缺清单才写回;不动 updatedAt(元数据补写非内容更新)。
     try {
-      const fresh = await db.select().from(sites).where(eq(sites.id, site.id)).get();
+      const fresh = (await db.select().from(sites).where(eq(sites.id, site.id)))[0];
       if (fresh) {
         const v = fresh.versions.find((x) => x.id === cur.id);
         if (v && !v.files) {
           v.files = listed;
-          await db.update(sites).set({ versions: fresh.versions }).where(eq(sites.id, site.id)).run();
+          await db.update(sites).set({ versions: fresh.versions }).where(eq(sites.id, site.id));
         }
       }
     } catch {
@@ -514,11 +514,11 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
   const serve = async (c: Context<AppEnv>): Promise<Response> => {
     const { handle, slug, rest } = splitSitePath(c);
     if (RESERVED_SEGMENTS.has(handle)) return notFound(c);
-    const site = await db
+    const site = (await db
       .select()
       .from(sites)
       .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
-      .get();
+      )[0];
     if (!site || site.currentVersionId === null) return notFound(c);
     // 管理员下架:先于任何内容/会话判定,对所有访问者(站长/匿名公开都含)一律 451,且不读存储
     if (site.suspendedAt !== null) {
@@ -532,11 +532,11 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     // 查库判活:会话用户须存在且未被禁用,否则按未登录处理(私有页不放行、不注入评论层)
     let viewerActive = false;
     if (claims !== null) {
-      const u = await db
+      const u = (await db
         .select({ disabled: users.disabled, sessionEpoch: users.sessionEpoch })
         .from(users)
         .where(eq(users.id, claims.sub))
-        .get();
+        )[0];
       viewerActive = u !== undefined && !u.disabled && (claims.epo ?? 0) === u.sessionEpoch;
     }
     if (!pub && !viewerActive) {
@@ -547,7 +547,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       if (site.visibility === 'public' && site.publicExpiresAt) {
         return c.html(linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now), loginHref), 200, gateHeaders);
       }
-      const owner = await db.select().from(users).where(eq(users.id, site.ownerId)).get();
+      const owner = (await db.select().from(users).where(eq(users.id, site.ownerId)))[0];
       const ownerName = owner?.displayName || `@${handle}`;
       return c.html(loginWallHtml(slug, ownerName, loginHref), 200, gateHeaders);
     }

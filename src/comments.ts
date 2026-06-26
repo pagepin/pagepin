@@ -166,7 +166,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   async function activeViewer(c: Context<AppEnv>): Promise<{ claims: SessionClaims; user: UserRow }> {
     const claims = await readSession(c, cfg, plane);
     if (claims === null) throw new ApiError(401, '未登录');
-    const user = await db.select().from(users).where(eq(users.id, claims.sub)).get();
+    const user = (await db.select().from(users).where(eq(users.id, claims.sub)))[0];
     if (!user) throw new ApiError(401, '用户不存在，请重新登录');
     if (user.disabled) throw new ApiError(403, '账号已被禁用');
     return { claims, user };
@@ -181,22 +181,22 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   }
 
   async function commentableSite(handle: string, slug: string): Promise<SiteRow> {
-    const site = await db
+    const site = (await db
       .select()
       .from(sites)
       .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
-      .get();
+      )[0];
     if (!site) throw new ApiError(404, '站点不存在');
     if (!site.commentsEnabled) throw new ApiError(403, '该站点未开启评论');
     return site;
   }
 
   async function getThread(threadId: string): Promise<CommentThreadRow> {
-    const thread = await db
+    const thread = (await db
       .select()
       .from(commentThreads)
       .where(eq(commentThreads.id, threadId))
-      .get();
+      )[0];
     if (!thread || thread.deletedAt !== null) throw new ApiError(404, '评论不存在');
     return thread;
   }
@@ -237,8 +237,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
             isNull(commentThreads.deletedAt),
           ),
         )
-        .orderBy(asc(commentThreads.createdAt))
-        .all();
+        .orderBy(asc(commentThreads.createdAt));
       return c.json({ threads: threads.map(threadOut) });
     }),
   );
@@ -285,7 +284,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         updatedAt: now,
         deletedAt: null,
       };
-      await db.insert(commentThreads).values(row).run();
+      await db.insert(commentThreads).values(row);
       return c.json(threadOut(row));
     }),
   );
@@ -311,8 +310,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       };
       await db.update(commentThreads)
         .set({ comments: [...thread.comments, reply], updatedAt: nowIso() })
-        .where(eq(commentThreads.id, thread.id))
-        .run();
+        .where(eq(commentThreads.id, thread.id));
       return c.json(commentOut(reply));
     }),
   );
@@ -341,7 +339,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       // 解决/重开/改 kind 放开给所有登录成员(协作场景,留痕在回复里)
       await viewer(c);
       const thread = await getThread(c.req.param('tid') ?? '');
-      await db.update(commentThreads).set(set).where(eq(commentThreads.id, thread.id)).run();
+      await db.update(commentThreads).set(set).where(eq(commentThreads.id, thread.id));
       const updated: CommentThreadRow = {
         ...thread,
         resolved: hasResolved ? set.resolved! : thread.resolved,
@@ -357,7 +355,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     wrap(async (c) => {
       const user = await viewerUser(c);
       const thread = await getThread(c.req.param('tid') ?? '');
-      const site = await db.select().from(sites).where(eq(sites.id, thread.siteId)).get();
+      const site = (await db.select().from(sites).where(eq(sites.id, thread.siteId)))[0];
       const isAuthor = thread.comments[0]?.author_sub === user.id;
       const isSiteOwner = site !== undefined && site.ownerId === user.id;
       if (!isAuthor && !isSiteOwner) {
@@ -366,8 +364,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       const now = nowIso();
       await db.update(commentThreads)
         .set({ deletedAt: now, updatedAt: now })
-        .where(eq(commentThreads.id, thread.id))
-        .run();
+        .where(eq(commentThreads.id, thread.id));
       return c.json({ ok: true });
     }),
   );

@@ -58,7 +58,7 @@ export async function mintToken(
     expiresAt,
     revokedAt: null,
   };
-  await db.insert(apiTokens).values(rec).run();
+  await db.insert(apiTokens).values(rec);
   return rec;
 }
 
@@ -96,7 +96,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
 
   /** 按 id 取本人未吊销的 token;不存在/他人/已吊销一律视为不存在。 */
   const ownedToken = async (tokenId: string, user: UserRow): Promise<ApiTokenRow | null> => {
-    const rec = await db.select().from(apiTokens).where(eq(apiTokens.id, tokenId)).get();
+    const rec = (await db.select().from(apiTokens).where(eq(apiTokens.id, tokenId)))[0];
     if (!rec || rec.userId !== user.id || rec.revokedAt !== null) return null;
     return rec;
   };
@@ -107,8 +107,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       .select()
       .from(apiTokens)
       .where(activeOf(user.id))
-      .orderBy(desc(apiTokens.createdAt))
-      .all();
+      .orderBy(desc(apiTokens.createdAt));
     return c.json({ tokens: toks.map(out) });
   });
 
@@ -116,7 +115,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     const user = c.get('user');
     const name = (await readNameField(c)).trim();
     if (name.length < 1 || name.length > 64) return c.json({ detail: '名称需 1-64 字符' }, 422);
-    const row = await db.select({ n: count() }).from(apiTokens).where(activeOf(user.id)).get();
+    const row = (await db.select({ n: count() }).from(apiTokens).where(activeOf(user.id)))[0];
     if ((row?.n ?? 0) >= MAX_TOKENS_PER_USER) {
       return c.json({ detail: `token 数量已达上限（${MAX_TOKENS_PER_USER}），请先吊销不用的` }, 409);
     }
@@ -134,7 +133,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     const raw = newRawToken();
     const tokenHash = await sha256Hex(raw);
     const prefix = raw.slice(0, 15);
-    await db.update(apiTokens).set({ token: raw, tokenHash, prefix }).where(eq(apiTokens.id, rec.id)).run();
+    await db.update(apiTokens).set({ token: raw, tokenHash, prefix }).where(eq(apiTokens.id, rec.id));
     console.log(`token rotated handle=${user.handle} ${rec.prefix} -> ${prefix}`);
     return c.json(out({ ...rec, token: raw, tokenHash, prefix }));
   });
@@ -143,7 +142,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     const user = c.get('user');
     const rec = await ownedToken(c.req.param('tokenId'), user);
     if (!rec) return c.json({ detail: 'token 不存在' }, 404);
-    await db.update(apiTokens).set({ revokedAt: nowIso() }).where(eq(apiTokens.id, rec.id)).run();
+    await db.update(apiTokens).set({ revokedAt: nowIso() }).where(eq(apiTokens.id, rec.id));
     console.log(`token revoked handle=${user.handle} prefix=${rec.prefix}`);
     return c.json({ ok: true });
   });

@@ -66,7 +66,7 @@ function clientIp(c: Context<AppEnv>): string {
 }
 
 async function unresolvedCount(db: Db, siteId: string): Promise<number> {
-  const row = await db
+  const row = (await db
     .select({ n: count() })
     .from(commentThreads)
     .where(
@@ -76,18 +76,18 @@ async function unresolvedCount(db: Db, siteId: string): Promise<number> {
         isNull(commentThreads.deletedAt),
       ),
     )
-    .get();
+    )[0];
   return row?.n ?? 0;
 }
 
 /** 本人名下未删站点;不存在返回 null(调用方回 404 '站点不存在')。 */
 async function ownedSite(db: Db, userId: string, slug: string): Promise<SiteRow | null> {
   return (
-    (await db
+    ((await db
       .select()
       .from(sites)
       .where(and(eq(sites.ownerId, userId), eq(sites.slug, slug), isNull(sites.deletedAt)))
-      .get()) ?? null
+      )[0]) ?? null
   );
 }
 
@@ -185,8 +185,7 @@ async function quotaCheck(
   const mySites = await db
     .select({ slug: sites.slug, versions: sites.versions })
     .from(sites)
-    .where(and(eq(sites.ownerId, user.id), isNull(sites.deletedAt)))
-    .all();
+    .where(and(eq(sites.ownerId, user.id), isNull(sites.deletedAt)));
   let otherBytes = 0;
   let thisBytes: number[] = [];
   for (const s of mySites) {
@@ -239,7 +238,7 @@ async function getOrCreateSite(
     suspendedAt: null,
     suspendedReason: null,
   };
-  await db.insert(sites).values(site).run();
+  await db.insert(sites).values(site);
   return site;
 }
 
@@ -293,7 +292,7 @@ async function publishVersion(
   // 乐观并发 + 版本 GC:新版始终是末元素 → slice(-N) 必含它(current 绝不指向被裁版本)
   let removed: SiteVersion[] = [];
   for (let attempt = 0; attempt < 5; attempt++) {
-    const fresh = await db.select().from(sites).where(eq(sites.id, p.siteId)).get();
+    const fresh = (await db.select().from(sites).where(eq(sites.id, p.siteId)))[0];
     if (!fresh) break;
     const allVersions = [...fresh.versions, version];
     const kept = cfg.keepVersions > 0 ? allVersions.slice(-cfg.keepVersions) : allVersions;
@@ -308,12 +307,12 @@ async function publishVersion(
       fresh.currentVersionId === null
         ? isNull(sites.currentVersionId)
         : eq(sites.currentVersionId, fresh.currentVersionId);
-    const wrote = await db
+    const wrote = (await db
       .update(sites)
       .set(set)
       .where(and(eq(sites.id, p.siteId), guard))
       .returning({ id: sites.id })
-      .get();
+      )[0];
     if (wrote) {
       removed = trimmed;
       break;
@@ -338,7 +337,7 @@ async function ownedSession(
   slug: string,
   deployId: string,
 ): Promise<DeploySessionRow | null> {
-  const s = await db.select().from(deploySessions).where(eq(deploySessions.id, deployId)).get();
+  const s = (await db.select().from(deploySessions).where(eq(deploySessions.id, deployId)))[0];
   if (!s || s.ownerId !== userId || s.slug !== slug) return null;
   return s;
 }
@@ -348,8 +347,7 @@ async function sweepExpiredSessions(db: Db, storage: Storage, ownerId: string): 
   const stale = await db
     .select()
     .from(deploySessions)
-    .where(and(eq(deploySessions.ownerId, ownerId), lt(deploySessions.expiresAt, nowIso())))
-    .all();
+    .where(and(eq(deploySessions.ownerId, ownerId), lt(deploySessions.expiresAt, nowIso())));
   for (const s of stale) {
     if (storage.deletePrefix) {
       try {
@@ -358,7 +356,7 @@ async function sweepExpiredSessions(db: Db, storage: Storage, ownerId: string): 
         console.warn(`草稿回收失败 ${s.storagePrefix}:`, e);
       }
     }
-    await db.delete(deploySessions).where(eq(deploySessions.id, s.id)).run();
+    await db.delete(deploySessions).where(eq(deploySessions.id, s.id));
   }
 }
 
@@ -399,8 +397,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       .select()
       .from(sites)
       .where(and(eq(sites.ownerId, user.id), isNull(sites.deletedAt)))
-      .orderBy(desc(sites.updatedAt))
-      .all();
+      .orderBy(desc(sites.updatedAt));
     const counts = new Map<string, number>();
     if (rows.length > 0) {
       const grouped = await db
@@ -416,8 +413,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
             isNull(commentThreads.deletedAt),
           ),
         )
-        .groupBy(commentThreads.siteId)
-        .all();
+        .groupBy(commentThreads.siteId);
       for (const g of grouped) counts.set(g.siteId, g.n);
     }
     return c.json({ sites: rows.map((x) => siteOut(deps, x, counts.get(x.id) ?? 0)) });
@@ -508,7 +504,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       updatedAt: now,
       expiresAt: new Date(Date.now() + cfg.deployTtlH * 3600 * 1000).toISOString(),
     };
-    await db.insert(deploySessions).values(session).run();
+    await db.insert(deploySessions).values(session);
     return c.json({
       deploy_id: vid,
       storage_prefix: session.storagePrefix,
@@ -548,8 +544,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     await db
       .update(deploySessions)
       .set({ manifest: merged, updatedAt: nowIso() })
-      .where(eq(deploySessions.id, session.id))
-      .run();
+      .where(eq(deploySessions.id, session.id));
     return c.json({ file_count: merged.length, total_bytes: mergedBytes });
   });
 
@@ -583,7 +578,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       uploadedBy: user.id,
       title,
     });
-    await db.delete(deploySessions).where(eq(deploySessions.id, session.id)).run();
+    await db.delete(deploySessions).where(eq(deploySessions.id, session.id));
     console.log(
       `deploy(chunked) handle=${user.handle} slug=${session.slug} vid=${session.id} ` +
         `files=${session.manifest.length} bytes=${totalBytes} user=${user.id} via=${c.get('authVia')} ` +
@@ -606,7 +601,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         console.warn(`草稿回收失败 ${session.storagePrefix}:`, e);
       }
     }
-    await db.delete(deploySessions).where(eq(deploySessions.id, session.id)).run();
+    await db.delete(deploySessions).where(eq(deploySessions.id, session.id));
     return c.json({ ok: true });
   });
 
@@ -655,7 +650,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       set.commentsEnabled = b;
     }
     set.updatedAt = nowIso();
-    await db.update(sites).set(set).where(eq(sites.id, site.id)).run();
+    await db.update(sites).set(set).where(eq(sites.id, site.id));
 
     const updated = await ownedSite(db, user.id, slug);
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
@@ -672,8 +667,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     await db
       .update(sites)
       .set({ deletedAt: now, updatedAt: now, slug: tombstoneSlug(site.slug, site.id) })
-      .where(eq(sites.id, site.id))
-      .run();
+      .where(eq(sites.id, site.id));
     // 软删后回收存储(尽力而为;同名 slug 复用是新建,不与已删行的 storage 冲突)
     await purgeSiteStorage(storage, site.ownerId, site.slug);
     return c.json({ ok: true });
@@ -692,8 +686,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       .select()
       .from(commentThreads)
       .where(and(...conds))
-      .orderBy(asc(commentThreads.createdAt))
-      .all();
+      .orderBy(asc(commentThreads.createdAt));
 
     const base = siteUrl(cfg, site.ownerHandle, site.slug);
     return c.json({
@@ -727,7 +720,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const site = await ownedSite(db, userId, slug);
     if (!site) return { site: null, thread: null };
     const thread =
-      (await db.select().from(commentThreads).where(eq(commentThreads.id, threadId)).get()) ?? null;
+      ((await db.select().from(commentThreads).where(eq(commentThreads.id, threadId)))[0]) ?? null;
     if (!thread || thread.deletedAt !== null || thread.siteId !== site.id) {
       return { site, thread: null };
     }
@@ -747,8 +740,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     await db
       .update(commentThreads)
       .set({ resolved: body.resolved, updatedAt: nowIso() })
-      .where(eq(commentThreads.id, thread.id))
-      .run();
+      .where(eq(commentThreads.id, thread.id));
     return c.json({ id: thread.id, resolved: body.resolved });
   });
 
@@ -775,18 +767,18 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     // 乐观并发(D1 无交互事务):重读 → 追加 → 条件 UPDATE 守 updated_at 未变 → RETURNING 检测命中,
     // 未命中说明有并发回复抢先,重读重试,原子追加防覆盖。
     for (let attempt = 0; attempt < 5; attempt++) {
-      const fresh = await db
+      const fresh = (await db
         .select()
         .from(commentThreads)
         .where(eq(commentThreads.id, thread.id))
-        .get();
+        )[0];
       if (!fresh) break;
-      const wrote = await db
+      const wrote = (await db
         .update(commentThreads)
         .set({ comments: [...fresh.comments, reply], updatedAt: nowIso() })
         .where(and(eq(commentThreads.id, thread.id), eq(commentThreads.updatedAt, fresh.updatedAt)))
         .returning({ id: commentThreads.id })
-        .get();
+        )[0];
       if (wrote) break;
     }
     return c.json({
@@ -830,8 +822,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     await db
       .update(sites)
       .set({ currentVersionId: versionId, updatedAt: nowIso() })
-      .where(eq(sites.id, site.id))
-      .run();
+      .where(eq(sites.id, site.id));
     const updated = await ownedSite(db, user.id, c.req.param('slug'));
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
     return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));

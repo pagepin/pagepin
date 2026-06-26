@@ -44,7 +44,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   const handleTaken = async (handle: string): Promise<boolean> =>
-    (await db.select({ id: users.id }).from(users).where(eq(users.handle, handle)).get()) !==
+    ((await db.select({ id: users.id }).from(users).where(eq(users.handle, handle)))[0]) !==
     undefined;
 
   const limitsJson = () => ({
@@ -91,7 +91,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       displayName = t || null;
     } else return c.json({ detail: 'display_name 必须是字符串或 null' }, 422);
     const user = c.get('user');
-    await db.update(users).set({ displayName }).where(eq(users.id, user.id)).run();
+    await db.update(users).set({ displayName }).where(eq(users.id, user.id));
     return c.json({ display_name: displayName });
   });
 
@@ -116,14 +116,14 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       return c.json({ detail: '当前密码不正确' }, 403);
     }
     const passwordHash = await hashPassword(next);
-    await db.update(users).set({ passwordHash }).where(eq(users.id, user.id)).run();
+    await db.update(users).set({ passwordHash }).where(eq(users.id, user.id));
     return c.json({ ok: true });
   });
 
   /** 已连接的登录身份(password / google / github)。Account & Settings 的「连接账号」区。 */
   app.get('/api/me/identities', mw.currentUser, async (c) => {
     const user = c.get('user');
-    const rows = await db.select().from(identities).where(eq(identities.userId, user.id)).all();
+    const rows = await db.select().from(identities).where(eq(identities.userId, user.id));
     return c.json({
       identities: rows
         .map((r) => ({
@@ -144,16 +144,16 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   app.delete('/api/me/identities/:id', mw.cookieMutatingUser, async (c) => {
     const user = c.get('user');
     const id = c.req.param('id');
-    const rows = await db.select().from(identities).where(eq(identities.userId, user.id)).all();
+    const rows = await db.select().from(identities).where(eq(identities.userId, user.id));
     const target = rows.find((r) => r.id === id);
     if (!target) return c.json({ detail: '身份不存在' }, 404);
     // 邮箱密码是账号的主登录方式 / 锚点,不可断开(断了没有重设入口,且 canonicalEmail 挂在它上)。
     // 只允许断开社交方式。
     if (target.provider === 'password') return c.json({ detail: '邮箱登录方式不可断开' }, 409);
     if (rows.length <= 1) return c.json({ detail: '不能断开最后一个登录方式' }, 409);
-    await db.delete(identities).where(and(eq(identities.id, id), eq(identities.userId, user.id))).run();
+    await db.delete(identities).where(and(eq(identities.id, id), eq(identities.userId, user.id)));
     const newEpoch = user.sessionEpoch + 1; // 使其它会话(旧 epo)失效
-    await db.update(users).set({ sessionEpoch: newEpoch }).where(eq(users.id, user.id)).run();
+    await db.update(users).set({ sessionEpoch: newEpoch }).where(eq(users.id, user.id));
     await setLoginCookies(c, cfg, 'session', user.id, user.handle, newEpoch); // 当前会话重发新 epo
     return c.json({ ok: true });
   });
@@ -183,8 +183,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     const rows = await db
       .select()
       .from(sites)
-      .where(and(eq(sites.ownerId, user.id), isNull(sites.deletedAt)))
-      .all();
+      .where(and(eq(sites.ownerId, user.id), isNull(sites.deletedAt)));
     let storageBytes = 0;
     let files = 0;
     let versions = 0;
@@ -198,14 +197,14 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       return { slug: s.slug, total_bytes: bytes, file_count: fc };
     });
     perSite.sort((a, b) => b.total_bytes - a.total_bytes);
-    const tok = await db
+    const tok = (await db
       .select({ n: count() })
       .from(apiTokens)
       .where(and(eq(apiTokens.userId, user.id), isNull(apiTokens.revokedAt)))
-      .get();
+      )[0];
     let unresolved = 0;
     if (rows.length > 0) {
-      const r = await db
+      const r = (await db
         .select({ n: count() })
         .from(commentThreads)
         .where(
@@ -218,7 +217,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
             isNull(commentThreads.deletedAt),
           ),
         )
-        .get();
+        )[0];
       unresolved = r?.n ?? 0;
     }
     return c.json({
@@ -244,7 +243,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       return c.json({ detail: 'handle 需 2-32 位小写字母/数字/中划线、字母开头，且不在保留字内' }, 422);
     }
     if (await handleTaken(handle)) return c.json({ detail: 'handle 已被占用' }, 409);
-    await db.update(users).set({ handle }).where(eq(users.id, user.id)).run();
+    await db.update(users).set({ handle }).where(eq(users.id, user.id));
     // handle 进了会话 JWT —— 旧 Cookie 里 hdl=null,刷新一份
     await setLoginCookies(c, cfg, 'session', user.id, handle, user.sessionEpoch);
     return c.json({ handle });

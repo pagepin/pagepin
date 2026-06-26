@@ -60,16 +60,16 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
 
   // 发起授权:匿名。返回展示给人的短码与浏览器确认地址。
   app.post('/api/device/code', async (c) => {
-    await db.delete(deviceAuths).where(lt(deviceAuths.expiresAt, nowIso())).run(); // 顺手清过期,避免无界增长
+    await db.delete(deviceAuths).where(lt(deviceAuths.expiresAt, nowIso())); // 顺手清过期,避免无界增长
 
     const deviceCode = newDeviceCode();
     let userCode = newUserCode();
     for (let i = 0; i < 5; i++) {
-      const dup = await db
+      const dup = (await db
         .select({ id: deviceAuths.id })
         .from(deviceAuths)
         .where(eq(deviceAuths.userCode, userCode))
-        .get();
+        )[0];
       if (!dup) break;
       userCode = newUserCode();
     }
@@ -88,8 +88,7 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
         createdAt: nowIso(),
         expiresAt,
         approvedAt: null,
-      })
-      .run();
+      });
 
     const base = consoleBase(cfg);
     const verificationUri = `${base}/activate`;
@@ -109,19 +108,19 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     const deviceCode = typeof body?.device_code === 'string' ? body.device_code : '';
     if (!deviceCode) return c.json({ detail: '缺少 device_code' }, 422);
 
-    const rec = await db.select().from(deviceAuths).where(eq(deviceAuths.deviceCode, deviceCode)).get();
+    const rec = (await db.select().from(deviceAuths).where(eq(deviceAuths.deviceCode, deviceCode)))[0];
     if (!rec) return c.json({ status: 'expired' }); // 未知/已清理:按过期处理,发起方停止轮询
     if (Date.parse(rec.expiresAt) <= Date.now()) {
-      await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id)).run();
+      await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id));
       return c.json({ status: 'expired' });
     }
     if (rec.status === 'denied') {
-      await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id)).run();
+      await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id));
       return c.json({ status: 'denied' });
     }
     if (rec.status === 'approved' && rec.token) {
       const token = rec.token;
-      await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id)).run(); // 一次性交付:取走即删
+      await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id)); // 一次性交付:取走即删
       return c.json({ status: 'approved', token });
     }
     return c.json({ status: 'pending' });
@@ -134,9 +133,9 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     const userCode = typeof body?.user_code === 'string' ? body.user_code.trim().toUpperCase() : '';
     if (!userCode) return c.json({ detail: '缺少 user_code' }, 422);
 
-    const rec = await db.select().from(deviceAuths).where(eq(deviceAuths.userCode, userCode)).get();
+    const rec = (await db.select().from(deviceAuths).where(eq(deviceAuths.userCode, userCode)))[0];
     if (!rec || Date.parse(rec.expiresAt) <= Date.now()) {
-      if (rec) await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id)).run();
+      if (rec) await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id));
       return c.json({ detail: '设备码不存在或已过期，请在工具里重新发起登录' }, 404);
     }
     if (rec.status !== 'pending') return c.json({ detail: '该设备码已被处理' }, 409);
@@ -150,8 +149,7 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     await db
       .update(deviceAuths)
       .set({ status: 'approved', userId: user.id, token: minted.token, tokenName: name, approvedAt: nowIso() })
-      .where(eq(deviceAuths.id, rec.id))
-      .run();
+      .where(eq(deviceAuths.id, rec.id));
     console.log(`device approved handle=${user.handle} user_code=${userCode} prefix=${minted.prefix}`);
     return c.json({ ok: true, token_name: name });
   });
@@ -161,9 +159,9 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     const body = await readJson<{ user_code?: unknown }>(c);
     const userCode = typeof body?.user_code === 'string' ? body.user_code.trim().toUpperCase() : '';
     if (!userCode) return c.json({ detail: '缺少 user_code' }, 422);
-    const rec = await db.select().from(deviceAuths).where(eq(deviceAuths.userCode, userCode)).get();
+    const rec = (await db.select().from(deviceAuths).where(eq(deviceAuths.userCode, userCode)))[0];
     if (rec && rec.status === 'pending') {
-      await db.update(deviceAuths).set({ status: 'denied' }).where(eq(deviceAuths.id, rec.id)).run();
+      await db.update(deviceAuths).set({ status: 'denied' }).where(eq(deviceAuths.id, rec.id));
     }
     return c.json({ ok: true });
   });

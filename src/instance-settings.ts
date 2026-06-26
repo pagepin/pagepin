@@ -17,20 +17,22 @@ export function isRegistrationMode(v: unknown): v is RegistrationMode {
 }
 
 export async function getSetting(deps: AppDeps, key: string): Promise<string | null> {
-  const row = await deps.db
+  // await 风格(非 .get()):三方言通用 —— SQLite/PG/MySQL 的查询都是 thenable,await 取所有行、[0] 取首行。
+  // 这是 Repo 抽象下统一的数据访问写法(运行时方言切换见 db/index.ts)。
+  const rows = await deps.db
     .select({ value: instanceSettings.value })
     .from(instanceSettings)
-    .where(eq(instanceSettings.key, key))
-    .get();
-  return row?.value ?? null;
+    .where(eq(instanceSettings.key, key));
+  return rows[0]?.value ?? null;
 }
 
 export async function setSetting(deps: AppDeps, key: string, value: string): Promise<void> {
+  // await 风格(非 .run())。注:onConflictDoUpdate 适用 SQLite/PG;MySQL 阶段此处改 onDuplicateKeyUpdate
+  // —— 这类「方言差异方法」收进 repo 后,集中在单个方法里按方言处理,不外溢到业务代码。
   await deps.db
     .insert(instanceSettings)
     .values({ key, value })
-    .onConflictDoUpdate({ target: instanceSettings.key, set: { value } })
-    .run();
+    .onConflictDoUpdate({ target: instanceSettings.key, set: { value } });
 }
 
 /** env 是否锁定了注册模式(锁定时 UI 不可改)。 */

@@ -184,12 +184,12 @@ ${tsScript}<div class="foot">Hosted on <span class="mono">pagepin</span></div>
 /** none 模式:upsert 开发用户(每次登录刷新 last_login_at)。 */
 async function upsertDevUser(deps: AppDeps): Promise<UserRow> {
   const now = nowIso();
-  const existing = await deps.db.select().from(users).where(eq(users.email, 'dev@localhost')).get();
+  const existing = (await deps.db.select().from(users).where(eq(users.email, 'dev@localhost')))[0];
   if (existing) {
-    await deps.db.update(users).set({ lastLoginAt: now }).where(eq(users.id, existing.id)).run();
+    await deps.db.update(users).set({ lastLoginAt: now }).where(eq(users.id, existing.id));
     return existing;
   }
-  return deps.db
+  return (await deps.db
     .insert(users)
     .values({
       id: uuid(),
@@ -199,8 +199,7 @@ async function upsertDevUser(deps: AppDeps): Promise<UserRow> {
       createdAt: now,
       lastLoginAt: now,
     })
-    .returning()
-    .get();
+    .returning())[0]!;
 }
 
 /** canonical email 是否空闲(没被别的账号占用);决定「建新账号 / 刷资料时能否落这个邮箱键」。
@@ -210,11 +209,11 @@ async function canonicalFreeOrNull(
   deps: AppDeps, canonical: string | null, selfId: string | null,
 ): Promise<string | null> {
   if (!canonical) return null;
-  const owner = await deps.db
+  const owner = (await deps.db
     .select({ id: users.id })
     .from(users)
     .where(eq(users.canonicalEmail, canonical))
-    .get();
+    )[0];
   return owner && owner.id !== selfId ? null : canonical;
 }
 
@@ -235,19 +234,18 @@ export async function upsertFederatedUser(deps: AppDeps, fed: FederatedLogin): P
   const now = nowIso();
   const canonical = fed.emailVerified ? canonicalEmail(fed.email) : null;
 
-  const existing = await deps.db
+  const existing = (await deps.db
     .select()
     .from(identities)
     .where(and(eq(identities.provider, fed.provider), eq(identities.sub, fed.sub)))
-    .get();
+    )[0];
   if (existing) {
-    const user = await deps.db.select().from(users).where(eq(users.id, existing.userId)).get();
+    const user = (await deps.db.select().from(users).where(eq(users.id, existing.userId)))[0];
     if (!user) throw new Error(`身份 ${fed.provider}:${fed.sub} 指向不存在的用户`);
     await deps.db
       .update(identities)
       .set({ email: canonical ?? existing.email, lastLoginAt: now })
-      .where(eq(identities.id, existing.id))
-      .run();
+      .where(eq(identities.id, existing.id));
     // 账号资料顺手刷新:缺名补名;账号尚无 canonical 且当前 email 空闲时认领它(仅自己,不抢别人)。
     const claim = canonical && !user.canonicalEmail ? await canonicalFreeOrNull(deps, canonical, user.id) : null;
     await deps.db
@@ -259,20 +257,19 @@ export async function upsertFederatedUser(deps: AppDeps, fed: FederatedLogin): P
         emailVerified: user.emailVerified || !!claim,
         lastLoginAt: now,
       })
-      .where(eq(users.id, user.id))
-      .run();
-    return (await deps.db.select().from(users).where(eq(users.id, user.id)).get())!;
+      .where(eq(users.id, user.id));
+    return ((await deps.db.select().from(users).where(eq(users.id, user.id)))[0])!;
   }
 
   // 自动合并(两边邮箱都已验证才安全):新身份的 verified 邮箱命中一个 emailVerified 的已有账号 →
   // 挂上并登录进它(= Resend 那种「同邮箱直接进同一账号」)。已有账号邮箱「未验证」**绝不**作目标:
   // 攻击者验证不了不属于自己的邮箱,其抢注账号 emailVerified 恒为 false,故挡住未验证邮箱抢注。
   if (canonical) {
-    const match = await deps.db
+    const match = (await deps.db
       .select()
       .from(users)
       .where(and(eq(users.canonicalEmail, canonical), eq(users.emailVerified, true)))
-      .get();
+      )[0];
     if (match && !match.disabled) {
       const attached = await attachIdentity(deps, match.id, {
         provider: fed.provider,
@@ -284,16 +281,15 @@ export async function upsertFederatedUser(deps: AppDeps, fed: FederatedLogin): P
         await deps.db
           .update(users)
           .set({ displayName: match.displayName ?? fed.name ?? null, lastLoginAt: now })
-          .where(eq(users.id, match.id))
-          .run();
-        return (await deps.db.select().from(users).where(eq(users.id, match.id)).get())!;
+          .where(eq(users.id, match.id));
+        return ((await deps.db.select().from(users).where(eq(users.id, match.id)))[0])!;
       }
     }
   }
 
   // 从未见过的身份 → 建独立新账号
   const freeCanonical = await canonicalFreeOrNull(deps, canonical, null);
-  const n = (await deps.db.select({ n: sql<number>`count(*)` }).from(users).get())?.n ?? 0;
+  const n = ((await deps.db.select({ n: sql<number>`count(*)` }).from(users))[0])?.n ?? 0;
   const userId = uuid();
   const base = {
     id: userId,
@@ -307,19 +303,19 @@ export async function upsertFederatedUser(deps: AppDeps, fed: FederatedLogin): P
     lastLoginAt: now,
   };
   try {
-    await deps.db.insert(users).values(base).run();
+    await deps.db.insert(users).values(base);
   } catch {
     // 并发:identities 已被抢建 → 返回那行用户;否则 canonical/oidc_sub 撞 → 去键重插,保持独立账号
-    const taken = await deps.db
+    const taken = (await deps.db
       .select()
       .from(identities)
       .where(and(eq(identities.provider, fed.provider), eq(identities.sub, fed.sub)))
-      .get();
+      )[0];
     if (taken) {
-      const u = await deps.db.select().from(users).where(eq(users.id, taken.userId)).get();
+      const u = (await deps.db.select().from(users).where(eq(users.id, taken.userId)))[0];
       if (u) return u;
     }
-    await deps.db.insert(users).values({ ...base, email: null, canonicalEmail: null, oidcSub: null }).run();
+    await deps.db.insert(users).values({ ...base, email: null, canonicalEmail: null, oidcSub: null });
   }
   try {
     await deps.db
@@ -333,20 +329,19 @@ export async function upsertFederatedUser(deps: AppDeps, fed: FederatedLogin): P
         emailVerified: !!canonical,
         createdAt: now,
         lastLoginAt: now,
-      })
-      .run();
+      });
   } catch {
-    const taken = await deps.db
+    const taken = (await deps.db
       .select()
       .from(identities)
       .where(and(eq(identities.provider, fed.provider), eq(identities.sub, fed.sub)))
-      .get();
+      )[0];
     if (taken) {
-      const u = await deps.db.select().from(users).where(eq(users.id, taken.userId)).get();
+      const u = (await deps.db.select().from(users).where(eq(users.id, taken.userId)))[0];
       if (u) return u;
     }
   }
-  return (await deps.db.select().from(users).where(eq(users.id, userId)).get())!;
+  return ((await deps.db.select().from(users).where(eq(users.id, userId)))[0])!;
 }
 
 /** 为 password 账号补登 identities 行(provider='password', sub=canonicalEmail)。
@@ -366,8 +361,7 @@ async function ensurePasswordIdentity(
         emailVerified: false,
         createdAt: now,
         lastLoginAt: now,
-      })
-      .run();
+      });
   } catch {
     /* 并发/重复 → 唯一索引兜底,忽略 */
   }
@@ -385,21 +379,20 @@ export async function attachIdentity(
 ): Promise<'ok' | 'conflict' | 'failed'> {
   const now = nowIso();
   const canonical = fed.emailVerified ? canonicalEmail(fed.email) : null;
-  const target = await deps.db.select().from(users).where(eq(users.id, userId)).get();
+  const target = (await deps.db.select().from(users).where(eq(users.id, userId)))[0];
   if (!target || target.disabled) return 'failed';
 
-  const existing = await deps.db
+  const existing = (await deps.db
     .select()
     .from(identities)
     .where(and(eq(identities.provider, fed.provider), eq(identities.sub, fed.sub)))
-    .get();
+    )[0];
   if (existing) {
     if (existing.userId !== userId) return 'conflict';
     await deps.db
       .update(identities)
       .set({ email: canonical ?? existing.email, lastLoginAt: now })
-      .where(eq(identities.id, existing.id))
-      .run();
+      .where(eq(identities.id, existing.id));
     return 'ok';
   }
   try {
@@ -414,14 +407,13 @@ export async function attachIdentity(
         emailVerified: !!canonical,
         createdAt: now,
         lastLoginAt: now,
-      })
-      .run();
+      });
   } catch {
-    const taken = await deps.db
+    const taken = (await deps.db
       .select()
       .from(identities)
       .where(and(eq(identities.provider, fed.provider), eq(identities.sub, fed.sub)))
-      .get();
+      )[0];
     if (taken) return taken.userId === userId ? 'ok' : 'conflict';
     return 'failed';
   }
@@ -432,8 +424,7 @@ export async function attachIdentity(
       await deps.db
         .update(users)
         .set({ canonicalEmail: free, email: target.email ?? fed.email ?? null, emailVerified: true })
-        .where(and(eq(users.id, userId), isNull(users.canonicalEmail)))
-        .run();
+        .where(and(eq(users.id, userId), isNull(users.canonicalEmail)));
     }
   }
   return 'ok';
@@ -481,13 +472,13 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const canonical = canonicalEmail(body.email);
     const password = body.password ?? '';
     const user = canonical
-      ? await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)).get()
+      ? (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0]
       : undefined;
     if (!user || !user.passwordHash || !password || !(await verifyPassword(password, user.passwordHash))) {
       return c.json({ detail: '邮箱或密码不正确' }, 401);
     }
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
-    await deps.db.update(users).set({ lastLoginAt: nowIso() }).where(eq(users.id, user.id)).run();
+    await deps.db.update(users).set({ lastLoginAt: nowIso() }).where(eq(users.id, user.id));
     await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
     if (isJson) return c.json({ ok: true });
     return c.redirect(safeNext(body.next), 302);
@@ -517,12 +508,12 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const passwordHash = await hashPassword(password);
     const now = nowIso();
     // D1 无交互事务:按 canonicalEmail 查重 + 数首个用户(count==0 → admin),靠 users_canonical_email_uq 兜并发双注册
-    const dup = await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)).get();
+    const dup = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
     if (dup) return c.json({ detail: '该邮箱已注册' }, 409);
-    const n = (await deps.db.select({ n: sql<number>`count(*)` }).from(users).get())?.n ?? 0;
+    const n = ((await deps.db.select({ n: sql<number>`count(*)` }).from(users))[0])?.n ?? 0;
     let created: UserRow;
     try {
-      created = await deps.db
+      created = (await deps.db
         .insert(users)
         .values({
           id: uuid(),
@@ -535,10 +526,10 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
           lastLoginAt: now,
         })
         .returning()
-        .get();
+        )[0]!;
     } catch (e) {
       // 唯一索引兜并发同邮箱:落库失败后该 canonical 已存在 → 409,否则真异常上抛
-      const exists = await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)).get();
+      const exists = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
       if (exists) return c.json({ detail: '该邮箱已注册' }, 409);
       throw e;
     }
@@ -679,17 +670,16 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     if (!payload) {
       return fail('This verification link is invalid or has expired. Sign in and resend it from Settings.');
     }
-    const user = await deps.db.select().from(users).where(eq(users.id, payload.uid)).get();
+    const user = (await deps.db.select().from(users).where(eq(users.id, payload.uid)))[0];
     if (!user || user.canonicalEmail !== payload.eml) {
       return fail('This link no longer matches your account email.');
     }
     if (!user.emailVerified) {
-      await deps.db.update(users).set({ emailVerified: true }).where(eq(users.id, user.id)).run();
+      await deps.db.update(users).set({ emailVerified: true }).where(eq(users.id, user.id));
       await deps.db
         .update(identities)
         .set({ emailVerified: true })
-        .where(and(eq(identities.userId, user.id), eq(identities.provider, 'password')))
-        .run();
+        .where(and(eq(identities.userId, user.id), eq(identities.provider, 'password')));
     }
     // 验证就是「本账号自证掌握邮箱」—— 唯一安全的收编触发点。无条件调(重新点链接也能续跑未完成的合并)。
     await reconcileByVerifiedEmail(deps, user.canonicalEmail);
@@ -723,7 +713,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     if ((await effectiveRegistrationMode(deps)) === 'closed') return c.json({ ok: false, reason: 'closed' });
     const token = (c.req.query('token') ?? '').trim();
     if (!token) return c.json({ ok: false, reason: 'missing' });
-    const inv = await deps.db.select().from(invites).where(eq(invites.tokenHash, await sha256Hex(token))).get();
+    const inv = (await deps.db.select().from(invites).where(eq(invites.tokenHash, await sha256Hex(token))))[0];
     if (!inv || inv.acceptedAt !== null || Date.parse(inv.expiresAt) <= Date.now()) {
       return c.json({ ok: false, reason: 'invalid' });
     }
@@ -742,7 +732,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     if (password.length < 8) return c.json({ detail: '密码至少 8 位' }, 422);
 
     const tokenHash = await sha256Hex(token);
-    const inv = await deps.db.select().from(invites).where(eq(invites.tokenHash, tokenHash)).get();
+    const inv = (await deps.db.select().from(invites).where(eq(invites.tokenHash, tokenHash)))[0];
     if (!inv || inv.acceptedAt !== null || Date.parse(inv.expiresAt) <= Date.now()) {
       return c.json({ detail: '邀请无效或已过期' }, 400);
     }
@@ -754,21 +744,21 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const passwordHash = await hashPassword(password);
     const now = nowIso();
     // 常见 dup 先拦(不消耗邀请)
-    const dup = await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)).get();
+    const dup = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
     if (dup) return c.json({ detail: '该邮箱已注册' }, 409);
     // D1 无交互事务:① 先条件认领邀请(WHERE accepted_at IS NULL,RETURNING 检测命中=一次性语义),
     // ② 认领成功才建号,③ 建号失败则补偿释放邀请。跨进程安全,无需交互事务。
     const newUserId = uuid();
-    const claimed = await deps.db
+    const claimed = (await deps.db
       .update(invites)
       .set({ acceptedAt: now, acceptedUserId: newUserId })
       .where(and(eq(invites.id, inv.id), isNull(invites.acceptedAt)))
       .returning({ id: invites.id })
-      .get();
+      )[0];
     if (!claimed) return c.json({ detail: '邀请已被使用' }, 400);
     let created: UserRow;
     try {
-      created = await deps.db
+      created = (await deps.db
         .insert(users)
         .values({
           id: newUserId,
@@ -781,15 +771,14 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
           lastLoginAt: now,
         })
         .returning()
-        .get();
+        )[0]!;
     } catch (e) {
       // 建号失败(如并发同邮箱抢先)→ 释放本次认领,回错
       await deps.db
         .update(invites)
         .set({ acceptedAt: null, acceptedUserId: null })
-        .where(and(eq(invites.id, inv.id), eq(invites.acceptedUserId, newUserId)))
-        .run();
-      const exists = await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)).get();
+        .where(and(eq(invites.id, inv.id), eq(invites.acceptedUserId, newUserId)));
+      const exists = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
       if (exists) return c.json({ detail: '该邮箱已注册' }, 409);
       throw e;
     }
