@@ -5,12 +5,11 @@ import { AcceptInvite } from './components/AcceptInvite';
 import { Activate } from './components/Activate';
 import { Admin } from './components/Admin';
 import { Confirmer } from './components/ConfirmDialog';
-import { DropZone } from './components/DropZone';
 import { HandleSetup } from './components/HandleSetup';
 import { Login } from './components/Login';
 import { Settings } from './components/Settings';
 import { Signup } from './components/Signup';
-import { SiteList } from './components/SiteList';
+import { SitesView } from './components/SitesView';
 import { Toaster } from './components/Toast';
 import { TopBar } from './components/TopBar';
 
@@ -95,14 +94,7 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <TopBar />
-      {me.needs_handle ? (
-        <HandleSetup />
-      ) : (
-        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
-          <DropZone />
-          <SiteList />
-        </main>
-      )}
+      {me.needs_handle ? <HandleSetup /> : <SitesView />}
       <Toaster />
       <Confirmer />
       <footer className="pb-8 pt-4 text-center text-xs text-ink-300">

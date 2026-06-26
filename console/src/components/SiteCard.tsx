@@ -309,7 +309,7 @@ export function SiteCard({
               disabled={busy}
             >
               <Globe2 className="h-3.5 w-3.5" />
-              {isPublicLive ? 'Renew / make private' : 'Share publicly'}
+              {isPublicLive ? 'Extend / make private' : 'Make public'}
             </button>
             <button
               type="button"
@@ -327,7 +327,7 @@ export function SiteCard({
               disabled={busy}
             >
               <History className="h-3.5 w-3.5" />
-              Versions
+              Versions · {site.version_count}
             </button>
             <button
               type="button"
@@ -353,7 +353,9 @@ export function SiteCard({
           {panel === 'share' && (
             <div className="mt-3 rounded-panel border border-ink-200 bg-ink-50 p-3 animate-fade-up">
               <div className="text-xs font-semibold text-ink-500">
-                {isPublicLive ? 'Renew (resets the timer)' : 'Public for (auto-reverts to private)'}
+                {isPublicLive
+                  ? 'Extend window (restarts the clock)'
+                  : 'Public for (auto-reverts to private)'}
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {shareOptions.map((o) => (
@@ -375,7 +377,7 @@ export function SiteCard({
                   disabled={busy}
                   onClick={makePrivate}
                 >
-                  Make private now
+                  Revert to private now
                 </button>
               )}
             </div>
