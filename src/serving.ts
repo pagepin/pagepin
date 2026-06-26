@@ -115,7 +115,7 @@ function loginWallHtml(slug: string, ownerName: string, loginHref: string): stri
     'Private · pagepin',
     `<div class="chip chip-teal">${LOCK_SVG}</div>
 <h1>This page is private</h1>
-<p class="body">You&rsquo;ve been invited to review <span class="mono teal">${escapeHtml(slug)}</span>. Sign in to view it &mdash; most reviewers use the email their invite was sent to.</p>
+<p class="body">Sign in to view <span class="mono teal">${escapeHtml(slug)}</span>.</p>
 <a class="btn btn-primary" href="${escapeHtml(loginHref)}">Sign in to view</a>
 <div class="row"><span class="avatar">${initial}</span>Shared by ${escapeHtml(ownerName)}</div>
 <div class="foot">Hosted on <span class="mono">pagepin</span></div>`,
