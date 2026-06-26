@@ -1,6 +1,6 @@
 ---
 name: pagepin
-description: Deploy an HTML page, Markdown file, image, or multi-file static site to a pagepin host and get a shareable URL — pagepin renders Markdown and images in a viewer — then run the pin-point review-comment loop (read comments, fix, redeploy, resolve). Use when the user wants to publish, share, preview, host, or update a page / site / report / README / .md / .html file, "deploy to pagepin", get a link for a file, or address review comments on a hosted page. 需要把 HTML、Markdown、图片或静态站点部署到 pagepin、生成可分享链接、或处理页面评论时使用。
+description: Deploy an HTML page, Markdown file, image, or multi-file static site to a pagepin host and get a shareable URL — pagepin renders Markdown and images in a viewer — then run the pin-point review-comment loop (read comments, fix, redeploy, resolve). Use when the user wants to publish, share, preview, host, or update a page / site / report / README / .md / .html file, "deploy to pagepin", "deploy to pp" (pp = pagepin), get a link for a file, or address review comments on a hosted page. 需要把 HTML、Markdown、图片或静态站点部署到 pagepin/pp、生成可分享链接、或处理页面评论时使用（pp 即 pagepin 的简称，如「部署到 pp」「pp 一下这个文件」「发个 pp 链接」）。
 ---
 
 # pagepin — deploy static pages from your agent
