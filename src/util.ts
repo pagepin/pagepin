@@ -2,9 +2,23 @@
 
 // 数据平面 URL 的第一段是 handle:这些顶级段保留给系统路由/常见探测,handle 不可取
 export const RESERVED_SEGMENTS = new Set([
-  'auth', 'api', 'healthz', 'favicon.ico', 'robots.txt', '.well-known',
-  'static', 'assets', 'login', 'logout', 'admin', 'pagepin', 'pages',
-  'p', '_pagepin', 'skill.md', 'console',
+  'auth',
+  'api',
+  'healthz',
+  'favicon.ico',
+  'robots.txt',
+  '.well-known',
+  'static',
+  'assets',
+  'login',
+  'logout',
+  'admin',
+  'pagepin',
+  'pages',
+  'p',
+  '_pagepin',
+  'skill.md',
+  'console',
 ]);
 
 const HANDLE_RE = /^[a-z][a-z0-9-]{1,31}$/;

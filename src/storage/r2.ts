@@ -20,7 +20,10 @@ export function parseIfNoneMatch(header?: string): string | undefined {
 
 export class R2Storage implements Storage {
   private prefix: string;
-  constructor(private bucket: R2Bucket, prefix = '') {
+  constructor(
+    private bucket: R2Bucket,
+    prefix = '',
+  ) {
     this.prefix = prefix.replace(/^\/+/, '');
   }
 
@@ -28,7 +31,11 @@ export class R2Storage implements Storage {
     return this.prefix + key;
   }
 
-  async put(key: string, data: ReadableStream<Uint8Array> | Uint8Array, contentType: string): Promise<void> {
+  async put(
+    key: string,
+    data: ReadableStream<Uint8Array> | Uint8Array,
+    contentType: string,
+  ): Promise<void> {
     // R2 原生 put 直收 ReadableStream/Uint8Array,免聚合(不像 s3 驱动要整体算 SigV4 hash)。
     await this.bucket.put(this.k(key), data as never, { httpMetadata: { contentType } });
   }

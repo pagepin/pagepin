@@ -67,28 +67,30 @@ function clientIp(c: Context<AppEnv>): string {
 }
 
 async function unresolvedCount(db: Db, siteId: string): Promise<number> {
-  const row = (await db
-    .select({ n: count() })
-    .from(commentThreads)
-    .where(
-      and(
-        eq(commentThreads.siteId, siteId),
-        eq(commentThreads.resolved, false),
-        isNull(commentThreads.deletedAt),
-      ),
-    )
-    )[0];
+  const row = (
+    await db
+      .select({ n: count() })
+      .from(commentThreads)
+      .where(
+        and(
+          eq(commentThreads.siteId, siteId),
+          eq(commentThreads.resolved, false),
+          isNull(commentThreads.deletedAt),
+        ),
+      )
+  )[0];
   return row?.n ?? 0;
 }
 
 /** 本人名下未删站点;不存在返回 null(调用方回 404 '站点不存在')。 */
 async function ownedSite(db: Db, userId: string, slug: string): Promise<SiteRow | null> {
   return (
-    ((await db
-      .select()
-      .from(sites)
-      .where(and(eq(sites.ownerId, userId), eq(sites.slug, slug), isNull(sites.deletedAt)))
-      )[0]) ?? null
+    (
+      await db
+        .select()
+        .from(sites)
+        .where(and(eq(sites.ownerId, userId), eq(sites.slug, slug), isNull(sites.deletedAt)))
+    )[0] ?? null
   );
 }
 
@@ -253,14 +255,21 @@ async function generateIndexFallback(
   const rels = new Set(manifest.map((e) => e.rel));
   if (rels.has('index.html')) return;
   const rootHtmls = [...rels].filter(
-    (p) => !p.includes('/') && (p.toLowerCase().endsWith('.html') || p.toLowerCase().endsWith('.htm')),
+    (p) =>
+      !p.includes('/') && (p.toLowerCase().endsWith('.html') || p.toLowerCase().endsWith('.htm')),
   );
   if (rootHtmls.length === 1) {
     await storage.copy(storagePrefix + rootHtmls[0]!, storagePrefix + 'index.html');
   } else {
     const html =
-      manifest.length === 1 ? redirectIndexHtml(manifest[0]!.rel) : galleryIndexHtml(label, manifest);
-    await storage.put(storagePrefix + 'index.html', new TextEncoder().encode(html), 'text/html; charset=utf-8');
+      manifest.length === 1
+        ? redirectIndexHtml(manifest[0]!.rel)
+        : galleryIndexHtml(label, manifest);
+    await storage.put(
+      storagePrefix + 'index.html',
+      new TextEncoder().encode(html),
+      'text/html; charset=utf-8',
+    );
   }
 }
 
@@ -298,7 +307,12 @@ async function publishVersion(
     const allVersions = [...fresh.versions, version];
     const kept = cfg.keepVersions > 0 ? allVersions.slice(-cfg.keepVersions) : allVersions;
     const trimmed = allVersions.slice(0, allVersions.length - kept.length);
-    const set: { versions: SiteVersion[]; currentVersionId: string; updatedAt: string; title?: string } = {
+    const set: {
+      versions: SiteVersion[];
+      currentVersionId: string;
+      updatedAt: string;
+      title?: string;
+    } = {
       versions: kept,
       currentVersionId: p.vid,
       updatedAt: nowIso(),
@@ -309,7 +323,10 @@ async function publishVersion(
         ? isNull(sites.currentVersionId)
         : eq(sites.currentVersionId, fresh.currentVersionId);
     const wrote = await writtenCount(
-      db.update(sites).set(set).where(and(eq(sites.id, p.siteId), guard)),
+      db
+        .update(sites)
+        .set(set)
+        .where(and(eq(sites.id, p.siteId), guard)),
     );
     if (wrote) {
       removed = trimmed;
@@ -469,7 +486,10 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const updated = await ownedSite(db, user.id, slug);
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
     // pruned_versions:本次发布因版本上限被回收的旧版本数(>0 → 前端提示)
-    return c.json({ ...siteOut(deps, updated, await unresolvedCount(db, updated.id)), pruned_versions: pruned });
+    return c.json({
+      ...siteOut(deps, updated, await unresolvedCount(db, updated.id)),
+      pruned_versions: pruned,
+    });
   });
 
   // ---- 分批部署 begin:开一个草稿版本,文件后续分多请求推上来,commit 才发布 ----
@@ -565,7 +585,12 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const quotaErr = await quotaCheck(c, db, cfg, user, session.slug, totalBytes);
     if (quotaErr) return quotaErr;
 
-    await generateIndexFallback(storage, session.storagePrefix, session.manifest, title || session.slug);
+    await generateIndexFallback(
+      storage,
+      session.storagePrefix,
+      session.manifest,
+      title || session.slug,
+    );
     const pruned = await publishVersion(db, storage, cfg, {
       siteId: session.siteId,
       vid: session.id,
@@ -584,7 +609,10 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     );
     const updated = await ownedSite(db, user.id, session.slug);
     if (!updated) return c.json({ detail: '站点不存在' }, 404);
-    return c.json({ ...siteOut(deps, updated, await unresolvedCount(db, updated.id)), pruned_versions: pruned });
+    return c.json({
+      ...siteOut(deps, updated, await unresolvedCount(db, updated.id)),
+      pruned_versions: pruned,
+    });
   });
 
   // ---- 分批部署 abort:丢弃草稿并回收已上传的存储 ----
@@ -718,7 +746,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const site = await ownedSite(db, userId, slug);
     if (!site) return { site: null, thread: null };
     const thread =
-      ((await db.select().from(commentThreads).where(eq(commentThreads.id, threadId)))[0]) ?? null;
+      (await db.select().from(commentThreads).where(eq(commentThreads.id, threadId)))[0] ?? null;
     if (!thread || thread.deletedAt !== null || thread.siteId !== site.id) {
       return { site, thread: null };
     }
@@ -765,17 +793,17 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     // 乐观并发(D1 无交互事务):重读 → 追加 → 条件 UPDATE 守 updated_at 未变 → RETURNING 检测命中,
     // 未命中说明有并发回复抢先,重读重试,原子追加防覆盖。
     for (let attempt = 0; attempt < 5; attempt++) {
-      const fresh = (await db
-        .select()
-        .from(commentThreads)
-        .where(eq(commentThreads.id, thread.id))
-        )[0];
+      const fresh = (
+        await db.select().from(commentThreads).where(eq(commentThreads.id, thread.id))
+      )[0];
       if (!fresh) break;
       const wrote = await writtenCount(
         db
           .update(commentThreads)
           .set({ comments: [...fresh.comments, reply], updatedAt: nowIso() })
-          .where(and(eq(commentThreads.id, thread.id), eq(commentThreads.updatedAt, fresh.updatedAt))),
+          .where(
+            and(eq(commentThreads.id, thread.id), eq(commentThreads.updatedAt, fresh.updatedAt)),
+          ),
       );
       if (wrote) break;
     }

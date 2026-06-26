@@ -111,7 +111,9 @@ function mountConsoleFallback(app: Hono<AppEnv>, opts: CreateAppOptions): void {
 }
 
 async function mountConsolePlane(
-  app: Hono<AppEnv>, deps: AppDeps, opts: CreateAppOptions,
+  app: Hono<AppEnv>,
+  deps: AppDeps,
+  opts: CreateAppOptions,
 ): Promise<void> {
   app.route('/', makeAuthRoutes(deps, 'session')); // 含 GET /api/auth/config
   const mw = makeAuthMiddleware(deps);
@@ -167,7 +169,5 @@ async function createDualApp(deps: AppDeps, opts: CreateAppOptions): Promise<App
 }
 
 export async function createApp(deps: AppDeps, opts: CreateAppOptions = {}): Promise<AppHandle> {
-  return deps.config.mode === 'dual'
-    ? createDualApp(deps, opts)
-    : createSingleApp(deps, opts);
+  return deps.config.mode === 'dual' ? createDualApp(deps, opts) : createSingleApp(deps, opts);
 }

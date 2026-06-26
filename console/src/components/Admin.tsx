@@ -34,8 +34,16 @@ import { toast, toastError } from './Toast';
 
 const REG_MODES: { key: RegistrationMode; label: string; desc: string }[] = [
   { key: 'closed', label: 'Closed', desc: 'No new accounts. Existing users only.' },
-  { key: 'invite', label: 'Invite-only', desc: 'Join only via a one-time invite link you generate.' },
-  { key: 'open', label: 'Open', desc: 'Anyone with the URL can self-register. Best for trusted networks.' },
+  {
+    key: 'invite',
+    label: 'Invite-only',
+    desc: 'Join only via a one-time invite link you generate.',
+  },
+  {
+    key: 'open',
+    label: 'Open',
+    desc: 'Anyone with the URL can self-register. Best for trusted networks.',
+  },
 ];
 
 const AVA = ['#0b6358', '#1f4f86', '#8a560b', '#5b3596', '#b14a42'];
@@ -48,7 +56,11 @@ function avatarColor(handle: string | null, disabled: boolean): string {
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return <section className="rounded-card border border-ink-200 bg-white p-6 shadow-card">{children}</section>;
+  return (
+    <section className="rounded-card border border-ink-200 bg-white p-6 shadow-card">
+      {children}
+    </section>
+  );
 }
 
 function StatCard({
@@ -119,11 +131,26 @@ export function Admin() {
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
-    api.adminOverview().then(setOverview).catch((e) => toastError(e, 'Failed to load overview'));
-    api.adminSettings().then(setSettings).catch((e) => toastError(e, 'Failed to load settings'));
-    api.adminUsers().then((r) => setUsers(r.users)).catch((e) => toastError(e, 'Failed to load users'));
-    api.adminSites().then((r) => setSites(r.sites)).catch((e) => toastError(e, 'Failed to load sites'));
-    api.listInvites().then((r) => setInvites(r.invites)).catch(() => {});
+    api
+      .adminOverview()
+      .then(setOverview)
+      .catch((e) => toastError(e, 'Failed to load overview'));
+    api
+      .adminSettings()
+      .then(setSettings)
+      .catch((e) => toastError(e, 'Failed to load settings'));
+    api
+      .adminUsers()
+      .then((r) => setUsers(r.users))
+      .catch((e) => toastError(e, 'Failed to load users'));
+    api
+      .adminSites()
+      .then((r) => setSites(r.sites))
+      .catch((e) => toastError(e, 'Failed to load sites'));
+    api
+      .listInvites()
+      .then((r) => setInvites(r.invites))
+      .catch(() => {});
   }, []);
 
   const isPassword = settings?.auth_mode === 'password';
@@ -155,7 +182,10 @@ export function Admin() {
         setGenerated(inv);
         setInviteEmail('');
         setInviteAdmin(false);
-        api.listInvites().then((r) => setInvites(r.invites)).catch(() => {});
+        api
+          .listInvites()
+          .then((r) => setInvites(r.invites))
+          .catch(() => {});
       })
       .catch((e) => toastError(e, 'Could not create invite'))
       .finally(() => setGenerating(false));
@@ -177,7 +207,11 @@ export function Admin() {
       .catch((e) => toastError(e, 'Revoke failed'));
   };
 
-  const patchUser = (u: AdminUser, body: { is_admin?: boolean; disabled?: boolean }, label: string) => {
+  const patchUser = (
+    u: AdminUser,
+    body: { is_admin?: boolean; disabled?: boolean },
+    label: string,
+  ) => {
     setBusy(u.id);
     api
       .patchUser(u.id, body)
@@ -195,7 +229,9 @@ export function Admin() {
     api
       .verifyUserEmail(u.id)
       .then(() => {
-        setUsers((prev) => (prev ?? []).map((x) => (x.id === u.id ? { ...x, email_verified: true } : x)));
+        setUsers((prev) =>
+          (prev ?? []).map((x) => (x.id === u.id ? { ...x, email_verified: true } : x)),
+        );
         toast('Email verified');
       })
       .catch((e) => toastError(e, 'Verify failed'))
@@ -341,9 +377,8 @@ export function Admin() {
           <h2 className="text-sm font-bold text-ink-800">Registration</h2>
           {!isPassword ? (
             <p className="mt-3 text-xs text-ink-400">
-              This instance uses{' '}
-              <span className="font-mono">{settings?.auth_mode ?? '…'}</span> sign-in; registration
-              mode and invites apply to password mode only.
+              This instance uses <span className="font-mono">{settings?.auth_mode ?? '…'}</span>{' '}
+              sign-in; registration mode and invites apply to password mode only.
             </p>
           ) : (
             <>
@@ -454,14 +489,19 @@ export function Admin() {
                       </div>
                       <div className="mt-2 space-y-1.5">
                         {invites.map((inv) => (
-                          <div key={inv.id} className="flex items-center justify-between gap-2 text-xs">
+                          <div
+                            key={inv.id}
+                            className="flex items-center justify-between gap-2 text-xs"
+                          >
                             <span className="truncate font-mono text-ink-600">
                               {inv.email ?? '(any email)'}
                               {inv.is_admin && <span className="ml-1 text-tide-600">· admin</span>}
                             </span>
                             <div className="flex shrink-0 items-center gap-2">
                               <span className={inv.expired ? 'text-red-500' : 'text-ink-400'}>
-                                {inv.expired ? 'expired' : `expires ${formatRelative(inv.expires_at)}`}
+                                {inv.expired
+                                  ? 'expired'
+                                  : `expires ${formatRelative(inv.expires_at)}`}
                               </span>
                               <button
                                 type="button"
@@ -516,9 +556,12 @@ export function Admin() {
                   </div>
                   <div className="hidden text-right text-xs text-ink-400 sm:block">
                     <div>
-                      {u.site_count} site{u.site_count === 1 ? '' : 's'} · {formatBytes(u.storage_bytes)}
+                      {u.site_count} site{u.site_count === 1 ? '' : 's'} ·{' '}
+                      {formatBytes(u.storage_bytes)}
                     </div>
-                    <div>{u.last_login_at ? `active ${formatRelative(u.last_login_at)}` : 'never'}</div>
+                    <div>
+                      {u.last_login_at ? `active ${formatRelative(u.last_login_at)}` : 'never'}
+                    </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     {busy === u.id && <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-400" />}
@@ -624,7 +667,9 @@ export function Admin() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    {busySite === s.id && <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-400" />}
+                    {busySite === s.id && (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-400" />
+                    )}
                     {s.suspended ? (
                       <button
                         type="button"
@@ -669,7 +714,10 @@ export function Admin() {
               <Limit name="PAGEPIN_MAX_SITE_MB" value={`${settings.limits.max_site_mb} MB`} />
               <Limit name="PAGEPIN_MAX_FILE_MB" value={`${settings.limits.max_file_mb} MB`} />
               <Limit name="PAGEPIN_MAX_FILES" value={String(settings.limits.max_files)} />
-              <Limit name="PAGEPIN_PUBLIC_MAX_HOURS" value={`${settings.limits.public_max_hours} h`} />
+              <Limit
+                name="PAGEPIN_PUBLIC_MAX_HOURS"
+                value={`${settings.limits.public_max_hours} h`}
+              />
             </div>
           </Card>
         )}

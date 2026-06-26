@@ -186,7 +186,12 @@ function fmtBytes(n: number): string {
 const FILE_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
 const CODE_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>`;
 
-const mdShell = (fname: string, contentJson: string, inject: string, sizeBytes: number) => `<!doctype html>
+const mdShell = (
+  fname: string,
+  contentJson: string,
+  inject: string,
+  sizeBytes: number,
+) => `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${FAVICON}${FONTS}<title>${fname}</title>
@@ -259,7 +264,13 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
       rel ? '' : ' style="visibility:hidden"'
     } title="${tip}">${ch}</a>`;
   const arrows = view
-    ? arrow('pp-img-prev', 'pp-prev', view.i > 0 ? view.imgs[view.i - 1]! : null, 'Previous (←)', CHEV_L) +
+    ? arrow(
+        'pp-img-prev',
+        'pp-prev',
+        view.i > 0 ? view.imgs[view.i - 1]! : null,
+        'Previous (←)',
+        CHEV_L,
+      ) +
       '\n' +
       arrow(
         'pp-img-next',
@@ -500,7 +511,10 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     return {
       handle: safeDecode(segs[base] ?? ''),
       slug: safeDecode(segs[base + 1] ?? ''),
-      rest: segs.slice(base + 2).map(safeDecode).join('/'),
+      rest: segs
+        .slice(base + 2)
+        .map(safeDecode)
+        .join('/'),
     };
   }
 
@@ -514,11 +528,12 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
   const serve = async (c: Context<AppEnv>): Promise<Response> => {
     const { handle, slug, rest } = splitSitePath(c);
     if (RESERVED_SEGMENTS.has(handle)) return notFound(c);
-    const site = (await db
-      .select()
-      .from(sites)
-      .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
-      )[0];
+    const site = (
+      await db
+        .select()
+        .from(sites)
+        .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
+    )[0];
     if (!site || site.currentVersionId === null) return notFound(c);
     // 管理员下架:先于任何内容/会话判定,对所有访问者(站长/匿名公开都含)一律 451,且不读存储
     if (site.suspendedAt !== null) {
@@ -532,11 +547,12 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     // 查库判活:会话用户须存在且未被禁用,否则按未登录处理(私有页不放行、不注入评论层)
     let viewerActive = false;
     if (claims !== null) {
-      const u = (await db
-        .select({ disabled: users.disabled, sessionEpoch: users.sessionEpoch })
-        .from(users)
-        .where(eq(users.id, claims.sub))
-        )[0];
+      const u = (
+        await db
+          .select({ disabled: users.disabled, sessionEpoch: users.sessionEpoch })
+          .from(users)
+          .where(eq(users.id, claims.sub))
+      )[0];
       viewerActive = u !== undefined && !u.disabled && (claims.epo ?? 0) === u.sessionEpoch;
     }
     if (!pub && !viewerActive) {
@@ -545,7 +561,11 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       const loginHref = `/auth/login?next=${encodeURIComponent(c.req.path)}`;
       const gateHeaders = { 'Cache-Control': 'no-store, private' };
       if (site.visibility === 'public' && site.publicExpiresAt) {
-        return c.html(linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now), loginHref), 200, gateHeaders);
+        return c.html(
+          linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now), loginHref),
+          200,
+          gateHeaders,
+        );
       }
       const owner = (await db.select().from(users).where(eq(users.id, site.ownerId)))[0];
       const ownerName = owner?.displayName || `@${handle}`;
@@ -608,7 +628,12 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
           // </ 转义防止 markdown 原文里的 </script> 提前闭合壳页脚本
           const contentJson = JSON.stringify(text).replaceAll('</', '<\\/');
           return c.html(
-            mdShell(escapeHtml(fname), contentJson, injectHtml, opened.meta.contentLength ?? buf.byteLength),
+            mdShell(
+              escapeHtml(fname),
+              contentJson,
+              injectHtml,
+              opened.meta.contentLength ?? buf.byteLength,
+            ),
             200,
             baseHeaders,
           );
@@ -631,8 +656,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     for (const cand of candidates) {
       // 注入候选(HTML 且开评论)不带条件请求:响应体会被改写,存储层的 ETag 对不上号
       const candLower = cand.toLowerCase();
-      const injectThis =
-        canInject && (candLower.endsWith('.html') || candLower.endsWith('.htm'));
+      const injectThis = canInject && (candLower.endsWith('.html') || candLower.endsWith('.htm'));
       try {
         const o = await storage.open(cur.storage_prefix + cand, {
           ifNoneMatch: injectThis ? undefined : c.req.header('if-none-match'),
@@ -665,7 +689,9 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     }
     if (injectableHtml && injectHtmlStream) {
       // >5MB:HTMLRewriter 流式注入(Workers;去整读上限,不占内存)
-      const src = new Response(body, { headers: { ...baseHeaders, 'Content-Type': meta.contentType } });
+      const src = new Response(body, {
+        headers: { ...baseHeaders, 'Content-Type': meta.contentType },
+      });
       return injectHtmlStream(src, injectTag(handle, slug, hit, cur.id));
     }
     // 否则(>5MB 且无流式注入器,如 Node)原样流出,不注入

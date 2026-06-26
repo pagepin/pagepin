@@ -130,8 +130,9 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
       storageBytes += cur ? cur.total_bytes : 0;
       versionCount += s.versions.length;
     }
-    const userCount = ((await db.select({ n: count() }).from(users))[0])?.n ?? 0;
-    const adminCount = ((await db.select({ n: count() }).from(users).where(eq(users.isAdmin, true)))[0])?.n ?? 0;
+    const userCount = (await db.select({ n: count() }).from(users))[0]?.n ?? 0;
+    const adminCount =
+      (await db.select({ n: count() }).from(users).where(eq(users.isAdmin, true)))[0]?.n ?? 0;
     return c.json({
       sites: allSites.length,
       users: userCount,
@@ -158,11 +159,18 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const hasAdmin = body.is_admin !== undefined;
     const hasDisabled = body.disabled !== undefined;
     if (!hasAdmin && !hasDisabled) return c.json({ detail: '需提供 is_admin 或 disabled' }, 422);
-    if (hasAdmin && typeof body.is_admin !== 'boolean') return c.json({ detail: 'is_admin 必须是布尔值' }, 422);
-    if (hasDisabled && typeof body.disabled !== 'boolean') return c.json({ detail: 'disabled 必须是布尔值' }, 422);
+    if (hasAdmin && typeof body.is_admin !== 'boolean')
+      return c.json({ detail: 'is_admin 必须是布尔值' }, 422);
+    if (hasDisabled && typeof body.disabled !== 'boolean')
+      return c.json({ detail: 'disabled 必须是布尔值' }, 422);
 
     const actor = c.get('user');
-    const target = (await db.select().from(users).where(eq(users.id, c.req.param('id'))))[0];
+    const target = (
+      await db
+        .select()
+        .from(users)
+        .where(eq(users.id, c.req.param('id')))
+    )[0];
     if (!target) return c.json({ detail: '用户不存在' }, 404);
 
     const resAdmin = hasAdmin ? (body.is_admin as boolean) : target.isAdmin;
@@ -176,15 +184,18 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const wasEnabledAdmin = target.isAdmin && !target.disabled;
     const willBeEnabledAdmin = resAdmin && !resDisabled;
     if (wasEnabledAdmin && !willBeEnabledAdmin) {
-      const enabled = ((await db
-        .select({ n: count() })
-        .from(users)
-        .where(and(eq(users.isAdmin, true), eq(users.disabled, false)))
-        )[0])?.n ?? 0;
+      const enabled =
+        (
+          await db
+            .select({ n: count() })
+            .from(users)
+            .where(and(eq(users.isAdmin, true), eq(users.disabled, false)))
+        )[0]?.n ?? 0;
       if (enabled <= 1) return c.json({ detail: '至少保留一名启用的管理员' }, 400);
     }
 
-    await db.update(users)
+    await db
+      .update(users)
       .set({ isAdmin: resAdmin, disabled: resDisabled })
       .where(eq(users.id, target.id));
     const allSites = await db.select().from(sites).where(isNull(sites.deletedAt));
@@ -195,7 +206,12 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
   /** 管理员手动标记某用户邮箱已验证 —— 救援:邮箱退信 / 死域 / GitHub noreply 等无法自助验证时,
    *  否则该账号会被门槛永久挡在「不能建站」之外。置 users.emailVerified + password 身份 verified。 */
   r.post('/users/:id/verify-email', mw.adminMutatingUser, async (c) => {
-    const target = (await db.select().from(users).where(eq(users.id, c.req.param('id'))))[0];
+    const target = (
+      await db
+        .select()
+        .from(users)
+        .where(eq(users.id, c.req.param('id')))
+    )[0];
     if (!target) return c.json({ detail: '用户不存在' }, 404);
     await db.update(users).set({ emailVerified: true }).where(eq(users.id, target.id));
     await db
@@ -223,17 +239,22 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
   /** id 定位未删站点;不存在返回 null(调用方回 404)。 */
   async function liveSite(id: string): Promise<SiteRow | null> {
     return (
-      ((await db.select().from(sites).where(and(eq(sites.id, id), isNull(sites.deletedAt))))[0]) ??
-      null
+      (
+        await db
+          .select()
+          .from(sites)
+          .where(and(eq(sites.id, id), isNull(sites.deletedAt)))
+      )[0] ?? null
     );
   }
 
   async function siteOutById(c: Context<AppEnv>, id: string): Promise<Response> {
-    const fresh = (await db
-      .select()
-      .from(sites)
-      .where(and(eq(sites.id, id), isNull(sites.deletedAt)))
-      )[0];
+    const fresh = (
+      await db
+        .select()
+        .from(sites)
+        .where(and(eq(sites.id, id), isNull(sites.deletedAt)))
+    )[0];
     if (!fresh) return c.json({ detail: '站点不存在' }, 404);
     const owner = (await db.select().from(users).where(eq(users.id, fresh.ownerId)))[0];
     return c.json(adminSiteOut(cfg, fresh, owner ?? undefined));
@@ -253,7 +274,9 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
       .update(sites)
       .set({ suspendedAt: site.suspendedAt ?? now, suspendedReason: reason, updatedAt: now })
       .where(eq(sites.id, site.id));
-    console.log(`admin-suspend site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`);
+    console.log(
+      `admin-suspend site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`,
+    );
     return siteOutById(c, site.id);
   });
 
@@ -264,7 +287,9 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
       .update(sites)
       .set({ suspendedAt: null, suspendedReason: null, updatedAt: nowIso() })
       .where(eq(sites.id, site.id));
-    console.log(`admin-unsuspend site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`);
+    console.log(
+      `admin-unsuspend site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`,
+    );
     return siteOutById(c, site.id);
   });
 
@@ -278,7 +303,9 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
       .set({ deletedAt: now, updatedAt: now, slug: tombstoneSlug(site.slug, site.id) })
       .where(eq(sites.id, site.id));
     await purgeSiteStorage(storage, site.ownerId, site.slug);
-    console.log(`admin-delete site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`);
+    console.log(
+      `admin-delete site=${site.id} handle=${site.ownerHandle} slug=${site.slug} by=${c.get('user').id}`,
+    );
     return c.json({ ok: true });
   });
 
@@ -360,7 +387,12 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
   });
 
   r.delete('/invites/:id', mw.adminMutatingUser, async (c) => {
-    const inv = (await db.select().from(invites).where(eq(invites.id, c.req.param('id'))))[0];
+    const inv = (
+      await db
+        .select()
+        .from(invites)
+        .where(eq(invites.id, c.req.param('id')))
+    )[0];
     if (!inv || inv.acceptedAt !== null) return c.json({ detail: '邀请不存在' }, 404);
     await db.delete(invites).where(eq(invites.id, inv.id));
     return c.json({ ok: true });

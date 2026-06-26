@@ -5,9 +5,12 @@ import { EMAIL_RE } from '../types';
 
 /** 接受邀请屏（/signup?invite=<token>）：校验邀请 → 设密码建号并登录。handle 仍走首登确认。 */
 export function AcceptInvite({ token }: { token: string }) {
-  const [info, setInfo] = useState<
-    { ok: boolean; email?: string | null; is_admin?: boolean; reason?: string } | null
-  >(null);
+  const [info, setInfo] = useState<{
+    ok: boolean;
+    email?: string | null;
+    is_admin?: boolean;
+    reason?: string;
+  } | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');

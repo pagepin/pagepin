@@ -60,7 +60,11 @@ async function setup(env: Record<string, string> = {}) {
     lastLoginAt: null,
   };
   await db.insert(users).values(user);
-  const cfg = loadConfig({ PAGEPIN_SECRET: 'test', PAGEPIN_BASE_URL: 'http://localhost:8000', ...env });
+  const cfg = loadConfig({
+    PAGEPIN_SECRET: 'test',
+    PAGEPIN_BASE_URL: 'http://localhost:8000',
+    ...env,
+  });
   const deps: AppDeps = { config: cfg, db, storage };
   const app = makeSiteRoutes(deps, injectUser(user));
   return { storage, db, cfg, app };
@@ -79,7 +83,9 @@ function form(items: { path: string; bytes: number | string }[], title?: string)
 }
 
 function postForm(app: Hono<AppEnv>, path: string, fd: FormData): Promise<Response> {
-  return Promise.resolve(app.fetch(new Request('http://localhost' + path, { method: 'POST', body: fd })));
+  return Promise.resolve(
+    app.fetch(new Request('http://localhost' + path, { method: 'POST', body: fd })),
+  );
 }
 function postJson(app: Hono<AppEnv>, path: string, body: unknown = {}): Promise<Response> {
   return Promise.resolve(
@@ -117,7 +123,11 @@ test('chunked: begin → 2 batches → commit 发布两批的并集', async () =
   assert.equal((await r.json()).file_count, 2);
 
   // 第 2 批(累计)
-  r = await postForm(app, `/api/sites/big/deploys/${deploy_id}/files`, form([{ path: 'assets/app.js', bytes: 200 }]));
+  r = await postForm(
+    app,
+    `/api/sites/big/deploys/${deploy_id}/files`,
+    form([{ path: 'assets/app.js', bytes: 200 }]),
+  );
   assert.equal(r.status, 200);
   const batch2 = await r.json();
   assert.equal(batch2.file_count, 3);
@@ -144,7 +154,11 @@ test('chunked: begin → 2 batches → commit 发布两批的并集', async () =
 test('chunked: 跨批重传同路径按 rel 去重(不重复计数)', async () => {
   const { app } = await setup();
   const { deploy_id } = await (await postJson(app, '/api/sites/dd/deploys')).json();
-  await postForm(app, `/api/sites/dd/deploys/${deploy_id}/files`, form([{ path: 'index.html', bytes: 'v1' }]));
+  await postForm(
+    app,
+    `/api/sites/dd/deploys/${deploy_id}/files`,
+    form([{ path: 'index.html', bytes: 'v1' }]),
+  );
   const r = await postForm(
     app,
     `/api/sites/dd/deploys/${deploy_id}/files`,
@@ -159,10 +173,18 @@ test('GC: keepVersions=2,部署 3 次裁掉最旧版本并回收其存储', asyn
   const { app, db, storage } = await setup({ PAGEPIN_KEEP_VERSIONS: '2' });
   const prefixes: string[] = [];
   for (let i = 0; i < 3; i++) {
-    const r = await postForm(app, '/api/sites/gc/deploy', form([{ path: 'index.html', bytes: `v${i}` }], 'GC'));
+    const r = await postForm(
+      app,
+      '/api/sites/gc/deploy',
+      form([{ path: 'index.html', bytes: `v${i}` }], 'GC'),
+    );
     assert.equal(r.status, 200);
     // 第 3 次(i=2)发布触达上限 → 响应里 pruned_versions=1;前两次为 0
-    assert.equal((await r.json()).pruned_versions, i < 2 ? 0 : 1, 'pruned_versions 透出被回收版本数');
+    assert.equal(
+      (await r.json()).pruned_versions,
+      i < 2 ? 0 : 1,
+      'pruned_versions 透出被回收版本数',
+    );
     const row = (await db.select().from(sites).where(eq(sites.slug, 'gc')))[0];
     prefixes.push(row!.versions[row!.versions.length - 1]!.storage_prefix);
   }
@@ -175,10 +197,18 @@ test('GC: keepVersions=2,部署 3 次裁掉最旧版本并回收其存储', asyn
 test('配额: 部署累计超过 PAGEPIN_FREE_USER_MB 即 413', async () => {
   const { app } = await setup({ PAGEPIN_FREE_USER_MB: '1', PAGEPIN_KEEP_VERSIONS: '0' });
   // 站点 1 ~0.6MB:通过
-  let r = await postForm(app, '/api/sites/q1/deploy', form([{ path: 'index.html', bytes: 600 * 1024 }]));
+  let r = await postForm(
+    app,
+    '/api/sites/q1/deploy',
+    form([{ path: 'index.html', bytes: 600 * 1024 }]),
+  );
   assert.equal(r.status, 200);
   // 站点 2 ~0.6MB:总和 ~1.2MB > 1MB → 413
-  r = await postForm(app, '/api/sites/q2/deploy', form([{ path: 'index.html', bytes: 600 * 1024 }]));
+  r = await postForm(
+    app,
+    '/api/sites/q2/deploy',
+    form([{ path: 'index.html', bytes: 600 * 1024 }]),
+  );
   assert.equal(r.status, 413, '超配额被拒');
 });
 
@@ -186,7 +216,11 @@ test('abort: 丢弃草稿并回收已上传的存储', async () => {
   const { app, db, storage } = await setup();
   const begin = await (await postJson(app, '/api/sites/ab/deploys')).json();
   const { deploy_id, storage_prefix } = begin;
-  await postForm(app, `/api/sites/ab/deploys/${deploy_id}/files`, form([{ path: 'index.html', bytes: 'draft' }]));
+  await postForm(
+    app,
+    `/api/sites/ab/deploys/${deploy_id}/files`,
+    form([{ path: 'index.html', bytes: 'draft' }]),
+  );
   assert.equal(await storage.exists(storage_prefix + 'index.html'), true);
 
   const r = await del(app, `/api/sites/ab/deploys/${deploy_id}`);
@@ -200,23 +234,23 @@ test('begin: 顺手清理本人过期未提交草稿', async () => {
   const { app, db, storage } = await setup();
   const stalePrefix = 'sites/u1/old/stale-vid/';
   await storage.put(stalePrefix + 'index.html', new TextEncoder().encode('old'), 'text/html');
-  await db
-    .insert(deploySessions)
-    .values({
-      id: 'stale-vid',
-      siteId: 's-old',
-      ownerId: 'u1',
-      slug: 'old',
-      storagePrefix: stalePrefix,
-      title: null,
-      manifest: [],
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      expiresAt: new Date(Date.now() - 1000).toISOString(), // 已过期
-    });
+  await db.insert(deploySessions).values({
+    id: 'stale-vid',
+    siteId: 's-old',
+    ownerId: 'u1',
+    slug: 'old',
+    storagePrefix: stalePrefix,
+    title: null,
+    manifest: [],
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    expiresAt: new Date(Date.now() - 1000).toISOString(), // 已过期
+  });
 
   await postJson(app, '/api/sites/fresh/deploys'); // 任一 begin 触发清理
-  const gone = (await db.select().from(deploySessions).where(eq(deploySessions.id, 'stale-vid')))[0];
+  const gone = (
+    await db.select().from(deploySessions).where(eq(deploySessions.id, 'stale-vid'))
+  )[0];
   assert.equal(gone, undefined, '过期草稿行被清');
   assert.equal(await storage.exists(stalePrefix + 'index.html'), false, '过期草稿存储被回收');
 });

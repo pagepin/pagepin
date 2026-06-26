@@ -227,7 +227,8 @@ export const api = {
     request<{ ok: true }>(`/api/me/identities/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   /** 重发邮箱验证信（password 账号，邮箱未验证时）。 */
-  resendVerifyEmail: () => request<{ ok: true; sent: boolean }>('/api/me/verify-email/resend', { method: 'POST' }),
+  resendVerifyEmail: () =>
+    request<{ ok: true; sent: boolean }>('/api/me/verify-email/resend', { method: 'POST' }),
 
   // ---- admin ----
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
@@ -242,7 +243,9 @@ export const api = {
 
   /** 管理员手动标记某用户邮箱已验证（救援:退信/死域/noreply 无法自助验证时）。 */
   verifyUserEmail: (id: string) =>
-    request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/verify-email`, { method: 'POST' }),
+    request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/verify-email`, {
+      method: 'POST',
+    }),
 
   adminSettings: () => request<AdminSettings>('/api/admin/settings'),
 
@@ -285,7 +288,12 @@ export async function fetchInviteInfo(
       credentials: 'same-origin',
     });
     if (!res.ok) return { ok: false, reason: 'invalid' };
-    return (await res.json()) as { ok: boolean; email?: string | null; is_admin?: boolean; reason?: string };
+    return (await res.json()) as {
+      ok: boolean;
+      email?: string | null;
+      is_admin?: boolean;
+      reason?: string;
+    };
   } catch {
     return { ok: false, reason: 'network' };
   }
@@ -428,10 +436,16 @@ export async function deploySite(
     let uploadedBytes = 0;
     for (const b of batches) {
       const bBytes = b.reduce((s, f) => s + f.file.size, 0);
-      await xhrPost(`${base}/deploys/${encodeURIComponent(deployId)}/files`, filesToForm(b), (loaded, total) => {
-        const frac = total > 0 ? loaded / total : 0;
-        onProgress(Math.min(99, Math.round(((uploadedBytes + frac * bBytes) / totalBytes) * 100)));
-      });
+      await xhrPost(
+        `${base}/deploys/${encodeURIComponent(deployId)}/files`,
+        filesToForm(b),
+        (loaded, total) => {
+          const frac = total > 0 ? loaded / total : 0;
+          onProgress(
+            Math.min(99, Math.round(((uploadedBytes + frac * bBytes) / totalBytes) * 100)),
+          );
+        },
+      );
       uploadedBytes += bBytes;
       onProgress(Math.min(99, Math.round((uploadedBytes / totalBytes) * 100)));
     }

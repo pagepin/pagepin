@@ -32,7 +32,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const [, nS, rS, pS, saltB64, hashB64] = parts;
   const want = unb64(hashB64!);
   const got = await scryptAsync(password.normalize('NFKC'), unb64(saltB64!), {
-    N: Number(nS), r: Number(rS), p: Number(pS), dkLen: want.length,
+    N: Number(nS),
+    r: Number(rS),
+    p: Number(pS),
+    dkLen: want.length,
   });
   // 常数时间比较
   if (got.length !== want.length) return false;

@@ -26,7 +26,10 @@ import type { Storage } from '../src/storage/index.js';
 import type { AppDeps, AppEnv } from '../src/types.js';
 import { nowIso, uuid } from '../src/util.js';
 
-const cfg = loadConfig({ PAGEPIN_SECRET: 'test-secret', PAGEPIN_BASE_URL: 'http://localhost:8000' });
+const cfg = loadConfig({
+  PAGEPIN_SECRET: 'test-secret',
+  PAGEPIN_BASE_URL: 'http://localhost:8000',
+});
 
 /** 注入式 mw:绕过真实 Cookie/CSRF,直接放一个已登录管理员进 context。 */
 function injectAdmin(admin: typeof users.$inferSelect): AuthMiddleware {

@@ -24,10 +24,12 @@ function VerifyEmailGate({ email }: { email: string }) {
         <div className="flex h-11 w-11 items-center justify-center rounded-panel bg-amber-50 text-amber-600">
           <Mail className="h-5 w-5" />
         </div>
-        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">Verify your email first</h1>
+        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
+          Verify your email first
+        </h1>
         <p className="mt-1.5 text-[13px] leading-relaxed text-ink-500">
-          We sent a link to <span className="font-mono text-ink-700">{email}</span>. Click it to confirm
-          your email — then you can pick a handle and publish sites.
+          We sent a link to <span className="font-mono text-ink-700">{email}</span>. Click it to
+          confirm your email — then you can pick a handle and publish sites.
         </p>
         <button
           type="button"
@@ -38,7 +40,9 @@ function VerifyEmailGate({ email }: { email: string }) {
           {sending && <Loader2 className="h-4 w-4 animate-spin" />}
           Resend verification email
         </button>
-        <p className="mt-3 text-center text-[11px] text-ink-400">Already clicked it? Reload this page.</p>
+        <p className="mt-3 text-center text-[11px] text-ink-400">
+          Already clicked it? Reload this page.
+        </p>
       </div>
     </div>
   );

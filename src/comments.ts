@@ -141,7 +141,8 @@ function parseThreadCreate(raw: unknown): ThreadCreateIn {
   if (anchor !== null && typeof anchor !== 'string') {
     throw new ApiError(422, 'anchor_text 必须是字符串');
   }
-  if (anchor !== null && cpLen(anchor) > 200) throw new ApiError(422, 'anchor_text 过长（≤200 字）');
+  if (anchor !== null && cpLen(anchor) > 200)
+    throw new ApiError(422, 'anchor_text 过长（≤200 字）');
   if (typeof b.text !== 'string') throw new ApiError(422, 'text 必须是字符串');
   return {
     path: b.path,
@@ -163,7 +164,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   // 查库判活:被禁用用户即时失效(数据面不经控制台中间件,disabled 须在此自行兜住)
-  async function activeViewer(c: Context<AppEnv>): Promise<{ claims: SessionClaims; user: UserRow }> {
+  async function activeViewer(
+    c: Context<AppEnv>,
+  ): Promise<{ claims: SessionClaims; user: UserRow }> {
     const claims = await readSession(c, cfg, plane);
     if (claims === null) throw new ApiError(401, '未登录');
     const user = (await db.select().from(users).where(eq(users.id, claims.sub)))[0];
@@ -181,22 +184,21 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   }
 
   async function commentableSite(handle: string, slug: string): Promise<SiteRow> {
-    const site = (await db
-      .select()
-      .from(sites)
-      .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
-      )[0];
+    const site = (
+      await db
+        .select()
+        .from(sites)
+        .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
+    )[0];
     if (!site) throw new ApiError(404, '站点不存在');
     if (!site.commentsEnabled) throw new ApiError(403, '该站点未开启评论');
     return site;
   }
 
   async function getThread(threadId: string): Promise<CommentThreadRow> {
-    const thread = (await db
-      .select()
-      .from(commentThreads)
-      .where(eq(commentThreads.id, threadId))
-      )[0];
+    const thread = (
+      await db.select().from(commentThreads).where(eq(commentThreads.id, threadId))
+    )[0];
     if (!thread || thread.deletedAt !== null) throw new ApiError(404, '评论不存在');
     return thread;
   }
@@ -294,7 +296,8 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     wrap(async (c) => {
       const raw = await readJson(c);
       if (
-        typeof raw !== 'object' || raw === null ||
+        typeof raw !== 'object' ||
+        raw === null ||
         typeof (raw as Record<string, unknown>).text !== 'string'
       ) {
         throw new ApiError(422, 'text 必须是字符串');
@@ -308,7 +311,8 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         text: cleanText((raw as { text: string }).text),
         created_at: nowIso(),
       };
-      await db.update(commentThreads)
+      await db
+        .update(commentThreads)
         .set({ comments: [...thread.comments, reply], updatedAt: nowIso() })
         .where(eq(commentThreads.id, thread.id));
       return c.json(commentOut(reply));
@@ -324,7 +328,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       const hasResolved = 'resolved' in body;
       const hasKind = 'kind' in body;
       if (!hasResolved && !hasKind) throw new ApiError(422, '需提供 resolved 或 kind');
-      const set: { resolved?: boolean; kind?: string | null; updatedAt: string } = { updatedAt: nowIso() };
+      const set: { resolved?: boolean; kind?: string | null; updatedAt: string } = {
+        updatedAt: nowIso(),
+      };
       if (hasResolved) {
         if (typeof body.resolved !== 'boolean') throw new ApiError(422, 'resolved 必须是布尔值');
         set.resolved = body.resolved;
@@ -362,7 +368,8 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         throw new ApiError(403, '只有评论作者或站点所有者可以删除');
       }
       const now = nowIso();
-      await db.update(commentThreads)
+      await db
+        .update(commentThreads)
         .set({ deletedAt: now, updatedAt: now })
         .where(eq(commentThreads.id, thread.id));
       return c.json({ ok: true });

@@ -109,7 +109,12 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
           <button type="button" className="btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn-primary" disabled={!ready || submitting} onClick={submit}>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!ready || submitting}
+            onClick={submit}
+          >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
             Update password
           </button>

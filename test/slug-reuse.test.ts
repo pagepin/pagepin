@@ -60,11 +60,12 @@ test('soft-deleting a site frees its slug for reuse (plain unique index)', async
   // 现在同名 slug 可被新站复用,不再撞唯一索引。
   await db.insert(sites).values(liveSiteRow('s3', 'u1', 'alice', 'demo'));
 
-  const live = (await db
-    .select()
-    .from(sites)
-    .where(and(eq(sites.ownerHandle, 'alice'), eq(sites.slug, 'demo'), isNull(sites.deletedAt)))
-    )[0];
+  const live = (
+    await db
+      .select()
+      .from(sites)
+      .where(and(eq(sites.ownerHandle, 'alice'), eq(sites.slug, 'demo'), isNull(sites.deletedAt)))
+  )[0];
   assert.equal(live?.id, 's3', 'the reused slug resolves to the new live site');
 
   const tomb = (await db.select().from(sites).where(eq(sites.id, 's1')))[0];

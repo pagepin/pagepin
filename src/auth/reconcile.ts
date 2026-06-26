@@ -30,9 +30,11 @@ interface Candidate extends UserRow {
 export function pickSurvivor(cands: Candidate[], email: string): Candidate {
   return [...cands].sort((a, b) => {
     if (a.hasContent !== b.hasContent) return a.hasContent ? -1 : 1;
-    const ah = a.handle != null, bh = b.handle != null;
+    const ah = a.handle != null,
+      bh = b.handle != null;
     if (ah !== bh) return ah ? -1 : 1;
-    const ac = a.canonicalEmail === email, bc = b.canonicalEmail === email;
+    const ac = a.canonicalEmail === email,
+      bc = b.canonicalEmail === email;
     if (ac !== bc) return ac ? -1 : 1;
     return a.id < b.id ? -1 : 1;
   })[0]!;
@@ -40,27 +42,40 @@ export function pickSurvivor(cands: Candidate[], email: string): Candidate {
 
 async function hasContent(deps: AppDeps, userId: string, handle: string | null): Promise<boolean> {
   if (handle != null) return true;
-  const site = (await deps.db
-    .select({ id: sites.id })
-    .from(sites)
-    .where(and(eq(sites.ownerId, userId), isNull(sites.deletedAt)))
-    )[0];
+  const site = (
+    await deps.db
+      .select({ id: sites.id })
+      .from(sites)
+      .where(and(eq(sites.ownerId, userId), isNull(sites.deletedAt)))
+  )[0];
   return !!site;
 }
 
 /** 把一个【空】loser 并入 survivor —— 幂等、可恢复的固定步骤序列(account_merges 作闩锁)。 */
-async function reconcileOne(deps: AppDeps, survivor: UserRow, loser: UserRow, email: string): Promise<void> {
+async function reconcileOne(
+  deps: AppDeps,
+  survivor: UserRow,
+  loser: UserRow,
+  email: string,
+): Promise<void> {
   const { db } = deps;
   if (survivor.id === loser.id) return;
   const now = nowIso();
 
   // 闩锁:loser_id 唯一。已有不同 survivor 的闩 → 退避(防对向并发把两个都禁用);已 done → 结束。
   try {
-    await db
-      .insert(accountMerges)
-      .values({ id: uuid(), loserId: loser.id, survivorId: survivor.id, emailKey: email, status: 'moving', createdAt: now });
+    await db.insert(accountMerges).values({
+      id: uuid(),
+      loserId: loser.id,
+      survivorId: survivor.id,
+      emailKey: email,
+      status: 'moving',
+      createdAt: now,
+    });
   } catch {
-    const ex = (await db.select().from(accountMerges).where(eq(accountMerges.loserId, loser.id)))[0];
+    const ex = (
+      await db.select().from(accountMerges).where(eq(accountMerges.loserId, loser.id))
+    )[0];
     if (!ex) return;
     if (ex.survivorId !== survivor.id || ex.status === 'done' || ex.status === 'conflict') return;
   }
@@ -69,13 +84,22 @@ async function reconcileOne(deps: AppDeps, survivor: UserRow, loser: UserRow, em
   if (loser.isAdmin) await db.update(users).set({ isAdmin: true }).where(eq(users.id, survivor.id));
 
   // 杀掉 loser:disabled 是 PAT 鉴权唯一看的开关(deps.ts),故先 disabled + 吊销 token 才真正停掉它的 CLI。
-  await db.update(users).set({ disabled: true, sessionEpoch: loser.sessionEpoch + 1 }).where(eq(users.id, loser.id));
-  await db.update(apiTokens).set({ revokedAt: now }).where(and(eq(apiTokens.userId, loser.id), isNull(apiTokens.revokedAt)));
+  await db
+    .update(users)
+    .set({ disabled: true, sessionEpoch: loser.sessionEpoch + 1 })
+    .where(eq(users.id, loser.id));
+  await db
+    .update(apiTokens)
+    .set({ revokedAt: now })
+    .where(and(eq(apiTokens.userId, loser.id), isNull(apiTokens.revokedAt)));
 
   // 禁用后复查 loser 仍为空(防极小窗口内 loser 抢着发了内容)。若有内容 → 解禁 + 记 conflict,不破坏数据。
   if (await hasContent(deps, loser.id, loser.handle)) {
     await db.update(users).set({ disabled: false }).where(eq(users.id, loser.id));
-    await db.update(accountMerges).set({ status: 'conflict' }).where(eq(accountMerges.loserId, loser.id));
+    await db
+      .update(accountMerges)
+      .set({ status: 'conflict' })
+      .where(eq(accountMerges.loserId, loser.id));
     return;
   }
 
@@ -89,35 +113,70 @@ async function reconcileOne(deps: AppDeps, survivor: UserRow, loser: UserRow, em
   }
 
   // 搬站点/草稿/设备授权/token(loser 为空 → 站点 0 行;写成通用形以兼容历史数据)。
-  await db.update(sites).set({ ownerId: survivor.id, ownerHandle: survivor.handle ?? '' }).where(eq(sites.ownerId, loser.id));
+  await db
+    .update(sites)
+    .set({ ownerId: survivor.id, ownerHandle: survivor.handle ?? '' })
+    .where(eq(sites.ownerId, loser.id));
   await db.update(apiTokens).set({ userId: survivor.id }).where(eq(apiTokens.userId, loser.id));
-  await db.update(deploySessions).set({ ownerId: survivor.id }).where(eq(deploySessions.ownerId, loser.id));
+  await db
+    .update(deploySessions)
+    .set({ ownerId: survivor.id })
+    .where(eq(deploySessions.ownerId, loser.id));
   await db.update(deviceAuths).set({ userId: survivor.id }).where(eq(deviceAuths.userId, loser.id));
 
   // canonical 槽:先腾空 loser(若它占着),再让 survivor 认领(部分唯一索引保证只一个 owner;email 取自触发参数不依赖 loser 行)。
   await db.update(users).set({ canonicalEmail: null, oidcSub: null }).where(eq(users.id, loser.id));
   await db
     .update(users)
-    .set({ canonicalEmail: email, emailVerified: true, email: survivor.email ?? loser.email ?? email })
-    .where(and(eq(users.id, survivor.id), or(isNull(users.canonicalEmail), eq(users.canonicalEmail, email))));
+    .set({
+      canonicalEmail: email,
+      emailVerified: true,
+      email: survivor.email ?? loser.email ?? email,
+    })
+    .where(
+      and(
+        eq(users.id, survivor.id),
+        or(isNull(users.canonicalEmail), eq(users.canonicalEmail, email)),
+      ),
+    );
 
-  await db.update(accountMerges).set({ status: 'done', finishedAt: nowIso() }).where(eq(accountMerges.loserId, loser.id));
+  await db
+    .update(accountMerges)
+    .set({ status: 'done', finishedAt: nowIso() })
+    .where(eq(accountMerges.loserId, loser.id));
 }
 
 /** 邮箱(canonical)刚被验证后调用:找出同邮箱、已证明掌握该邮箱的账号,空账号并入有内容的幸存者。
  *  ≤1 个候选 → no-op;≥2 个有内容 → 记 conflict(人工);否则空账号逐个 reconcileOne。 */
-export async function reconcileByVerifiedEmail(deps: AppDeps, email: string | null | undefined): Promise<void> {
+export async function reconcileByVerifiedEmail(
+  deps: AppDeps,
+  email: string | null | undefined,
+): Promise<void> {
   if (!email) return;
   const { db } = deps;
 
   // 候选 = 占着 canonical 槽且已验证 的账号,∪ 持有该邮箱 verified 身份 的账号。
-  const byCanon = await db.select().from(users).where(and(eq(users.canonicalEmail, email), eq(users.emailVerified, true)));
-  const identRows = await db.select({ userId: identities.userId }).from(identities).where(and(eq(identities.email, email), eq(identities.emailVerified, true)));
+  const byCanon = await db
+    .select()
+    .from(users)
+    .where(and(eq(users.canonicalEmail, email), eq(users.emailVerified, true)));
+  const identRows = await db
+    .select({ userId: identities.userId })
+    .from(identities)
+    .where(and(eq(identities.email, email), eq(identities.emailVerified, true)));
   const ids = new Set<string>([...byCanon.map((u) => u.id), ...identRows.map((r) => r.userId)]);
   if (ids.size <= 1) return;
 
   const rows = (
-    await Promise.all([...ids].map((id) => db.select().from(users).where(eq(users.id, id)).then((r) => r[0])))
+    await Promise.all(
+      [...ids].map((id) =>
+        db
+          .select()
+          .from(users)
+          .where(eq(users.id, id))
+          .then((r) => r[0]),
+      ),
+    )
   ).filter((u): u is UserRow => !!u && !u.disabled);
   if (rows.length <= 1) return;
 
@@ -131,9 +190,14 @@ export async function reconcileByVerifiedEmail(deps: AppDeps, email: string | nu
     const survivor = sorted[0]!;
     for (const loser of sorted.slice(1)) {
       try {
-        await db
-          .insert(accountMerges)
-          .values({ id: uuid(), loserId: loser.id, survivorId: survivor.id, emailKey: email, status: 'conflict', createdAt: nowIso() });
+        await db.insert(accountMerges).values({
+          id: uuid(),
+          loserId: loser.id,
+          survivorId: survivor.id,
+          emailKey: email,
+          status: 'conflict',
+          createdAt: nowIso(),
+        });
       } catch {
         /* 已有闩锁,忽略 */
       }
@@ -151,7 +215,10 @@ export async function reconcileByVerifiedEmail(deps: AppDeps, email: string | nu
 /** 恢复扫描:完成任何卡在 'moving' 的合并(进程崩在中途、且没人再点验证信时兜底)。
  *  幂等:reconcileOne 重跑安全。Node 启动调一次;Workers 每 isolate 构建时调一次(无 moving 行即 no-op)。 */
 export async function resumeSweep(deps: AppDeps): Promise<void> {
-  const moving = await deps.db.select().from(accountMerges).where(eq(accountMerges.status, 'moving'));
+  const moving = await deps.db
+    .select()
+    .from(accountMerges)
+    .where(eq(accountMerges.status, 'moving'));
   for (const m of moving) {
     const survivor = (await deps.db.select().from(users).where(eq(users.id, m.survivorId)))[0];
     const loser = (await deps.db.select().from(users).where(eq(users.id, m.loserId)))[0];

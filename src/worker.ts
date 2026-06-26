@@ -66,7 +66,9 @@ async function buildApp(env: Env): Promise<AppHandle> {
     // env.ASSETS.fetch 用 workers-types 的 Request/Response;createApp 回调签名用全局(WebWorker lib)
     // 的同名类型 —— 两套结构互不完全兼容(getSetCookie vs getAll),此处桥接一次。
     serveAssets: (req) =>
-      env.ASSETS.fetch(req as unknown as Parameters<Fetcher['fetch']>[0]) as unknown as Promise<Response>,
+      env.ASSETS.fetch(
+        req as unknown as Parameters<Fetcher['fetch']>[0],
+      ) as unknown as Promise<Response>,
     injectHtmlStream: htmlRewriterInject,
   });
 }

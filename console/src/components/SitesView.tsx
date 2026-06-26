@@ -23,8 +23,8 @@ function EmptyState({ onPick, onCopyInstall }: { onPick: () => void; onCopyInsta
         </div>
         <div className="mt-4 text-[15px] font-semibold text-ink-700">No sites yet</div>
         <p className="mx-auto mt-1.5 max-w-md text-[13px] leading-relaxed text-ink-400">
-          Drop an HTML or Markdown file — or a whole folder — to publish your first page. You&rsquo;ll
-          get a shareable link the moment it lands.
+          Drop an HTML or Markdown file — or a whole folder — to publish your first page.
+          You&rsquo;ll get a shareable link the moment it lands.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2.5">
           <button type="button" className="btn-primary" onClick={onPick}>

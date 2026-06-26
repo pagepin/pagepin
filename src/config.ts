@@ -145,7 +145,9 @@ export function loadConfig(env: Env): Config {
     const clientId = env.PAGEPIN_OIDC_CLIENT_ID;
     const clientSecret = env.PAGEPIN_OIDC_CLIENT_SECRET;
     if (!issuer || !clientId || !clientSecret) {
-      throw new Error('oidc 模式需设置 PAGEPIN_OIDC_ISSUER / PAGEPIN_OIDC_CLIENT_ID / PAGEPIN_OIDC_CLIENT_SECRET');
+      throw new Error(
+        'oidc 模式需设置 PAGEPIN_OIDC_ISSUER / PAGEPIN_OIDC_CLIENT_ID / PAGEPIN_OIDC_CLIENT_SECRET',
+      );
     }
     let authParams: Record<string, string> = {};
     if (env.PAGEPIN_OIDC_AUTH_PARAMS) {
@@ -171,7 +173,9 @@ export function loadConfig(env: Env): Config {
     const accessKey = env.PAGEPIN_S3_ACCESS_KEY;
     const secretKey = env.PAGEPIN_S3_SECRET_KEY;
     if (!endpoint || !bucket || !accessKey || !secretKey) {
-      throw new Error('s3 存储需设置 PAGEPIN_S3_ENDPOINT / PAGEPIN_S3_BUCKET / PAGEPIN_S3_ACCESS_KEY / PAGEPIN_S3_SECRET_KEY');
+      throw new Error(
+        's3 存储需设置 PAGEPIN_S3_ENDPOINT / PAGEPIN_S3_BUCKET / PAGEPIN_S3_ACCESS_KEY / PAGEPIN_S3_SECRET_KEY',
+      );
     }
     s3 = {
       endpoint,
@@ -193,13 +197,17 @@ export function loadConfig(env: Env): Config {
     .filter(Boolean);
   for (const id of wantProviders) {
     if (!isSupportedSocialProvider(id)) {
-      throw new Error(`PAGEPIN_OAUTH_PROVIDERS 含未知 provider:${id}(支持 ${SOCIAL_PROVIDER_IDS.join('/')})`);
+      throw new Error(
+        `PAGEPIN_OAUTH_PROVIDERS 含未知 provider:${id}(支持 ${SOCIAL_PROVIDER_IDS.join('/')})`,
+      );
     }
     const up = id.toUpperCase();
     const clientId = env[`PAGEPIN_OAUTH_${up}_CLIENT_ID`];
     const clientSecret = env[`PAGEPIN_OAUTH_${up}_CLIENT_SECRET`];
     if (!clientId || !clientSecret) {
-      throw new Error(`社交登录 ${id} 需设置 PAGEPIN_OAUTH_${up}_CLIENT_ID 与 PAGEPIN_OAUTH_${up}_CLIENT_SECRET`);
+      throw new Error(
+        `社交登录 ${id} 需设置 PAGEPIN_OAUTH_${up}_CLIENT_ID 与 PAGEPIN_OAUTH_${up}_CLIENT_SECRET`,
+      );
     }
     socialProviders.push({ id, clientId, clientSecret });
   }
@@ -210,7 +218,9 @@ export function loadConfig(env: Env): Config {
   const tsSecret = env.PAGEPIN_TURNSTILE_SECRET_KEY;
   if (tsSite || tsSecret) {
     if (!tsSite || !tsSecret) {
-      throw new Error('Turnstile 需同时设置 PAGEPIN_TURNSTILE_SITE_KEY 与 PAGEPIN_TURNSTILE_SECRET_KEY');
+      throw new Error(
+        'Turnstile 需同时设置 PAGEPIN_TURNSTILE_SITE_KEY 与 PAGEPIN_TURNSTILE_SECRET_KEY',
+      );
     }
     turnstile = { siteKey: tsSite, secretKey: tsSecret };
   }
@@ -272,8 +282,7 @@ export function loadConfig(env: Env): Config {
     deployTtlH: num(env, 'PAGEPIN_DEPLOY_TTL_H', 2),
     publicMaxHours: num(env, 'PAGEPIN_PUBLIC_MAX_HOURS', 168),
     deviceTokenTtlDays: num(env, 'PAGEPIN_DEVICE_TOKEN_TTL_DAYS', 90),
-    secureCookies:
-      mode === 'dual' ? externalScheme === 'https' : baseUrl.startsWith('https://'),
+    secureCookies: mode === 'dual' ? externalScheme === 'https' : baseUrl.startsWith('https://'),
   };
 }
 

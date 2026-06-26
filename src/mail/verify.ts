@@ -18,7 +18,13 @@ export async function sendVerificationEmail(deps: AppDeps, user: UserRow): Promi
   if (!mailer || !user.canonicalEmail) return false;
   const now = Math.floor(Date.now() / 1000);
   const token = await sign(
-    { purpose: 'verify-email', uid: user.id, eml: user.canonicalEmail, iat: now, exp: now + VERIFY_TTL },
+    {
+      purpose: 'verify-email',
+      uid: user.id,
+      eml: user.canonicalEmail,
+      iat: now,
+      exp: now + VERIFY_TTL,
+    },
     cfg.secret,
     'HS256',
   );

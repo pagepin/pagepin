@@ -8,7 +8,9 @@ import { useStore } from '../store';
  * 批准只调 /api/device/approve;明文 token 经发起方轮询交付,本页永远不展示 token。 */
 export function Activate() {
   const me = useStore((s) => s.me);
-  const userCode = (new URLSearchParams(location.search).get('user_code') ?? '').trim().toUpperCase();
+  const userCode = (new URLSearchParams(location.search).get('user_code') ?? '')
+    .trim()
+    .toUpperCase();
   const [phase, setPhase] = useState<'idle' | 'working' | 'approved' | 'denied' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +30,9 @@ export function Activate() {
         <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-panel bg-red-50 text-red-500">
           <AlertTriangle className="h-5 w-5" />
         </div>
-        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">Missing device code</h1>
+        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
+          Missing device code
+        </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
           Open the link your tool printed, or start the login again from your terminal.
         </p>
@@ -44,7 +48,8 @@ export function Activate() {
         </div>
         <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">Approved</h1>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-          Return to your terminal — the token has been delivered to the tool that started this. You can close this tab.
+          Return to your terminal — the token has been delivered to the tool that started this. You
+          can close this tab.
         </p>
       </>,
     );
@@ -98,10 +103,13 @@ export function Activate() {
       <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-tide-600">
         Device authorization
       </div>
-      <h1 className="mt-1 text-[19px] font-bold tracking-tight text-ink-900">Approve this sign-in?</h1>
+      <h1 className="mt-1 text-[19px] font-bold tracking-tight text-ink-900">
+        Approve this sign-in?
+      </h1>
       <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-        A tool is requesting an API token for <span className="font-semibold text-ink-700">{who}</span>. Only
-        approve if the code below matches what your tool is showing.
+        A tool is requesting an API token for{' '}
+        <span className="font-semibold text-ink-700">{who}</span>. Only approve if the code below
+        matches what your tool is showing.
       </p>
 
       <div className="mt-4 rounded-field border border-ink-200 bg-ink-50 px-3 py-2.5 text-center font-mono text-lg font-semibold tracking-[0.3em] text-ink-800">
@@ -113,7 +121,12 @@ export function Activate() {
       </div>
 
       <div className="mt-2 flex gap-2">
-        <button type="button" className="btn-primary flex-1 !py-2.5" disabled={working} onClick={approve}>
+        <button
+          type="button"
+          className="btn-primary flex-1 !py-2.5"
+          disabled={working}
+          onClick={approve}
+        >
           {working && <Loader2 className="h-4 w-4 animate-spin" />}
           Approve
         </button>
@@ -128,7 +141,8 @@ export function Activate() {
       </div>
 
       <p className="mt-3 text-xs leading-relaxed text-ink-400">
-        The token is delivered straight to the tool that started this — it is never shown here or pasted into a chat.
+        The token is delivered straight to the tool that started this — it is never shown here or
+        pasted into a chat.
       </p>
     </>,
   );

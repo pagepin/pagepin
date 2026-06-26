@@ -8,7 +8,15 @@ import { PasswordDialog } from './PasswordDialog';
 import { toast, toastError } from './Toast';
 import { TokenManager } from './TokenManager';
 
-function Card({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+function Card({
+  title,
+  sub,
+  children,
+}: {
+  title: string;
+  sub?: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className="rounded-card border border-ink-200 bg-white p-6 shadow-card">
       <div className="flex items-baseline justify-between gap-3">
@@ -146,7 +154,9 @@ function ConnectedAccounts({ me }: { me: Me }) {
               type="button"
               className="btn-ghost"
               disabled={onlyOne || busy === it.id}
-              title={onlyOne ? 'Add another sign-in method before disconnecting this one' : undefined}
+              title={
+                onlyOne ? 'Add another sign-in method before disconnecting this one' : undefined
+              }
               onClick={() => disconnect(it.id)}
             >
               {busy === it.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}
@@ -155,7 +165,12 @@ function ConnectedAccounts({ me }: { me: Me }) {
         </Row>
       ))}
       {available.map((p, idx) => (
-        <Row key={p} label={PROVIDER_LABEL[p] ?? p} desc="Not connected" last={idx === available.length - 1}>
+        <Row
+          key={p}
+          label={PROVIDER_LABEL[p] ?? p}
+          desc="Not connected"
+          last={idx === available.length - 1}
+        >
           <button type="button" className="btn-primary" onClick={() => connect(p)}>
             Connect
           </button>
@@ -175,7 +190,11 @@ function VerifyEmailBanner({ me }: { me: Me }) {
     setSending(true);
     api
       .resendVerifyEmail()
-      .then((r) => toast(r.sent ? 'Verification email sent' : 'Email sending is not configured on this instance'))
+      .then((r) =>
+        toast(
+          r.sent ? 'Verification email sent' : 'Email sending is not configured on this instance',
+        ),
+      )
       .catch((e) => toastError(e, 'Could not send verification email'))
       .finally(() => setSending(false));
   };
@@ -316,7 +335,11 @@ export function Settings() {
             <>
               <div className="grid grid-cols-3 gap-3">
                 <Stat label="SITES" value={String(usage.sites)} sub="hosted here" />
-                <Stat label="STORAGE" value={formatBytes(usage.storage_bytes)} sub="across all versions" />
+                <Stat
+                  label="STORAGE"
+                  value={formatBytes(usage.storage_bytes)}
+                  sub="across all versions"
+                />
                 <Stat
                   label="PER-SITE LIMIT"
                   value={`${limitMb} MB`}
@@ -335,7 +358,9 @@ export function Settings() {
                       return (
                         <div key={s.slug}>
                           <div className="flex items-center justify-between gap-2 text-xs">
-                            <span className="truncate font-mono font-semibold text-ink-700">{s.slug}</span>
+                            <span className="truncate font-mono font-semibold text-ink-700">
+                              {s.slug}
+                            </span>
                             <span className="shrink-0 text-ink-400">
                               {formatBytes(s.total_bytes)}
                               {hasLimit ? ` / ${limitMb} MB` : ''} · {s.file_count}

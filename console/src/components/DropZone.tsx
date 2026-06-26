@@ -269,10 +269,9 @@ export function DropZone({
 
         {!uploading && existing && !slugLocked && (
           <div className="mt-3 rounded-field border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
-            Slug “{slug}” is already taken by your site{' '}
-            <b>“{existing.title || existing.slug}”</b> — this deploy will publish as a{' '}
-            <b>new version</b> of it (currently {existing.file_count} files, updated{' '}
-            {formatRelative(existing.updated_at)};{' '}
+            Slug “{slug}” is already taken by your site <b>“{existing.title || existing.slug}”</b> —
+            this deploy will publish as a <b>new version</b> of it (currently {existing.file_count}{' '}
+            files, updated {formatRelative(existing.updated_at)};{' '}
             {me && me.limits.keep_versions > 0
               ? `only the last ${me.limits.keep_versions} versions are kept`
               : 'older versions stay rollback-able'}

@@ -28,7 +28,11 @@ export class FsStorage implements Storage {
     return p;
   }
 
-  async put(key: string, data: ReadableStream<Uint8Array> | Uint8Array, _contentType: string): Promise<void> {
+  async put(
+    key: string,
+    data: ReadableStream<Uint8Array> | Uint8Array,
+    _contentType: string,
+  ): Promise<void> {
     const file = this.fileFor(key);
     await mkdir(dirname(file), { recursive: true });
     if (data instanceof Uint8Array) {
@@ -78,7 +82,10 @@ export class FsStorage implements Storage {
       .sort();
   }
 
-  async open(key: string, opts?: { ifNoneMatch?: string }): Promise<{ meta: ObjectMeta; body: ReadableStream<Uint8Array> }> {
+  async open(
+    key: string,
+    opts?: { ifNoneMatch?: string },
+  ): Promise<{ meta: ObjectMeta; body: ReadableStream<Uint8Array> }> {
     const file = this.fileFor(key);
     let st;
     try {

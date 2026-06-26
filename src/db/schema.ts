@@ -162,10 +162,7 @@ export const apiTokens = sqliteTable(
     expiresAt: text('expires_at'), // 非空 = 到期即拒(设备授权铸的 token 用;普通 PAT 为 null = 不过期)
     revokedAt: text('revoked_at'), // 软吊销;命中即拒
   },
-  (t) => [
-    uniqueIndex('tokens_hash_uq').on(t.tokenHash),
-    index('tokens_user_idx').on(t.userId),
-  ],
+  (t) => [uniqueIndex('tokens_hash_uq').on(t.tokenHash), index('tokens_user_idx').on(t.userId)],
 );
 
 /** 注册邀请 —— 一次性链接,凭 token 建号。token 只存 sha256(明文),明文生成时展示一次。 */

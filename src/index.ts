@@ -54,7 +54,10 @@ async function main(): Promise<void> {
     db = await createMysqlDb(cfg.dbUrl!);
   } else {
     mkdirSync(cfg.dataDir, { recursive: true }); // 本地 file: 模式 libSQL 不会自建父目录
-    db = await createLibsqlDb(cfg.dbUrl ?? `file:${join(cfg.dataDir, 'pagepin.db')}`, cfg.dbAuthToken);
+    db = await createLibsqlDb(
+      cfg.dbUrl ?? `file:${join(cfg.dataDir, 'pagepin.db')}`,
+      cfg.dbAuthToken,
+    );
   }
   const storage = await createStorage(cfg);
 
@@ -65,17 +68,28 @@ async function main(): Promise<void> {
   }
 
   // 续跑任何卡在中途的账号合并(崩溃恢复;无 moving 行即 no-op)。
-  await resumeSweep({ config: cfg, db, storage }).catch((e) => console.error('reconcile resumeSweep 失败:', e));
+  await resumeSweep({ config: cfg, db, storage }).catch((e) =>
+    console.error('reconcile resumeSweep 失败:', e),
+  );
 
   // skills/pagepin/SKILL.md 与 console/dist 均相对仓库根定位;src/index.ts 与 dist/index.js
   // 距仓库根同深(一层),'../' 在两种形态下都成立。
   const skillMd = readFileSync(new URL('../skills/pagepin/SKILL.md', import.meta.url), 'utf-8');
-  const apiMd = readFileSync(new URL('../skills/pagepin/references/api.md', import.meta.url), 'utf-8');
+  const apiMd = readFileSync(
+    new URL('../skills/pagepin/references/api.md', import.meta.url),
+    'utf-8',
+  );
   const consoleDistUrl = new URL('../console/dist', import.meta.url);
   const consoleDist = existsSync(consoleDistUrl) ? fileURLToPath(consoleDistUrl) : undefined;
 
   const app = await createApp(
-    { config: cfg, db, storage, mailer: createMailer(cfg.mail), rateLimiter: new MemoryRateLimiter() },
+    {
+      config: cfg,
+      db,
+      storage,
+      mailer: createMailer(cfg.mail),
+      rateLimiter: new MemoryRateLimiter(),
+    },
     { consoleDist, skillMd, apiMd, mountConsole: mountConsoleStatic },
   );
 
@@ -94,7 +108,8 @@ async function main(): Promise<void> {
         );
       }
     }
-    if (!consoleDist) console.log('console dist 未构建:控制台前端走 vite 代理(pnpm -C console dev)');
+    if (!consoleDist)
+      console.log('console dist 未构建:控制台前端走 vite 代理(pnpm -C console dev)');
   });
 }
 

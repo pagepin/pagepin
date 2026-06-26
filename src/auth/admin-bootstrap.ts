@@ -37,17 +37,15 @@ async function upsertAdmin(
   }
   const id = uuid();
   try {
-    await deps.db
-      .insert(users)
-      .values({
-        id,
-        email,
-        canonicalEmail: canonical,
-        passwordHash,
-        displayName: email.split('@')[0] || email,
-        isAdmin: true,
-        createdAt: nowIso(),
-      });
+    await deps.db.insert(users).values({
+      id,
+      email,
+      canonicalEmail: canonical,
+      passwordHash,
+      displayName: email.split('@')[0] || email,
+      isAdmin: true,
+      createdAt: nowIso(),
+    });
   } catch (e) {
     // 唯一索引兜并发同邮箱:落库失败后该 canonical 已存在 → 改 update;否则真异常上抛
     const now = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
@@ -61,20 +59,20 @@ async function upsertAdmin(
 
 /** admin 账号的 password 身份(provider='password', sub=canonicalEmail);唯一索引兜并发,已存在即忽略。 */
 async function ensureAdminPasswordIdentity(
-  deps: AppDeps, userId: string, canonical: string,
+  deps: AppDeps,
+  userId: string,
+  canonical: string,
 ): Promise<void> {
   try {
-    await deps.db
-      .insert(identities)
-      .values({
-        id: uuid(),
-        userId,
-        provider: 'password',
-        sub: canonical,
-        email: canonical,
-        emailVerified: false,
-        createdAt: nowIso(),
-      });
+    await deps.db.insert(identities).values({
+      id: uuid(),
+      userId,
+      provider: 'password',
+      sub: canonical,
+      email: canonical,
+      emailVerified: false,
+      createdAt: nowIso(),
+    });
   } catch {
     /* 已存在 → 忽略 */
   }
@@ -92,7 +90,9 @@ export async function bootstrapAdmin(
   const canonical = canonicalEmail(email);
   if (!canonical) return false; // admin 邮箱配置无效
   const password = cfg.adminPassword;
-  const existing = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
+  const existing = (
+    await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical))
+  )[0];
   if (
     opts.guarded &&
     existing &&

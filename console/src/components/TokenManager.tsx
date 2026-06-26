@@ -94,14 +94,20 @@ export function TokenManager() {
         Deploy credentials for agents &amp; CI, scoped to your sites. The{' '}
         <Sparkles className="inline h-3 w-3 -translate-y-px text-tide-500" /> button copies the
         one-line{' '}
-        <a href="https://github.com/vercel-labs/skills" target="_blank" rel="noreferrer" className="text-tide-600 underline">
+        <a
+          href="https://github.com/vercel-labs/skills"
+          target="_blank"
+          rel="noreferrer"
+          className="text-tide-600 underline"
+        >
           npx skills
         </a>{' '}
         install command (or read the{' '}
         <a href="/skill.md" target="_blank" rel="noreferrer" className="text-tide-600 underline">
           skill guide
         </a>
-        ). The token stays out of it — the agent gets it via browser login, so it never lands in a chat.
+        ). The token stays out of it — the agent gets it via browser login, so it never lands in a
+        chat.
       </p>
 
       <div className="mt-4 flex gap-2">

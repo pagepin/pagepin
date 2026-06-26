@@ -33,15 +33,31 @@ export interface SessionClaims {
 const ttl = (cfg: Config) => cfg.sessionTtlH * 3600;
 
 export async function mint(
-  cfg: Config, plane: Plane, sub: string, handle: string | null, epoch: number, csrf?: string,
+  cfg: Config,
+  plane: Plane,
+  sub: string,
+  handle: string | null,
+  epoch: number,
+  csrf?: string,
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  const claims: SessionClaims = { sub, hdl: handle, pln: plane, epo: epoch, iat: now, exp: now + ttl(cfg) };
+  const claims: SessionClaims = {
+    sub,
+    hdl: handle,
+    pln: plane,
+    epo: epoch,
+    iat: now,
+    exp: now + ttl(cfg),
+  };
   if (csrf) claims.csrf = csrf;
   return sign(claims, cfg.secret, 'HS256');
 }
 
-export async function verify(cfg: Config, token: string, plane: Plane): Promise<SessionClaims | null> {
+export async function verify(
+  cfg: Config,
+  token: string,
+  plane: Plane,
+): Promise<SessionClaims | null> {
   try {
     const claims = (await jwtVerify(token, cfg.secret, 'HS256')) as SessionClaims;
     if (claims.pln !== plane) return null;
@@ -51,7 +67,11 @@ export async function verify(cfg: Config, token: string, plane: Plane): Promise<
   }
 }
 
-export async function readSession(c: Context, cfg: Config, plane: Plane): Promise<SessionClaims | null> {
+export async function readSession(
+  c: Context,
+  cfg: Config,
+  plane: Plane,
+): Promise<SessionClaims | null> {
   const token = getCookie(c, plane === 'view' ? VIEW_COOKIE : SESSION_COOKIE);
   return token ? verify(cfg, token, plane) : null;
 }
@@ -63,11 +83,19 @@ function randomHex(bytes: number): string {
 }
 
 export async function setLoginCookies(
-  c: Context, cfg: Config, plane: Plane, sub: string, handle: string | null, epoch: number,
+  c: Context,
+  cfg: Config,
+  plane: Plane,
+  sub: string,
+  handle: string | null,
+  epoch: number,
 ): Promise<void> {
   const common = {
-    httpOnly: true, secure: cfg.secureCookies, sameSite: 'Lax' as const,
-    maxAge: ttl(cfg), path: '/',
+    httpOnly: true,
+    secure: cfg.secureCookies,
+    sameSite: 'Lax' as const,
+    maxAge: ttl(cfg),
+    path: '/',
   };
   if (plane === 'view') {
     setCookie(c, VIEW_COOKIE, await mint(cfg, 'view', sub, handle, epoch), common);
@@ -107,7 +135,11 @@ export function setOauthNonce(c: Context, cfg: Config): string {
 export function consumeOauthNonce(c: Context, stateNonce: unknown): boolean {
   const cookie = getCookie(c, OAUTH_NONCE_COOKIE);
   deleteCookie(c, OAUTH_NONCE_COOKIE, { path: '/' });
-  if (typeof cookie !== 'string' || typeof stateNonce !== 'string' || cookie.length !== stateNonce.length) {
+  if (
+    typeof cookie !== 'string' ||
+    typeof stateNonce !== 'string' ||
+    cookie.length !== stateNonce.length
+  ) {
     return false;
   }
   let diff = 0;

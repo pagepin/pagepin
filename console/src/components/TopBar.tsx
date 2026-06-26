@@ -64,7 +64,12 @@ export function TopBar() {
                 </button>
               </>
             )}
-            <button type="button" onClick={() => void logout()} title="Sign out" className={iconBtn}>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              title="Sign out"
+              className={iconBtn}
+            >
               <LogOut className="h-4 w-4" />
             </button>
           </div>

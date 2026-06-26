@@ -27,11 +27,12 @@ async function sha256Hex(s: string): Promise<string> {
 export async function canPublish(deps: AppDeps, user: UserRow): Promise<boolean> {
   const { db, config: cfg } = deps;
   if (cfg.authMode === 'none' || user.isAdmin || user.emailVerified || !deps.mailer) return true;
-  const ident = (await db
-    .select({ id: identities.id })
-    .from(identities)
-    .where(and(eq(identities.userId, user.id), eq(identities.emailVerified, true)))
-    )[0];
+  const ident = (
+    await db
+      .select({ id: identities.id })
+      .from(identities)
+      .where(and(eq(identities.userId, user.id), eq(identities.emailVerified, true)))
+  )[0];
   return !!ident;
 }
 
@@ -60,11 +61,12 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
       return c.json({ detail: 'token 无效（应为 pp_ 开头的 PAT）' }, 401);
     }
     const h = await sha256Hex(token);
-    const rec = (await db
-      .select()
-      .from(apiTokens)
-      .where(and(eq(apiTokens.tokenHash, h), isNull(apiTokens.revokedAt)))
-      )[0];
+    const rec = (
+      await db
+        .select()
+        .from(apiTokens)
+        .where(and(eq(apiTokens.tokenHash, h), isNull(apiTokens.revokedAt)))
+    )[0];
     if (!rec) return c.json({ detail: 'token 无效或已吊销' }, 401);
     if (rec.expiresAt && Date.parse(rec.expiresAt) <= Date.now()) {
       return c.json({ detail: 'token 已过期，请重新登录获取' }, 401);
@@ -93,7 +95,8 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     if (!user) return c.json({ detail: '用户不存在，请重新登录' }, 401);
     if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
     // sessionEpoch 比对:断开身份/禁用会 bump epoch,旧会话(epo 不匹配)即失效(?? 0 兼容旧 token)
-    if ((claims.epo ?? 0) !== user.sessionEpoch) return c.json({ detail: '会话已失效，请重新登录' }, 401);
+    if ((claims.epo ?? 0) !== user.sessionEpoch)
+      return c.json({ detail: '会话已失效，请重新登录' }, 401);
     c.set('sessionClaims', claims);
     c.set('authVia', 'cookie');
     c.set('user', user);

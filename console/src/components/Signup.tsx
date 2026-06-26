@@ -86,7 +86,9 @@ export function Signup() {
         <div className="flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
           <UserPlus className="h-5 w-5" />
         </div>
-        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">Create your account</h1>
+        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
+          Create your account
+        </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
           Host static pages and collect pin-point review comments.
         </p>

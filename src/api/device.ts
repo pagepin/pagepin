@@ -65,30 +65,29 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     const deviceCode = newDeviceCode();
     let userCode = newUserCode();
     for (let i = 0; i < 5; i++) {
-      const dup = (await db
-        .select({ id: deviceAuths.id })
-        .from(deviceAuths)
-        .where(eq(deviceAuths.userCode, userCode))
-        )[0];
+      const dup = (
+        await db
+          .select({ id: deviceAuths.id })
+          .from(deviceAuths)
+          .where(eq(deviceAuths.userCode, userCode))
+      )[0];
       if (!dup) break;
       userCode = newUserCode();
     }
 
     const expiresAt = new Date(Date.now() + DEVICE_TTL_S * 1000).toISOString();
-    await db
-      .insert(deviceAuths)
-      .values({
-        id: uuid(),
-        deviceCode,
-        userCode,
-        status: 'pending',
-        userId: null,
-        token: null,
-        tokenName: null,
-        createdAt: nowIso(),
-        expiresAt,
-        approvedAt: null,
-      });
+    await db.insert(deviceAuths).values({
+      id: uuid(),
+      deviceCode,
+      userCode,
+      status: 'pending',
+      userId: null,
+      token: null,
+      tokenName: null,
+      createdAt: nowIso(),
+      expiresAt,
+      approvedAt: null,
+    });
 
     const base = consoleBase(cfg);
     const verificationUri = `${base}/activate`;
@@ -108,7 +107,9 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     const deviceCode = typeof body?.device_code === 'string' ? body.device_code : '';
     if (!deviceCode) return c.json({ detail: '缺少 device_code' }, 422);
 
-    const rec = (await db.select().from(deviceAuths).where(eq(deviceAuths.deviceCode, deviceCode)))[0];
+    const rec = (
+      await db.select().from(deviceAuths).where(eq(deviceAuths.deviceCode, deviceCode))
+    )[0];
     if (!rec) return c.json({ status: 'expired' }); // 未知/已清理:按过期处理,发起方停止轮询
     if (Date.parse(rec.expiresAt) <= Date.now()) {
       await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id));
@@ -144,13 +145,22 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     // 设备登录铸的 token 默认带过期(PAGEPIN_DEVICE_TOKEN_TTL_DAYS,默认 90 天;0 = 不过期),
     // 给落盘的长期凭证一个兜底失效期;普通 PAT 仍不过期。
     const ttlDays = cfg.deviceTokenTtlDays;
-    const expiresAt = ttlDays > 0 ? new Date(Date.now() + ttlDays * 86_400_000).toISOString() : null;
+    const expiresAt =
+      ttlDays > 0 ? new Date(Date.now() + ttlDays * 86_400_000).toISOString() : null;
     const minted = await mintToken(db, user.id, name, expiresAt);
     await db
       .update(deviceAuths)
-      .set({ status: 'approved', userId: user.id, token: minted.token, tokenName: name, approvedAt: nowIso() })
+      .set({
+        status: 'approved',
+        userId: user.id,
+        token: minted.token,
+        tokenName: name,
+        approvedAt: nowIso(),
+      })
       .where(eq(deviceAuths.id, rec.id));
-    console.log(`device approved handle=${user.handle} user_code=${userCode} prefix=${minted.prefix}`);
+    console.log(
+      `device approved handle=${user.handle} user_code=${userCode} prefix=${minted.prefix}`,
+    );
     return c.json({ ok: true, token_name: name });
   });
 

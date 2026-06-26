@@ -12,7 +12,14 @@ import { hashPassword, verifyPassword } from '../auth/password.js';
 import { sendVerificationEmail } from '../mail/verify.js';
 import { canPublish } from './deps.js';
 import { setLoginCookies } from '../auth/sessions.js';
-import { apiTokens, commentThreads, currentVersion, identities, sites, users } from '../db/index.js';
+import {
+  apiTokens,
+  commentThreads,
+  currentVersion,
+  identities,
+  sites,
+  users,
+} from '../db/index.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { validHandle } from '../util.js';
 
@@ -44,7 +51,7 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   const handleTaken = async (handle: string): Promise<boolean> =>
-    ((await db.select({ id: users.id }).from(users).where(eq(users.handle, handle)))[0]) !==
+    (await db.select({ id: users.id }).from(users).where(eq(users.handle, handle)))[0] !==
     undefined;
 
   const limitsJson = () => ({
@@ -197,27 +204,29 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
       return { slug: s.slug, total_bytes: bytes, file_count: fc };
     });
     perSite.sort((a, b) => b.total_bytes - a.total_bytes);
-    const tok = (await db
-      .select({ n: count() })
-      .from(apiTokens)
-      .where(and(eq(apiTokens.userId, user.id), isNull(apiTokens.revokedAt)))
-      )[0];
+    const tok = (
+      await db
+        .select({ n: count() })
+        .from(apiTokens)
+        .where(and(eq(apiTokens.userId, user.id), isNull(apiTokens.revokedAt)))
+    )[0];
     let unresolved = 0;
     if (rows.length > 0) {
-      const r = (await db
-        .select({ n: count() })
-        .from(commentThreads)
-        .where(
-          and(
-            inArray(
-              commentThreads.siteId,
-              rows.map((x) => x.id),
+      const r = (
+        await db
+          .select({ n: count() })
+          .from(commentThreads)
+          .where(
+            and(
+              inArray(
+                commentThreads.siteId,
+                rows.map((x) => x.id),
+              ),
+              eq(commentThreads.resolved, false),
+              isNull(commentThreads.deletedAt),
             ),
-            eq(commentThreads.resolved, false),
-            isNull(commentThreads.deletedAt),
-          ),
-        )
-        )[0];
+          )
+      )[0];
       unresolved = r?.n ?? 0;
     }
     return c.json({
@@ -240,7 +249,10 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     if (user.handle !== null) return c.json({ detail: 'handle 已设置，不可修改' }, 409);
     const handle = raw.trim().toLowerCase();
     if (!validHandle(handle)) {
-      return c.json({ detail: 'handle 需 2-32 位小写字母/数字/中划线、字母开头，且不在保留字内' }, 422);
+      return c.json(
+        { detail: 'handle 需 2-32 位小写字母/数字/中划线、字母开头，且不在保留字内' },
+        422,
+      );
     }
     if (await handleTaken(handle)) return c.json({ detail: 'handle 已被占用' }, 409);
     await db.update(users).set({ handle }).where(eq(users.id, user.id));
@@ -265,7 +277,10 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     if (user.email && user.email.includes('@')) cands.push(user.email.split('@')[0]!);
     if (user.displayName) cands.push(user.displayName);
     for (const cand of cands) {
-      const h = cand.toLowerCase().replace(/[_.]/g, '-').replace(/[^a-z0-9-]/g, '');
+      const h = cand
+        .toLowerCase()
+        .replace(/[_.]/g, '-')
+        .replace(/[^a-z0-9-]/g, '');
       if (validHandle(h) && !(await handleTaken(h))) return c.json({ suggestion: h });
     }
     return c.json({ suggestion: null });

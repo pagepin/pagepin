@@ -29,7 +29,9 @@ export async function getSetting(deps: AppDeps, key: string): Promise<string | n
 
 export async function setSetting(deps: AppDeps, key: string, value: string): Promise<void> {
   // 跨方言 upsert(SQLite/PG: ON CONFLICT;MySQL: ON DUPLICATE KEY)收口在 db/ops.upsert。
-  await upsert(deps.db.insert(instanceSettings).values({ key, value }), instanceSettings.key, { value });
+  await upsert(deps.db.insert(instanceSettings).values({ key, value }), instanceSettings.key, {
+    value,
+  });
 }
 
 /** env 是否锁定了注册模式(锁定时 UI 不可改)。 */

@@ -21,25 +21,26 @@ import type { Storage } from '../src/storage/index.js';
 import type { AppDeps, AppEnv } from '../src/types.js';
 import { nowIso } from '../src/util.js';
 
-const cfg = loadConfig({ PAGEPIN_SECRET: 'test-secret', PAGEPIN_BASE_URL: 'http://localhost:8000' });
+const cfg = loadConfig({
+  PAGEPIN_SECRET: 'test-secret',
+  PAGEPIN_BASE_URL: 'http://localhost:8000',
+});
 
 /** 内存 DB(自动迁移)+ 注入式 mw 的设备路由。 */
 async function setup(): Promise<{ app: Hono<AppEnv>; deps: AppDeps }> {
   const db = await makeTestDb();
-  await db
-    .insert(users)
-    .values({
-      id: 'u-test',
-      email: 'admin@example.com',
-      passwordHash: null,
-      oidcSub: null,
-      handle: 'admin',
-      displayName: 'Admin',
-      isAdmin: true,
-      disabled: false,
-      createdAt: nowIso(),
-      lastLoginAt: null,
-    });
+  await db.insert(users).values({
+    id: 'u-test',
+    email: 'admin@example.com',
+    passwordHash: null,
+    oidcSub: null,
+    handle: 'admin',
+    displayName: 'Admin',
+    isAdmin: true,
+    disabled: false,
+    createdAt: nowIso(),
+    lastLoginAt: null,
+  });
   const seeded = (await db.select().from(users).where(eq(users.id, 'u-test')))[0];
   if (!seeded) throw new Error('seed user failed');
 
@@ -86,7 +87,9 @@ test('device flow: code → approve → one-time token delivery', async () => {
   assert.equal(code.interval, 5);
   assert.equal(code.verification_uri, 'http://localhost:8000/activate');
 
-  const pending = (await (await post(app, '/api/device/token', { device_code: code.device_code })).json()) as {
+  const pending = (await (
+    await post(app, '/api/device/token', { device_code: code.device_code })
+  ).json()) as {
     status: string;
   };
   assert.equal(pending.status, 'pending');
@@ -95,7 +98,9 @@ test('device flow: code → approve → one-time token delivery', async () => {
   assert.equal(approveRes.status, 200);
   assert.equal(((await approveRes.json()) as { ok: boolean }).ok, true);
 
-  const delivered = (await (await post(app, '/api/device/token', { device_code: code.device_code })).json()) as {
+  const delivered = (await (
+    await post(app, '/api/device/token', { device_code: code.device_code })
+  ).json()) as {
     status: string;
     token: string;
   };
@@ -110,7 +115,9 @@ test('device flow: code → approve → one-time token delivery', async () => {
   assert.ok(toks[0]!.expiresAt, 'device-minted token carries an expiry (default TTL)'); // 兜底过期
 
   // 一次性:再轮询行已删 → expired
-  const after = (await (await post(app, '/api/device/token', { device_code: code.device_code })).json()) as {
+  const after = (await (
+    await post(app, '/api/device/token', { device_code: code.device_code })
+  ).json()) as {
     status: string;
   };
   assert.equal(after.status, 'expired');
@@ -118,10 +125,15 @@ test('device flow: code → approve → one-time token delivery', async () => {
 
 test('device flow: deny stops the poll', async () => {
   const { app } = await setup();
-  const code = (await (await post(app, '/api/device/code')).json()) as { device_code: string; user_code: string };
+  const code = (await (await post(app, '/api/device/code')).json()) as {
+    device_code: string;
+    user_code: string;
+  };
   const denyRes = await post(app, '/api/device/deny', { user_code: code.user_code });
   assert.equal(denyRes.status, 200);
-  const polled = (await (await post(app, '/api/device/token', { device_code: code.device_code })).json()) as {
+  const polled = (await (
+    await post(app, '/api/device/token', { device_code: code.device_code })
+  ).json()) as {
     status: string;
   };
   assert.equal(polled.status, 'denied');
@@ -130,7 +142,9 @@ test('device flow: deny stops the poll', async () => {
 test('device token: missing/garbage device_code', async () => {
   const { app } = await setup();
   assert.equal((await post(app, '/api/device/token')).status, 422); // no body
-  const unknown = (await (await post(app, '/api/device/token', { device_code: 'nope' })).json()) as {
+  const unknown = (await (
+    await post(app, '/api/device/token', { device_code: 'nope' })
+  ).json()) as {
     status: string;
   };
   assert.equal(unknown.status, 'expired'); // unknown code → treated as expired
@@ -138,20 +152,18 @@ test('device token: missing/garbage device_code', async () => {
 
 test('auth rejects an expired token but accepts a non-expiring one', async () => {
   const db = await makeTestDb();
-  await db
-    .insert(users)
-    .values({
-      id: 'u2',
-      email: 'e@x.com',
-      passwordHash: null,
-      oidcSub: null,
-      handle: 'eee',
-      displayName: 'E',
-      isAdmin: false,
-      disabled: false,
-      createdAt: nowIso(),
-      lastLoginAt: null,
-    });
+  await db.insert(users).values({
+    id: 'u2',
+    email: 'e@x.com',
+    passwordHash: null,
+    oidcSub: null,
+    handle: 'eee',
+    displayName: 'E',
+    isAdmin: false,
+    disabled: false,
+    createdAt: nowIso(),
+    lastLoginAt: null,
+  });
 
   const mw = makeAuthMiddleware({ config: cfg, db, storage: {} as unknown as Storage });
   const app = new Hono<AppEnv>();
@@ -162,20 +174,18 @@ test('auth rejects an expired token but accepts a non-expiring one', async () =>
     return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
   };
   const seedToken = async (raw: string, expiresAt: string | null) => {
-    await db
-      .insert(apiTokens)
-      .values({
-        id: 'tok-' + raw.slice(3, 11),
-        userId: 'u2',
-        name: 't',
-        token: raw,
-        tokenHash: await sha(raw),
-        prefix: raw.slice(0, 15),
-        createdAt: nowIso(),
-        lastUsedAt: null,
-        expiresAt,
-        revokedAt: null,
-      });
+    await db.insert(apiTokens).values({
+      id: 'tok-' + raw.slice(3, 11),
+      userId: 'u2',
+      name: 't',
+      token: raw,
+      tokenHash: await sha(raw),
+      prefix: raw.slice(0, 15),
+      createdAt: nowIso(),
+      lastUsedAt: null,
+      expiresAt,
+      revokedAt: null,
+    });
   };
   const expired = 'pp_expired00000000000000000000000000000000';
   const evergreen = 'pp_evergreen000000000000000000000000000000';
@@ -183,7 +193,9 @@ test('auth rejects an expired token but accepts a non-expiring one', async () =>
   await seedToken(evergreen, null);
 
   const get = (tok: string) =>
-    app.fetch(new Request('http://localhost/api/me', { headers: { Authorization: `Bearer ${tok}` } }));
+    app.fetch(
+      new Request('http://localhost/api/me', { headers: { Authorization: `Bearer ${tok}` } }),
+    );
   assert.equal((await get(expired)).status, 401);
   assert.equal((await get(evergreen)).status, 200);
 });

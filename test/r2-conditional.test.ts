@@ -83,7 +83,10 @@ test('回归:带引号的 If-None-Match 命中 → NotModifiedError(304),不再�
   await assert.rejects(
     () => s.open('screenshots/06-comment-thread.png', { ifNoneMatch: `"${RAW_ETAG}"` }),
     (e: unknown) => {
-      assert.ok(e instanceof NotModifiedError, `期望 NotModifiedError,实得 ${(e as Error)?.constructor?.name}: ${(e as Error)?.message}`);
+      assert.ok(
+        e instanceof NotModifiedError,
+        `期望 NotModifiedError,实得 ${(e as Error)?.constructor?.name}: ${(e as Error)?.message}`,
+      );
       return true;
     },
   );
@@ -112,5 +115,8 @@ test('无条件头 → 正常返回 body', async () => {
 
 test('对象不存在 → NotFoundError', async () => {
   const s = new R2Storage(fakeBucket(RAW_ETAG, /* present */ false));
-  await assert.rejects(() => s.open('missing.png'), (e: unknown) => e instanceof NotFoundError);
+  await assert.rejects(
+    () => s.open('missing.png'),
+    (e: unknown) => e instanceof NotFoundError,
+  );
 });

@@ -92,7 +92,8 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   const { db } = deps;
   const app = new Hono<AppEnv>();
 
-  const activeOf = (userId: string) => and(eq(apiTokens.userId, userId), isNull(apiTokens.revokedAt));
+  const activeOf = (userId: string) =>
+    and(eq(apiTokens.userId, userId), isNull(apiTokens.revokedAt));
 
   /** 按 id 取本人未吊销的 token;不存在/他人/已吊销一律视为不存在。 */
   const ownedToken = async (tokenId: string, user: UserRow): Promise<ApiTokenRow | null> => {
@@ -117,7 +118,10 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     if (name.length < 1 || name.length > 64) return c.json({ detail: '名称需 1-64 字符' }, 422);
     const row = (await db.select({ n: count() }).from(apiTokens).where(activeOf(user.id)))[0];
     if ((row?.n ?? 0) >= MAX_TOKENS_PER_USER) {
-      return c.json({ detail: `token 数量已达上限（${MAX_TOKENS_PER_USER}），请先吊销不用的` }, 409);
+      return c.json(
+        { detail: `token 数量已达上限（${MAX_TOKENS_PER_USER}），请先吊销不用的` },
+        409,
+      );
     }
 
     const rec = await mintToken(db, user.id, name);
@@ -133,7 +137,10 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     const raw = newRawToken();
     const tokenHash = await sha256Hex(raw);
     const prefix = raw.slice(0, 15);
-    await db.update(apiTokens).set({ token: raw, tokenHash, prefix }).where(eq(apiTokens.id, rec.id));
+    await db
+      .update(apiTokens)
+      .set({ token: raw, tokenHash, prefix })
+      .where(eq(apiTokens.id, rec.id));
     console.log(`token rotated handle=${user.handle} ${rec.prefix} -> ${prefix}`);
     return c.json(out({ ...rec, token: raw, tokenHash, prefix }));
   });
