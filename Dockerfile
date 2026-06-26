@@ -73,6 +73,14 @@ COPY skills/ skills/
 # libSQL auto-applies migrations from ./drizzle relative to WORKDIR (/app).
 COPY drizzle/ drizzle/
 
+# Run as the unprivileged built-in `node` user; make the data volume writable by it.
+# Named volumes (compose `pagepin-data`, `docker run -v pagepin-data:/data`) inherit this
+# ownership on first use. For a host bind-mount, chown the host dir to uid 1000 first.
+RUN mkdir -p /data && chown -R node:node /data
+USER node
+
 VOLUME /data
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${PAGEPIN_PORT:-8000}/healthz" >/dev/null 2>&1 || exit 1
 CMD ["node", "dist/index.js"]
