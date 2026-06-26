@@ -1,6 +1,7 @@
 /** 环境配置 —— 全部经 env 注入;loadConfig 只读传入的 env 对象,保持 edge-safe。 */
 
 import { isSupportedSocialProvider, SOCIAL_PROVIDER_IDS } from './auth/social.js';
+import { inferDbDriver, type DbDriver } from './db/driver.js';
 
 /** 社交登录 provider(与 password/oidc 并存,独立配置)。 */
 export interface SocialProvider {
@@ -44,10 +45,13 @@ export interface MailConfig {
 export interface Config {
   port: number;
   dataDir: string;
-  /** libSQL 连接(Node 自托管)。未设置 → 本地文件 file:{dataDir}/pagepin.db(开箱即用默认);
-   *  设为 libsql://… / https://… 可接 Turso 等托管 libSQL(配 dbAuthToken)。Workers 用 D1,忽略此项。 */
+  /** DB 方言 —— 由 PAGEPIN_DB_URL 的 scheme 推断(或 PAGEPIN_DB_DRIVER 显式覆盖):
+   *  sqlite(默认,含 libSQL/Turso)| postgres | mysql。Workers 恒为 sqlite(D1)。 */
+  dbDriver: DbDriver;
+  /** DB 连接串(Node 自托管)。未设置 → 本地文件 file:{dataDir}/pagepin.db(开箱即用默认)。
+   *  libsql://… / https://…(Turso,配 dbAuthToken)| postgres://… | mysql://…。Workers 用 D1,忽略此项。 */
   dbUrl?: string;
-  /** 远程 libSQL/Turso 的鉴权 token;本地 file: 或无鉴权的自建 sqld 留空。 */
+  /** 远程 libSQL/Turso 的鉴权 token;本地 file:、无鉴权 sqld、或 pg/mysql(凭据在 URL 里)留空。 */
   dbAuthToken?: string;
   /** 单域模式对外地址(含 scheme,无尾斜杠) */
   baseUrl: string;
@@ -238,6 +242,7 @@ export function loadConfig(env: Env): Config {
   return {
     port: num(env, 'PAGEPIN_PORT', 8000),
     dataDir: str(env, 'PAGEPIN_DATA_DIR', './data'),
+    dbDriver: inferDbDriver(env.PAGEPIN_DB_URL, env.PAGEPIN_DB_DRIVER),
     dbUrl: env.PAGEPIN_DB_URL || undefined,
     dbAuthToken: env.PAGEPIN_DB_AUTH_TOKEN || undefined,
     baseUrl,

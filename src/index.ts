@@ -16,6 +16,7 @@ import { MemoryRateLimiter } from './ratelimit.js';
 import { mountConsoleStatic } from './console-static.js';
 import { bootstrapAdmin } from './auth/admin-bootstrap.js';
 import { consoleBase, contentBase, loadConfig } from './config.js';
+import type { Db } from './db/index.js';
 import { createLibsqlDb } from './db/libsql.js';
 import { createMailer } from './mail/factory.js';
 import { resumeSweep } from './auth/reconcile.js';
@@ -40,13 +41,20 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig({ ...process.env, PAGEPIN_SECRET: secret });
-  // libSQL(纯 JS,无 native 构建);启动自动应用 drizzle 迁移(./drizzle,cwd 相对)。
-  // 默认本地文件(开箱即用);PAGEPIN_DB_URL 可指向 Turso 等托管 libSQL(配 PAGEPIN_DB_AUTH_TOKEN)。
-  mkdirSync(cfg.dataDir, { recursive: true }); // 本地 file: 模式 libSQL 不会自建父目录
-  const db = await createLibsqlDb(
-    cfg.dbUrl ?? `file:${join(cfg.dataDir, 'pagepin.db')}`,
-    cfg.dbAuthToken,
-  );
+  // DB 按方言选(部署期固定,见 config.dbDriver / db/driver.ts):
+  //  - sqlite(默认):libSQL 纯 JS,本地文件开箱即用,或 PAGEPIN_DB_URL 指 Turso(配 token)。
+  //  - postgres:接公司 PG;驱动懒加载(optionalDependency),启动应用 drizzle/pg 迁移。
+  // 各方言启动都自动应用对应 drizzle 迁移目录。
+  let db: Db;
+  if (cfg.dbDriver === 'postgres') {
+    const { createPostgresDb } = await import('./db/postgres.js');
+    db = await createPostgresDb(cfg.dbUrl!);
+  } else if (cfg.dbDriver === 'mysql') {
+    throw new Error('MySQL 驱动尚在接入中(下个版本);当前支持 sqlite / postgres');
+  } else {
+    mkdirSync(cfg.dataDir, { recursive: true }); // 本地 file: 模式 libSQL 不会自建父目录
+    db = await createLibsqlDb(cfg.dbUrl ?? `file:${join(cfg.dataDir, 'pagepin.db')}`, cfg.dbAuthToken);
+  }
   const storage = await createStorage(cfg);
 
   // admin bootstrap:配置了邮箱+密码则 upsert(存在则刷新密码哈希并确保 isAdmin,不动其他字段);
