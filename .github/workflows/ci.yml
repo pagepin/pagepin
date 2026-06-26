@@ -28,6 +28,8 @@ jobs:
       # ---- server: Hono + Drizzle/SQLite ----
       - name: Install server deps
         run: pnpm install --frozen-lockfile
+      - name: Lint (server)
+        run: pnpm lint
       - name: Typecheck
         run: pnpm typecheck
       - name: Typecheck (Workers / edge)
@@ -36,10 +38,14 @@ jobs:
         run: node --check static/comments.js
       - name: Build server bundle
         run: pnpm build
+      - name: Unit tests (server)
+        run: pnpm test:unit
 
       # ---- console: React + Vite ----
       - name: Install console deps
         run: pnpm -C console install --frozen-lockfile
+      - name: Lint (console)
+        run: pnpm -C console lint
       - name: Build console
         run: pnpm -C console build
 
