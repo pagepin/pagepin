@@ -1,0 +1,7 @@
+node_modules
+dist
+console/dist
+src/generated
+static/
+drizzle
+pnpm-lock.yaml

@@ -8,6 +8,10 @@
     "type": "git",
     "url": "https://github.com/pagepin/pagepin"
   },
+  "homepage": "https://github.com/pagepin/pagepin#readme",
+  "bugs": {
+    "url": "https://github.com/pagepin/pagepin/issues"
+  },
   "engines": {
     "node": ">=22"
   },
@@ -23,6 +27,8 @@
     "gen:migrations:mysql": "node --import tsx ./node_modules/drizzle-kit/bin.cjs generate --config drizzle.config.mysql.ts",
     "cf:dev": "pnpm gen:assets && wrangler dev",
     "cf:deploy": "pnpm gen:assets && wrangler d1 migrations apply pagepin --remote && wrangler deploy",
+    "lint": "eslint . && prettier --check \"{src,test,scripts}/**/*.{ts,mjs}\"",
+    "format": "prettier --write \"{src,test,scripts}/**/*.{ts,mjs}\"",
     "test": "pnpm test:unit && pnpm test:e2e",
     "test:unit": "node --import tsx --test test/*.test.ts",
     "test:e2e": "pnpm -C e2e test",
@@ -43,11 +49,17 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.0",
     "drizzle-kit": "^0.30.0",
+    "eslint": "^10.5.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.7.0",
+    "prettier": "^3.8.4",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.62.0",
     "wrangler": "^4.0.0"
   },
   "pnpm": {
