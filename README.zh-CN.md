@@ -2,6 +2,11 @@
 
 # pagepin
 
+[![CI](https://github.com/pagepin/pagepin/actions/workflows/ci.yml/badge.svg)](https://github.com/pagepin/pagepin/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/pagepin/pagepin)](https://github.com/pagepin/pagepin/releases)
+[![Container](https://img.shields.io/badge/ghcr.io-pagepin-2496ED?logo=docker&logoColor=white)](https://github.com/pagepin/pagepin/pkgs/container/pagepin)
+
 自托管的静态页面托管服务，支持元素级打点评论与 AI 反馈闭环 —— **让 agent 真正能拉取到的反馈**。
 
 用一条 `curl` 部署任意 HTML 报告或静态站点，分享链接，评审者即可直接在页面元素上打点评论。每条评论都带有 CSS selector、类型（`copy` / `style` / `question` / `bug`）和已解决标记 —— 你的编码 agent 因此能以结构化 JSON 拉取未解决的反馈，修改页面后再发布。评审闭环就此闭合，无需再往聊天里贴截图。

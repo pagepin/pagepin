@@ -48,14 +48,19 @@ All of these run in CI (`.github/workflows/ci.yml`); please make them pass
 locally first:
 
 ```bash
-pnpm typecheck                                 # tsc --noEmit (server)
-node --check static/comments.js                # comments overlay syntax
-pnpm build                                      # server bundle (tsup) + tsc
-pnpm -C console build                           # console typecheck + Vite build
-pnpm -C e2e install                             # first time only
-pnpm -C e2e exec playwright install chromium    # first time only
-pnpm -C e2e test                                # comments-overlay e2e
+pnpm lint                                       # ESLint + Prettier check (server)
+pnpm typecheck                                  # tsc --noEmit (server)
+pnpm test:unit                                  # server unit tests
+node --check static/comments.js                 # comments overlay syntax
+pnpm build                                       # server bundle (tsup) + tsc
+pnpm -C console lint                             # ESLint + Prettier check (console)
+pnpm -C console build                            # console typecheck + Vite build
+pnpm -C e2e install                              # first time only
+pnpm -C e2e exec playwright install chromium     # first time only
+pnpm -C e2e test                                 # comments-overlay e2e
 ```
+
+Run `pnpm format` (and `pnpm -C console format`) to auto-apply Prettier.
 
 When you change `static/comments.js`, add or update an `e2e/tests/*.spec.js`
 case. The e2e suite injects the real `comments.js` and stubs `/api/*` via

@@ -1,0 +1,8 @@
+# Normalize line endings to LF across platforms.
+* text=auto eol=lf
+
+# Generated / vendored — collapse in diffs and exclude from language stats.
+pnpm-lock.yaml linguist-generated=true
+console/pnpm-lock.yaml linguist-generated=true
+e2e/pnpm-lock.yaml linguist-generated=true
+static/marked.min.js linguist-vendored=true

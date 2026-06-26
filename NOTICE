@@ -1,0 +1,12 @@
+pagepin
+Copyright 2026 pagepin contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+--------------------------------------------------------------------------------
+Third-party components bundled in this repository:
+
+- marked — https://github.com/markedjs/marked
+  Copyright (c) 2011-2025, Christopher Jeffrey
+  Licensed under the MIT License.
+  Vendored at static/marked.min.js and inlined into src/generated/edge-assets.ts.

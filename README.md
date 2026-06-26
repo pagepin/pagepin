@@ -2,6 +2,11 @@
 
 # pagepin
 
+[![CI](https://github.com/pagepin/pagepin/actions/workflows/ci.yml/badge.svg)](https://github.com/pagepin/pagepin/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/pagepin/pagepin)](https://github.com/pagepin/pagepin/releases)
+[![Container](https://img.shields.io/badge/ghcr.io-pagepin-2496ED?logo=docker&logoColor=white)](https://github.com/pagepin/pagepin/pkgs/container/pagepin)
+
 Self-hosted static page hosting with pin-point review comments and an AI feedback loop — **feedback that agents can actually fetch**.
 
 Deploy any HTML report or static site with one `curl`, share the link, and let reviewers pin comments directly onto page elements. Every comment is stored with a CSS selector, a kind (`copy` / `style` / `question` / `bug`) and a resolved flag — so your coding agent can pull the open feedback as structured JSON, fix the page, and redeploy. Review loop closed, no screenshots-in-chat required.
