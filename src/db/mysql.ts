@@ -13,8 +13,10 @@ import type { Db } from './index.js';
 import * as schema from './schema.mysql.js';
 
 export async function createMysqlDb(url: string): Promise<Db> {
-  const mysql = await import('mysql2/promise');
-  const pool = mysql.createPool(url);
+  // CJS interop:Node ESM 下 createPool 可能挂在 default 上,两处都兜。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m: any = await import('mysql2/promise');
+  const pool = (m.createPool ?? m.default?.createPool)(url);
   const db = drizzle(pool, { schema, mode: 'default' });
   await migrate(db, { migrationsFolder: './drizzle/mysql' });
   return db as unknown as Db;

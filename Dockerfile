@@ -32,7 +32,9 @@ RUN pnpm install
 # gen:assets inlines static/* + skills/pagepin/* into src/generated/edge-assets.ts, which
 # serving.ts statically imports — so it must exist before tsup bundles index.ts (a clean
 # checkout has no generated file). Hence we COPY the sources it reads and run it first.
-COPY tsconfig.json ./
+# tsup.config.ts keeps the DB drivers (postgres/mysql2) external — without it tsup bundles
+# mysql2's CJS into the ESM output and the image crashes with "Dynamic require of buffer".
+COPY tsconfig.json tsup.config.ts ./
 COPY scripts/ scripts/
 COPY static/ static/
 COPY skills/ skills/
