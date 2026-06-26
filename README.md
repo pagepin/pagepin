@@ -17,6 +17,7 @@ Deploy any HTML report or static site with one `curl`, share the link, and let r
 - **SPA fallback** — opt-in per site for client-side routed apps.
 - **Pluggable auth** — built-in email/password (with optional signup), Google/GitHub social login, any OIDC provider, or `none` for local dev.
 - **Pluggable storage** — local filesystem or any S3-compatible object store (MinIO, R2, ...).
+- **Pluggable database** — SQLite/libSQL by default (zero-config), or PostgreSQL / MySQL for self-hosted Node.
 - **Small footprint** — one Node process + SQLite; single Docker image with a React console included.
 - **Single- or dual-domain serving** — run everything on one origin, or isolate hosted content on a separate content domain (see [Architecture](#architecture)).
 
@@ -81,6 +82,26 @@ cp .env.example .env   # then edit; pass with `docker run --env-file .env` or co
 ```
 
 The upload and quota limits in `.env.example` lean toward a public free tier; raise them via env for a trusted/team instance. Signup and password login are also rate-limited per IP at the app level (best-effort, and per-isolate on Workers). For real edge protection on a public deployment, add a Cloudflare **Rate Limiting Rule** on `/auth/signup` and `/auth/password` — that runs globally before the Worker.
+
+## Databases
+
+pagepin needs **zero database setup** — it ships with SQLite (via libSQL) and keeps data in a single file under `PAGEPIN_DATA_DIR`. Self-hosted Node deployments can instead point at **PostgreSQL** or **MySQL** to keep data in existing infrastructure. The driver is inferred from `PAGEPIN_DB_URL`'s scheme (override with `PAGEPIN_DB_DRIVER`):
+
+| Scheme | Engine |
+|---|---|
+| *(unset)* / `file:` | local SQLite file (default, zero-config) |
+| `libsql://` | managed libSQL / Turso (set `PAGEPIN_DB_AUTH_TOKEN`) |
+| `postgres://` | PostgreSQL |
+| `mysql://` | MySQL 8.0+ |
+
+```bash
+docker run -d --name pagepin -p 8000:8000 \
+  -e PAGEPIN_DB_URL=postgres://user:pass@db-host:5432/pagepin \
+  -e PAGEPIN_ADMIN_EMAIL=admin@example.com -e PAGEPIN_ADMIN_PASSWORD=change-me \
+  ghcr.io/pagepin/pagepin
+```
+
+A single schema definition generates the DDL for all three dialects, and the matching migrations are applied automatically at startup. The `postgres` / `mysql2` drivers are optional dependencies bundled in the image and loaded only when selected, so the default SQLite path stays slim. Cloudflare Workers deployments always use D1 and ignore `PAGEPIN_DB_URL`.
 
 ## Deploy & API for AI agents
 

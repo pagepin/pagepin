@@ -17,6 +17,7 @@
 - **SPA 兜底** —— 可按站点开启，适配客户端路由应用。
 - **可插拔认证** —— 内置邮箱/密码（可选开放注册）、Google/GitHub 社交登录、任意 OIDC provider，或 `none`（本地开发）。
 - **可插拔存储** —— 本地文件系统或任意 S3 兼容对象存储（MinIO、R2 等）。
+- **可插拔数据库** —— 默认 SQLite/libSQL（开箱即用），自托管 Node 也可用 PostgreSQL / MySQL。
 - **占用小** —— 一个 Node 进程 + SQLite；单个 Docker 镜像，内含 React 控制台。
 - **单域或双域服务** —— 全部跑在一个 origin 上，或把托管内容隔离到独立的内容域（见[架构](#架构)）。
 
@@ -81,6 +82,26 @@ cp .env.example .env   # 然后编辑；用 `docker run --env-file .env` 或 com
 ```
 
 `.env.example` 里的上传/配额限制默认偏向公开免费档；自托管/团队实例可按需用 env 调大。注册与密码登录在应用层还按 IP 做了限流（尽力而为，Workers 上为每 isolate 维度）。面向公开部署、需要真正的边缘防护时，建议在 `/auth/signup` 与 `/auth/password` 上加一条 Cloudflare **Rate Limiting Rule** —— 它在 Worker 之前全局生效。
+
+## 数据库
+
+pagepin **零数据库配置**即可跑 —— 内置 SQLite（经 libSQL），数据落在 `PAGEPIN_DATA_DIR` 下的单个文件里。自托管 Node 部署也可改用 **PostgreSQL** 或 **MySQL**，把数据放进已有基础设施。驱动按 `PAGEPIN_DB_URL` 的 scheme 自动推断（可用 `PAGEPIN_DB_DRIVER` 覆盖）：
+
+| Scheme | 引擎 |
+|---|---|
+| *(未设置)* / `file:` | 本地 SQLite 文件（默认，开箱即用） |
+| `libsql://` | 托管 libSQL / Turso（配 `PAGEPIN_DB_AUTH_TOKEN`） |
+| `postgres://` | PostgreSQL |
+| `mysql://` | MySQL 8.0+ |
+
+```bash
+docker run -d --name pagepin -p 8000:8000 \
+  -e PAGEPIN_DB_URL=postgres://user:pass@db-host:5432/pagepin \
+  -e PAGEPIN_ADMIN_EMAIL=admin@example.com -e PAGEPIN_ADMIN_PASSWORD=change-me \
+  ghcr.io/pagepin/pagepin
+```
+
+一份 schema 定义生成三种方言的 DDL，启动时自动应用对应迁移。`postgres` / `mysql2` 驱动是可选依赖，已打进镜像、仅在选用对应方言时才加载，默认 SQLite 路径不受影响、保持精简。Cloudflare Workers 部署始终用 D1，忽略 `PAGEPIN_DB_URL`。
 
 ## 部署与面向 AI agent 的 API
 
