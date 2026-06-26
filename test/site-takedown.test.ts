@@ -19,7 +19,7 @@ import { makeAdminRoutes } from '../src/api/admin.js';
 import type { AuthMiddleware } from '../src/api/deps.js';
 import { loadConfig } from '../src/config.js';
 import { sites, users } from '../src/db/index.js';
-import { createLibsqlDb } from '../src/db/libsql.js';
+import { makeTestDb } from './helpers/db.js';
 import { makeServingRoutes } from '../src/serving.js';
 import { FsStorage } from '../src/storage/fs.js';
 import type { Storage } from '../src/storage/index.js';
@@ -47,7 +47,7 @@ function injectAdmin(admin: typeof users.$inferSelect): AuthMiddleware {
 }
 
 async function seed(storage: Storage) {
-  const db = await createLibsqlDb(':memory:');
+  const db = await makeTestDb();
   const admin = {
     id: 'u-admin',
     email: 'admin@example.com',
@@ -60,7 +60,7 @@ async function seed(storage: Storage) {
     createdAt: nowIso(),
     lastLoginAt: null,
   };
-  await db.insert(users).values(admin).run();
+  await db.insert(users).values(admin);
 
   const vid = uuid();
   const site = {
@@ -90,7 +90,7 @@ async function seed(storage: Storage) {
     suspendedAt: null,
     suspendedReason: null,
   };
-  await db.insert(sites).values(site).run();
+  await db.insert(sites).values(site);
 
   const deps: AppDeps = { config: cfg, db, storage };
   const adminApp = makeAdminRoutes(deps, injectAdmin(admin));
@@ -157,7 +157,7 @@ test('admin delete → soft-deletes the row and calls storage.deletePrefix', asy
   assert.equal(res.status, 200);
   assert.equal(((await res.json()) as { ok: boolean }).ok, true);
 
-  const row = await db.select().from(sites).where(eq(sites.id, 's-1')).get();
+  const row = (await db.select().from(sites).where(eq(sites.id, 's-1')))[0];
   assert.ok(row?.deletedAt, 'site is soft-deleted (tombstone kept)');
   assert.equal(purged, 'sites/u-admin/demo/', 'storage回收用站点前缀,覆盖所有版本');
 });

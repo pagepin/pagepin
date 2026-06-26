@@ -16,7 +16,7 @@ import { makeDeviceRoutes } from '../src/api/device.js';
 import { makeAuthMiddleware, type AuthMiddleware } from '../src/api/deps.js';
 import { loadConfig } from '../src/config.js';
 import { apiTokens, users } from '../src/db/index.js';
-import { createLibsqlDb } from '../src/db/libsql.js';
+import { makeTestDb } from './helpers/db.js';
 import type { Storage } from '../src/storage/index.js';
 import type { AppDeps, AppEnv } from '../src/types.js';
 import { nowIso } from '../src/util.js';
@@ -25,7 +25,7 @@ const cfg = loadConfig({ PAGEPIN_SECRET: 'test-secret', PAGEPIN_BASE_URL: 'http:
 
 /** 内存 DB(自动迁移)+ 注入式 mw 的设备路由。 */
 async function setup(): Promise<{ app: Hono<AppEnv>; deps: AppDeps }> {
-  const db = await createLibsqlDb(':memory:');
+  const db = await makeTestDb();
   await db
     .insert(users)
     .values({
@@ -39,9 +39,8 @@ async function setup(): Promise<{ app: Hono<AppEnv>; deps: AppDeps }> {
       disabled: false,
       createdAt: nowIso(),
       lastLoginAt: null,
-    })
-    .run();
-  const seeded = await db.select().from(users).where(eq(users.id, 'u-test')).get();
+    });
+  const seeded = (await db.select().from(users).where(eq(users.id, 'u-test')))[0];
   if (!seeded) throw new Error('seed user failed');
 
   // 桩:绕过真实 Cookie/CSRF,直接把已登录用户放进 context(设备逻辑才是被测对象)。
@@ -104,7 +103,7 @@ test('device flow: code → approve → one-time token delivery', async () => {
   assert.match(delivered.token, /^pp_[0-9a-f]{40}$/);
 
   // 交付的 token 是一条真实 PAT(走与 /api/tokens 相同的铸造路径)
-  const toks = await deps.db.select().from(apiTokens).all();
+  const toks = await deps.db.select().from(apiTokens);
   assert.equal(toks.length, 1);
   assert.equal(toks[0]!.userId, 'u-test');
   assert.equal(toks[0]!.token, delivered.token);
@@ -138,7 +137,7 @@ test('device token: missing/garbage device_code', async () => {
 });
 
 test('auth rejects an expired token but accepts a non-expiring one', async () => {
-  const db = await createLibsqlDb(':memory:');
+  const db = await makeTestDb();
   await db
     .insert(users)
     .values({
@@ -152,8 +151,7 @@ test('auth rejects an expired token but accepts a non-expiring one', async () =>
       disabled: false,
       createdAt: nowIso(),
       lastLoginAt: null,
-    })
-    .run();
+    });
 
   const mw = makeAuthMiddleware({ config: cfg, db, storage: {} as unknown as Storage });
   const app = new Hono<AppEnv>();
@@ -177,8 +175,7 @@ test('auth rejects an expired token but accepts a non-expiring one', async () =>
         lastUsedAt: null,
         expiresAt,
         revokedAt: null,
-      })
-      .run();
+      });
   };
   const expired = 'pp_expired00000000000000000000000000000000';
   const evergreen = 'pp_evergreen000000000000000000000000000000';

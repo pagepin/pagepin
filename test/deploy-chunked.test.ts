@@ -20,7 +20,7 @@ import { makeSiteRoutes } from '../src/api/sites.js';
 import { loadConfig } from '../src/config.js';
 import { deploySessions, sites, users } from '../src/db/index.js';
 import type { UserRow } from '../src/db/index.js';
-import { createLibsqlDb } from '../src/db/libsql.js';
+import { makeTestDb } from './helpers/db.js';
 import { FsStorage } from '../src/storage/fs.js';
 import type { AppDeps, AppEnv } from '../src/types.js';
 import { nowIso } from '../src/util.js';
@@ -46,7 +46,7 @@ function injectUser(user: UserRow): AuthMiddleware {
 async function setup(env: Record<string, string> = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'pagepin-chunk-'));
   const storage = new FsStorage(dir);
-  const db = await createLibsqlDb(':memory:'); // 自动应用 drizzle 迁移(含 deploy_sessions)
+  const db = await makeTestDb(); // 自动应用 drizzle 迁移(含 deploy_sessions)
   const user: UserRow = {
     id: 'u1',
     email: 'u@example.com',
@@ -59,7 +59,7 @@ async function setup(env: Record<string, string> = {}) {
     createdAt: nowIso(),
     lastLoginAt: null,
   };
-  await db.insert(users).values(user).run();
+  await db.insert(users).values(user);
   const cfg = loadConfig({ PAGEPIN_SECRET: 'test', PAGEPIN_BASE_URL: 'http://localhost:8000', ...env });
   const deps: AppDeps = { config: cfg, db, storage };
   const app = makeSiteRoutes(deps, injectUser(user));
@@ -131,13 +131,13 @@ test('chunked: begin → 2 batches → commit 发布两批的并集', async () =
   assert.equal(site.version_count, 1);
 
   // 文件真的落在该版本前缀下
-  const row = await db.select().from(sites).where(eq(sites.slug, 'big')).get();
+  const row = (await db.select().from(sites).where(eq(sites.slug, 'big')))[0];
   const prefix = row!.versions[0]!.storage_prefix;
   assert.equal(await storage.exists(prefix + 'index.html'), true);
   assert.equal(await storage.exists(prefix + 'assets/app.js'), true);
 
   // 草稿会话已删
-  const sess = await db.select().from(deploySessions).where(eq(deploySessions.id, deploy_id)).get();
+  const sess = (await db.select().from(deploySessions).where(eq(deploySessions.id, deploy_id)))[0];
   assert.equal(sess, undefined, 'commit 后草稿行清除');
 });
 
@@ -163,10 +163,10 @@ test('GC: keepVersions=2,部署 3 次裁掉最旧版本并回收其存储', asyn
     assert.equal(r.status, 200);
     // 第 3 次(i=2)发布触达上限 → 响应里 pruned_versions=1;前两次为 0
     assert.equal((await r.json()).pruned_versions, i < 2 ? 0 : 1, 'pruned_versions 透出被回收版本数');
-    const row = await db.select().from(sites).where(eq(sites.slug, 'gc')).get();
+    const row = (await db.select().from(sites).where(eq(sites.slug, 'gc')))[0];
     prefixes.push(row!.versions[row!.versions.length - 1]!.storage_prefix);
   }
-  const row = await db.select().from(sites).where(eq(sites.slug, 'gc')).get();
+  const row = (await db.select().from(sites).where(eq(sites.slug, 'gc')))[0];
   assert.equal(row!.versions.length, 2, '裁到 keepVersions');
   assert.equal(await storage.exists(prefixes[0]! + 'index.html'), false, '最旧版本存储被回收');
   assert.equal(await storage.exists(prefixes[2]! + 'index.html'), true, '最新版本保留');
@@ -192,7 +192,7 @@ test('abort: 丢弃草稿并回收已上传的存储', async () => {
   const r = await del(app, `/api/sites/ab/deploys/${deploy_id}`);
   assert.equal(r.status, 200);
   assert.equal(await storage.exists(storage_prefix + 'index.html'), false, '草稿存储被回收');
-  const sess = await db.select().from(deploySessions).where(eq(deploySessions.id, deploy_id)).get();
+  const sess = (await db.select().from(deploySessions).where(eq(deploySessions.id, deploy_id)))[0];
   assert.equal(sess, undefined, '草稿行已删');
 });
 
@@ -213,11 +213,10 @@ test('begin: 顺手清理本人过期未提交草稿', async () => {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       expiresAt: new Date(Date.now() - 1000).toISOString(), // 已过期
-    })
-    .run();
+    });
 
   await postJson(app, '/api/sites/fresh/deploys'); // 任一 begin 触发清理
-  const gone = await db.select().from(deploySessions).where(eq(deploySessions.id, 'stale-vid')).get();
+  const gone = (await db.select().from(deploySessions).where(eq(deploySessions.id, 'stale-vid')))[0];
   assert.equal(gone, undefined, '过期草稿行被清');
   assert.equal(await storage.exists(stalePrefix + 'index.html'), false, '过期草稿存储被回收');
 });
