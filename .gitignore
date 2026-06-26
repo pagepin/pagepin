@@ -17,6 +17,7 @@ data/
 .env.*
 !.env.example
 .dev.vars
+.devdata
 
 # e2e artifacts
 e2e/node_modules/
@@ -28,3 +29,12 @@ e2e/.playwright/
 .idea/
 .vscode/
 .DS_Store
+
+# local working dirs (design sync / scratch) — not part of the project
+.design-sync/
+.design-review/
+.ds-sync/
+brand/
+ds-bundle/
+ds-bundle-v1/
+ds-bundle-comments/
