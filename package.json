@@ -26,7 +26,8 @@
     "test": "pnpm test:unit && pnpm test:e2e",
     "test:unit": "node --import tsx --test test/*.test.ts",
     "test:e2e": "pnpm -C e2e test",
-    "test:pg": "node --import tsx --test --test-force-exit test/pg-integration.test.ts"
+    "test:pg": "node --import tsx --test --test-force-exit test/pg-integration.test.ts",
+    "test:mysql": "node --import tsx --test --test-force-exit test/mysql-integration.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
@@ -36,6 +37,7 @@
     "hono": "^4.6.14"
   },
   "optionalDependencies": {
+    "mysql2": "^3.11.5",
     "postgres": "^3.4.5"
   },
   "devDependencies": {

@@ -18,6 +18,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { escapeHtml, gateDoc, LOCK_SVG } from '../brand-gate.js';
 import { consoleBase, type Config } from '../config.js';
 import { identities, invites, users, type UserRow } from '../db/index.js';
+import { writtenCount } from '../db/ops.js';
 import { effectiveRegistrationMode } from '../instance-settings.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { canonicalEmail, nowIso, uuid, validEmail } from '../util.js';
@@ -189,17 +190,16 @@ async function upsertDevUser(deps: AppDeps): Promise<UserRow> {
     await deps.db.update(users).set({ lastLoginAt: now }).where(eq(users.id, existing.id));
     return existing;
   }
-  return (await deps.db
-    .insert(users)
-    .values({
-      id: uuid(),
-      email: 'dev@localhost',
-      displayName: 'Dev User',
-      isAdmin: true,
-      createdAt: now,
-      lastLoginAt: now,
-    })
-    .returning())[0]!;
+  const id = uuid();
+  await deps.db.insert(users).values({
+    id,
+    email: 'dev@localhost',
+    displayName: 'Dev User',
+    isAdmin: true,
+    createdAt: now,
+    lastLoginAt: now,
+  });
+  return (await deps.db.select().from(users).where(eq(users.id, id)))[0]!;
 }
 
 /** canonical email 是否空闲(没被别的账号占用);决定「建新账号 / 刷资料时能否落这个邮箱键」。
@@ -511,28 +511,26 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     const dup = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
     if (dup) return c.json({ detail: '该邮箱已注册' }, 409);
     const n = ((await deps.db.select({ n: sql<number>`count(*)` }).from(users))[0])?.n ?? 0;
-    let created: UserRow;
+    const userId = uuid();
     try {
-      created = (await deps.db
-        .insert(users)
-        .values({
-          id: uuid(),
-          email,
-          canonicalEmail: canonical,
-          passwordHash,
-          displayName: displayName || null,
-          isAdmin: n === 0,
-          createdAt: now,
-          lastLoginAt: now,
-        })
-        .returning()
-        )[0]!;
+      await deps.db.insert(users).values({
+        id: userId,
+        email,
+        canonicalEmail: canonical,
+        passwordHash,
+        displayName: displayName || null,
+        isAdmin: n === 0,
+        createdAt: now,
+        lastLoginAt: now,
+      });
     } catch (e) {
       // 唯一索引兜并发同邮箱:落库失败后该 canonical 已存在 → 409,否则真异常上抛
       const exists = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
       if (exists) return c.json({ detail: '该邮箱已注册' }, 409);
       throw e;
     }
+    // 无 RETURNING 的跨方言写法:插入后按 id 回查整行(三方言一致)。
+    const created = (await deps.db.select().from(users).where(eq(users.id, userId)))[0]!;
     await ensurePasswordIdentity(deps, created.id, canonical, now);
     if (deps.mailer) {
       // 验证邮件尽力而为发送 —— 失败不阻断注册(邮箱保持未验证,用户可在设置里重发)
@@ -749,29 +747,24 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     // D1 无交互事务:① 先条件认领邀请(WHERE accepted_at IS NULL,RETURNING 检测命中=一次性语义),
     // ② 认领成功才建号,③ 建号失败则补偿释放邀请。跨进程安全,无需交互事务。
     const newUserId = uuid();
-    const claimed = (await deps.db
-      .update(invites)
-      .set({ acceptedAt: now, acceptedUserId: newUserId })
-      .where(and(eq(invites.id, inv.id), isNull(invites.acceptedAt)))
-      .returning({ id: invites.id })
-      )[0];
+    const claimed = await writtenCount(
+      deps.db
+        .update(invites)
+        .set({ acceptedAt: now, acceptedUserId: newUserId })
+        .where(and(eq(invites.id, inv.id), isNull(invites.acceptedAt))),
+    );
     if (!claimed) return c.json({ detail: '邀请已被使用' }, 400);
-    let created: UserRow;
     try {
-      created = (await deps.db
-        .insert(users)
-        .values({
-          id: newUserId,
-          email,
-          canonicalEmail: canonical,
-          passwordHash,
-          displayName: displayName || null,
-          isAdmin: inv.isAdmin,
-          createdAt: now,
-          lastLoginAt: now,
-        })
-        .returning()
-        )[0]!;
+      await deps.db.insert(users).values({
+        id: newUserId,
+        email,
+        canonicalEmail: canonical,
+        passwordHash,
+        displayName: displayName || null,
+        isAdmin: inv.isAdmin,
+        createdAt: now,
+        lastLoginAt: now,
+      });
     } catch (e) {
       // 建号失败(如并发同邮箱抢先)→ 释放本次认领,回错
       await deps.db
@@ -782,6 +775,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       if (exists) return c.json({ detail: '该邮箱已注册' }, 409);
       throw e;
     }
+    const created = (await deps.db.select().from(users).where(eq(users.id, newUserId)))[0]!;
     await ensurePasswordIdentity(deps, created.id, canonical, now);
     if (deps.mailer) {
       // 验证邮件尽力而为发送 —— 失败不阻断注册(邮箱保持未验证,用户可在设置里重发)

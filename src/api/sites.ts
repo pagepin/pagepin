@@ -26,6 +26,7 @@ import {
   type ThreadComment,
   type UserRow,
 } from '../db/index.js';
+import { writtenCount } from '../db/ops.js';
 import { purgeSiteStorage, type Storage } from '../storage/index.js';
 import { guessContentType } from '../storage/mime.js';
 import type { AppDeps, AppEnv } from '../types.js';
@@ -307,12 +308,9 @@ async function publishVersion(
       fresh.currentVersionId === null
         ? isNull(sites.currentVersionId)
         : eq(sites.currentVersionId, fresh.currentVersionId);
-    const wrote = (await db
-      .update(sites)
-      .set(set)
-      .where(and(eq(sites.id, p.siteId), guard))
-      .returning({ id: sites.id })
-      )[0];
+    const wrote = await writtenCount(
+      db.update(sites).set(set).where(and(eq(sites.id, p.siteId), guard)),
+    );
     if (wrote) {
       removed = trimmed;
       break;
@@ -773,12 +771,12 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         .where(eq(commentThreads.id, thread.id))
         )[0];
       if (!fresh) break;
-      const wrote = (await db
-        .update(commentThreads)
-        .set({ comments: [...fresh.comments, reply], updatedAt: nowIso() })
-        .where(and(eq(commentThreads.id, thread.id), eq(commentThreads.updatedAt, fresh.updatedAt)))
-        .returning({ id: commentThreads.id })
-        )[0];
+      const wrote = await writtenCount(
+        db
+          .update(commentThreads)
+          .set({ comments: [...fresh.comments, reply], updatedAt: nowIso() })
+          .where(and(eq(commentThreads.id, thread.id), eq(commentThreads.updatedAt, fresh.updatedAt))),
+      );
       if (wrote) break;
     }
     return c.json({

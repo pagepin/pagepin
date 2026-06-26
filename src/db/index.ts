@@ -39,6 +39,10 @@ export type Db = BaseSQLiteDatabase<'async', any, typeof sqliteSchema>;
 const env: Record<string, string | undefined> =
   (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
 const driver = inferDbDriver(env.PAGEPIN_DB_URL, env.PAGEPIN_DB_DRIVER);
+
+/** 部署期固定的 DB 方言 —— 供 db/ops.ts 把 RETURNING/upsert 等方言差异收口。 */
+export const dbDialect = driver;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const t: any = driver === 'postgres' ? pgSchema : driver === 'mysql' ? mysqlSchema : sqliteSchema;
 

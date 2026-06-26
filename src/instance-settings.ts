@@ -7,6 +7,7 @@
 import { eq } from 'drizzle-orm';
 
 import { instanceSettings } from './db/index.js';
+import { upsert } from './db/ops.js';
 import type { AppDeps } from './types.js';
 
 export const REGISTRATION_MODES = ['open', 'invite', 'closed'] as const;
@@ -27,12 +28,8 @@ export async function getSetting(deps: AppDeps, key: string): Promise<string | n
 }
 
 export async function setSetting(deps: AppDeps, key: string, value: string): Promise<void> {
-  // await 风格(非 .run())。注:onConflictDoUpdate 适用 SQLite/PG;MySQL 阶段此处改 onDuplicateKeyUpdate
-  // —— 这类「方言差异方法」收进 repo 后,集中在单个方法里按方言处理,不外溢到业务代码。
-  await deps.db
-    .insert(instanceSettings)
-    .values({ key, value })
-    .onConflictDoUpdate({ target: instanceSettings.key, set: { value } });
+  // 跨方言 upsert(SQLite/PG: ON CONFLICT;MySQL: ON DUPLICATE KEY)收口在 db/ops.upsert。
+  await upsert(deps.db.insert(instanceSettings).values({ key, value }), instanceSettings.key, { value });
 }
 
 /** env 是否锁定了注册模式(锁定时 UI 不可改)。 */

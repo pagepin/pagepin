@@ -50,7 +50,8 @@ async function main(): Promise<void> {
     const { createPostgresDb } = await import('./db/postgres.js');
     db = await createPostgresDb(cfg.dbUrl!);
   } else if (cfg.dbDriver === 'mysql') {
-    throw new Error('MySQL 驱动尚在接入中(下个版本);当前支持 sqlite / postgres');
+    const { createMysqlDb } = await import('./db/mysql.js');
+    db = await createMysqlDb(cfg.dbUrl!);
   } else {
     mkdirSync(cfg.dataDir, { recursive: true }); // 本地 file: 模式 libSQL 不会自建父目录
     db = await createLibsqlDb(cfg.dbUrl ?? `file:${join(cfg.dataDir, 'pagepin.db')}`, cfg.dbAuthToken);
