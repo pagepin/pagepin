@@ -20,6 +20,8 @@ import { consoleBase, type Config } from '../config.js';
 import { identities, invites, users, type UserRow } from '../db/index.js';
 import { writtenCount } from '../db/ops.js';
 import { effectiveRegistrationMode } from '../instance-settings.js';
+import { t, type Locale } from '../i18n/index.js';
+import { jsonError, localeOf } from '../i18n/locale.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { canonicalEmail, nowIso, uuid, validEmail } from '../util.js';
 import { buildAuthorizeUrl, exchangeCode, OidcError, type OidcIdentity } from './oidc.js';
@@ -132,66 +134,81 @@ function turnstileToken(body: Record<string, string>): string {
 const GOOGLE_MARK = `<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.27c0-.79-.07-1.54-.2-2.27H12v4.51h6.47a5.53 5.53 0 0 1-2.4 3.63v3h3.88c2.27-2.09 3.55-5.17 3.55-8.87Z"/><path fill="#34A853" d="M12 24c3.24 0 5.96-1.08 7.95-2.91l-3.88-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09A12 12 0 0 0 12 24Z"/><path fill="#FBBC05" d="M5.27 14.29a7.2 7.2 0 0 1 0-4.58V6.62H1.29a12 12 0 0 0 0 10.76l3.98-3.09Z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.43-3.43C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75Z"/></svg>`;
 const GITHUB_MARK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="#1b2127" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.47-2.39 1.24-3.23-.13-.31-.54-1.53.12-3.19 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.25 2.88.12 3.19.77.84 1.24 1.92 1.24 3.23 0 4.62-2.81 5.64-5.49 5.94.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/></svg>`;
 const SOCIAL_MARK: Record<string, string> = { google: GOOGLE_MARK, github: GITHUB_MARK };
-const SOCIAL_LABEL: Record<string, string> = {
-  google: 'Continue with Google',
-  github: 'Continue with GitHub',
-};
+// provider 展示名(品牌大小写,如 GitHub);未知 id 回落原值。文案模板见 auth.html.continueWith。
+const SOCIAL_PROVIDER_NAME: Record<string, string> = { google: 'Google', github: 'GitHub' };
 
 /** 内容域登录墙的社交登录按钮区:纯 <a> GET 起跳到 /auth/social/<id>（按 Host 拼回调,
  *  从 pagepin.page 发起即回 pagepin.page;无需 JS）。无 provider 时返回空串。 */
-function socialButtonsHtml(social: string[], next: string): string {
+function socialButtonsHtml(social: string[], next: string, locale: Locale): string {
   if (!social.length) return '';
   const buttons = social
     .map((id) => {
       const mark = SOCIAL_MARK[id] ?? '';
-      const label = SOCIAL_LABEL[id] ?? `Continue with ${id}`;
+      const label = t(locale, 'auth.html.continueWith', {
+        provider: SOCIAL_PROVIDER_NAME[id] ?? id,
+      });
       const href = `/auth/social/${encodeURIComponent(id)}?next=${encodeURIComponent(next)}`;
       return `  <a class="btn btn-social" href="${href}">${mark}${escapeHtml(label)}</a>`;
     })
     .join('\n');
-  return `<div class="social">\n${buttons}\n</div>\n<div class="or">or</div>\n`;
+  return `<div class="social">\n${buttons}\n</div>\n<div class="or">${escapeHtml(t(locale, 'auth.html.or'))}</div>\n`;
 }
 
 /** 双域内容平面的 password 登录页:复用 brand-gate 品牌壳(与私有门页同一视觉),自包含、
  * 无控制台资产依赖。提交走内联 fetch → JSON,失败行内报错(不再把 401 的 {detail} 甩成裸 JSON 页);
  * 成功跳回 next。JS 不可用时 <form> 仍原生 POST 兜底(成功 302 回跳,失败退化为旧的 JSON 页)。 */
-function loginPage(next: string, social: string[], turnstileSiteKey?: string): string {
+function loginPage(
+  next: string,
+  social: string[],
+  locale: Locale,
+  turnstileSiteKey?: string,
+): string {
   const tsWidget = turnstileSiteKey
     ? `  <div class="cf-turnstile" data-sitekey="${escapeHtml(turnstileSiteKey)}"></div>\n`
     : '';
   const tsScript = turnstileSiteKey
     ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>\n`
     : '';
+  // 内联 <script> 的提示文案:JSON.stringify 注入(引号/unicode 安全转义);
+  // 再把 `</` 转义掉,防文案里出现 </script> 提前闭合脚本(与 serving.ts mdShell 同一手法)。
+  const jsStr = (s: string) => JSON.stringify(s).replaceAll('</', '<\\/');
+  const btnLabel = t(locale, 'auth.html.signIn.button');
+  const msgSigningIn = jsStr(t(locale, 'auth.html.signingIn'));
+  const msgFail = jsStr(t(locale, 'auth.html.signInFailed'));
+  const msgNetwork = jsStr(t(locale, 'auth.html.networkError'));
+  const msgBtn = jsStr(btnLabel);
   return gateDoc(
-    'Sign in · pagepin',
+    t(locale, 'auth.html.signIn.title'),
     `<div class="chip chip-teal">${LOCK_SVG}</div>
-<h1>Sign in to view</h1>
-<p class="body">Sign in to your pagepin account to continue.</p>
-${socialButtonsHtml(social, next)}<form id="f" method="post" action="/auth/password">
+<h1>${escapeHtml(t(locale, 'auth.html.signIn.heading'))}</h1>
+<p class="body">${escapeHtml(t(locale, 'auth.html.signIn.subtitle'))}</p>
+${socialButtonsHtml(social, next, locale)}<form id="f" method="post" action="/auth/password">
   <input type="hidden" name="next" value="${escapeHtml(next)}">
-  <label>Email<input name="email" type="email" autocomplete="username" required autofocus></label>
-  <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+  <label>${escapeHtml(t(locale, 'auth.html.field.email'))}<input name="email" type="email" autocomplete="username" required autofocus></label>
+  <label>${escapeHtml(t(locale, 'auth.html.field.password'))}<input name="password" type="password" autocomplete="current-password" required></label>
 ${tsWidget}  <div id="err" class="err" hidden></div>
-  <button type="submit" class="btn btn-primary">Sign in</button>
+  <button type="submit" class="btn btn-primary">${escapeHtml(btnLabel)}</button>
 </form>
-${tsScript}<div class="foot">Hosted on <span class="mono">pagepin</span></div>
+${tsScript}<div class="foot">${escapeHtml(t(locale, 'auth.html.hostedOn'))} <span class="mono">pagepin</span></div>
 <script>
 (function(){
+  var MSG_SIGNING_IN=${msgSigningIn},MSG_FAIL=${msgFail},MSG_NETWORK=${msgNetwork},MSG_BTN=${msgBtn};
   var f=document.getElementById('f'),err=document.getElementById('err'),btn=f.querySelector('button');
   f.addEventListener('submit',function(e){
-    e.preventDefault();err.hidden=true;btn.disabled=true;btn.textContent='Signing in\\u2026';
+    e.preventDefault();err.hidden=true;btn.disabled=true;btn.textContent=MSG_SIGNING_IN;
     var p={};new FormData(f).forEach(function(v,k){p[k]=v;});
     fetch('/auth/password',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(p)})
       .then(function(r){return r.json().catch(function(){return {};}).then(function(j){return {ok:r.ok,j:j};});})
       .then(function(res){
         if(res.ok){window.location.href=p.next||'/';return;}
-        err.textContent=(res.j&&res.j.detail)||'Sign-in failed';err.hidden=false;
-        btn.disabled=false;btn.textContent='Sign in';
+        err.textContent=(res.j&&res.j.detail)||MSG_FAIL;err.hidden=false;
+        btn.disabled=false;btn.textContent=MSG_BTN;
       })
-      .catch(function(){err.textContent='Network error, please retry';err.hidden=false;btn.disabled=false;btn.textContent='Sign in';});
+      .catch(function(){err.textContent=MSG_NETWORK;err.hidden=false;btn.disabled=false;btn.textContent=MSG_BTN;});
   });
 })();
 </script>`,
+    locale,
   );
 }
 
@@ -474,7 +491,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
         const url = await buildAuthorizeUrl(cfg.oidc!, redirectUri(c, cfg), state);
         return c.redirect(url, 302);
       } catch (e) {
-        if (e instanceof OidcError) return c.json({ detail: e.detail }, 502);
+        if (e instanceof OidcError) return jsonError(c, 502, e.key, e.params);
         throw e;
       }
     }
@@ -485,6 +502,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
         loginPage(
           next,
           cfg.socialProviders.map((p) => p.id),
+          localeOf(c),
           cfg.turnstile?.siteKey,
         ),
       );
@@ -492,17 +510,17 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   });
 
   app.post('/auth/password', async (c) => {
-    if (cfg.authMode !== 'password') return c.json({ detail: '未启用密码登录' }, 403);
+    if (cfg.authMode !== 'password') return jsonError(c, 403, 'auth.password.notEnabled');
     const { body, isJson } = await readBody(c);
     // 限流:同一 IP 登录尝试节流(防撞库);边缘真正防护用 CF Rate Limiting Rules。
     if (deps.rateLimiter && !(await deps.rateLimiter.check(`login:${clientIp(c)}`, 10, 600))) {
-      return c.json({ detail: '尝试过于频繁，请稍后再试' }, 429);
+      return jsonError(c, 429, 'auth.login.rateLimited');
     }
     if (
       cfg.turnstile &&
       !(await verifyTurnstile(cfg.turnstile.secretKey, turnstileToken(body), clientIp(c)))
     ) {
-      return c.json({ detail: '人机校验失败，请重试' }, 403);
+      return jsonError(c, 403, 'auth.turnstile.failed');
     }
     const canonical = canonicalEmail(body.email);
     const password = body.password ?? '';
@@ -515,9 +533,9 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       !password ||
       !(await verifyPassword(password, user.passwordHash))
     ) {
-      return c.json({ detail: '邮箱或密码不正确' }, 401);
+      return jsonError(c, 401, 'auth.password.badCredentials');
     }
-    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
+    if (user.disabled) return jsonError(c, 403, 'auth.account.disabled');
     await deps.db.update(users).set({ lastLoginAt: nowIso() }).where(eq(users.id, user.id));
     await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
     if (isJson) return c.json({ ok: true });
@@ -527,32 +545,32 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   app.post('/auth/signup', async (c) => {
     // 自助注册仅在 open 模式放行;invite 模式须走邀请链接,closed 完全关闭
     if (cfg.authMode !== 'password' || (await effectiveRegistrationMode(deps)) !== 'open') {
-      return c.json({ detail: '注册未开放' }, 403);
+      return jsonError(c, 403, 'auth.signup.notOpen');
     }
     const { body } = await readBody(c);
     // 限流:同一 IP 批量注册节流(防机器人刷号);边缘真正防护用 CF Rate Limiting Rules。
     if (deps.rateLimiter && !(await deps.rateLimiter.check(`signup:${clientIp(c)}`, 5, 3600))) {
-      return c.json({ detail: '注册过于频繁，请稍后再试' }, 429);
+      return jsonError(c, 429, 'auth.signup.rateLimited');
     }
     if (
       cfg.turnstile &&
       !(await verifyTurnstile(cfg.turnstile.secretKey, turnstileToken(body), clientIp(c)))
     ) {
-      return c.json({ detail: '人机校验失败，请重试' }, 403);
+      return jsonError(c, 403, 'auth.turnstile.failed');
     }
     const email = (body.email ?? '').trim();
     const password = body.password ?? '';
     const displayName = (body.display_name ?? '').trim();
-    if (!validEmail(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
-    if (password.length < 8) return c.json({ detail: '密码至少 8 位' }, 422);
+    if (!validEmail(email)) return jsonError(c, 422, 'auth.email.invalid');
+    if (password.length < 8) return jsonError(c, 422, 'auth.password.tooShort');
     const canonical = canonicalEmail(email);
-    if (!canonical) return c.json({ detail: '邮箱格式不正确' }, 422);
+    if (!canonical) return jsonError(c, 422, 'auth.email.invalid');
 
     const passwordHash = await hashPassword(password);
     const now = nowIso();
     // D1 无交互事务:按 canonicalEmail 查重 + 数首个用户(count==0 → admin),靠 users_canonical_email_uq 兜并发双注册
     const dup = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
-    if (dup) return c.json({ detail: '该邮箱已注册' }, 409);
+    if (dup) return jsonError(c, 409, 'auth.email.taken');
     const n = (await deps.db.select({ n: sql<number>`count(*)` }).from(users))[0]?.n ?? 0;
     const userId = uuid();
     try {
@@ -571,7 +589,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       const exists = (
         await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical))
       )[0];
-      if (exists) return c.json({ detail: '该邮箱已注册' }, 409);
+      if (exists) return jsonError(c, 409, 'auth.email.taken');
       throw e;
     }
     // 无 RETURNING 的跨方言写法:插入后按 id 回查整行(三方言一致)。
@@ -580,7 +598,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     if (deps.mailer) {
       // 验证邮件尽力而为发送 —— 失败不阻断注册(邮箱保持未验证,用户可在设置里重发)
       try {
-        await sendVerificationEmail(deps, created);
+        await sendVerificationEmail(deps, created, localeOf(c));
       } catch (e) {
         console.error('验证邮件发送失败(不阻断注册):', e);
       }
@@ -590,19 +608,19 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   });
 
   app.get('/auth/callback', async (c) => {
-    if (cfg.authMode !== 'oidc') return c.json({ detail: '未启用 OIDC 登录' }, 404);
+    if (cfg.authMode !== 'oidc') return jsonError(c, 404, 'auth.oidc.notEnabled');
     const code = c.req.query('code');
     const state = c.req.query('state');
-    if (!code || !state) return c.json({ detail: '缺 code/state' }, 400);
+    if (!code || !state) return jsonError(c, 400, 'auth.oauth.missingCodeState');
     const st = await stateDecode(cfg.secret, state);
     if (!st || st.pln !== plane || !consumeOauthNonce(c, st.non)) {
-      return c.json({ detail: 'state 无效或过期，请重新登录' }, 400);
+      return jsonError(c, 400, 'auth.oauth.stateInvalid');
     }
     let info: OidcIdentity;
     try {
       info = await exchangeCode(cfg.oidc!, code, redirectUri(c, cfg));
     } catch (e) {
-      if (e instanceof OidcError) return c.json({ detail: e.detail }, 502);
+      if (e instanceof OidcError) return jsonError(c, 502, e.key, e.params);
       throw e;
     }
     const user = await upsertFederatedUser(deps, {
@@ -612,7 +630,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       email: info.email,
       emailVerified: info.emailVerified,
     });
-    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
+    if (user.disabled) return jsonError(c, 403, 'auth.account.disabled');
     await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
     return c.redirect(safeNext(typeof st.nxt === 'string' ? st.nxt : null), 302);
   });
@@ -622,7 +640,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   app.get('/auth/social/:provider', async (c) => {
     const provider = c.req.param('provider');
     const conf = cfg.socialProviders.find((p) => p.id === provider);
-    if (!conf) return c.json({ detail: '未启用该登录方式' }, 404);
+    if (!conf) return jsonError(c, 404, 'auth.social.notEnabled');
     const next = safeNext(c.req.query('next'));
     // link=1:把当前登录身份「连接」到已登录账号(sign-in-to-link)。须已登录,把目标 userId 签进 state。
     let link: string | undefined;
@@ -641,13 +659,13 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   app.get('/auth/social/:provider/callback', async (c) => {
     const provider = c.req.param('provider');
     const conf = cfg.socialProviders.find((p) => p.id === provider);
-    if (!conf) return c.json({ detail: '未启用该登录方式' }, 404);
+    if (!conf) return jsonError(c, 404, 'auth.social.notEnabled');
     const code = c.req.query('code');
     const state = c.req.query('state');
-    if (!code || !state) return c.json({ detail: '缺 code/state' }, 400);
+    if (!code || !state) return jsonError(c, 400, 'auth.oauth.missingCodeState');
     const st = await stateDecode(cfg.secret, state);
     if (!st || st.pln !== plane || !consumeOauthNonce(c, st.non)) {
-      return c.json({ detail: 'state 无效或过期，请重新登录' }, 400);
+      return jsonError(c, 400, 'auth.oauth.stateInvalid');
     }
     let id: { sub: string; name?: string; email?: string; emailVerified?: boolean };
     try {
@@ -659,7 +677,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
         socialRedirectUri(c, cfg, provider),
       );
     } catch (e) {
-      if (e instanceof OidcError) return c.json({ detail: e.detail }, 502);
+      if (e instanceof OidcError) return jsonError(c, 502, e.key, e.params);
       throw e;
     }
     const back = safeNext(typeof st.nxt === 'string' ? st.nxt : null);
@@ -685,7 +703,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       email: id.email,
       emailVerified: id.emailVerified,
     });
-    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
+    if (user.disabled) return jsonError(c, 403, 'auth.account.disabled');
     await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
     return c.redirect(back, 302);
   });
@@ -698,27 +716,27 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
   // 邮箱验证落地页:点邮件里的链接到这里。token 无状态(同会话密钥签),用途+签发时邮箱都比对,
   // 验证后把 users.emailVerified 与该账号 password identity 一并置真(幂等:已验证再点也无碍)。
   app.get('/auth/verify-email', async (c) => {
+    const locale = localeOf(c);
     const token = c.req.query('token') ?? '';
     const payload = token ? await readVerifyToken(cfg.secret, token) : null;
     const fail = (msg: string) =>
       c.html(
         gateDoc(
-          'Verification failed · pagepin',
+          t(locale, 'auth.html.verify.failTitle'),
           `<div class="chip chip-amber">${LOCK_SVG}</div>
-<h1>Link invalid or expired</h1>
+<h1>${escapeHtml(t(locale, 'auth.html.verify.failHeading'))}</h1>
 <p class="body">${escapeHtml(msg)}</p>
-<a class="btn btn-primary" href="${escapeHtml(consoleBase(cfg))}">Go to pagepin</a>`,
+<a class="btn btn-primary" href="${escapeHtml(consoleBase(cfg))}">${escapeHtml(t(locale, 'auth.html.verify.goButton'))}</a>`,
+          locale,
         ),
         400,
       );
     if (!payload) {
-      return fail(
-        'This verification link is invalid or has expired. Sign in and resend it from Settings.',
-      );
+      return fail(t(locale, 'auth.html.verify.invalidExpired'));
     }
     const user = (await deps.db.select().from(users).where(eq(users.id, payload.uid)))[0];
     if (!user || user.canonicalEmail !== payload.eml) {
-      return fail('This link no longer matches your account email.');
+      return fail(t(locale, 'auth.html.verify.emailMismatch'));
     }
     if (!user.emailVerified) {
       await deps.db.update(users).set({ emailVerified: true }).where(eq(users.id, user.id));
@@ -731,11 +749,14 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     await reconcileByVerifiedEmail(deps, user.canonicalEmail);
     return c.html(
       gateDoc(
-        'Email verified · pagepin',
+        t(locale, 'auth.html.verify.successTitle'),
         `<div class="chip chip-teal">${LOCK_SVG}</div>
-<h1>Email verified</h1>
-<p class="body">Thanks — <span class="mono">${escapeHtml(user.email ?? payload.eml)}</span> is confirmed.</p>
-<a class="btn btn-primary" href="${escapeHtml(consoleBase(cfg))}">Go to pagepin</a>`,
+<h1>${escapeHtml(t(locale, 'auth.html.verify.successHeading'))}</h1>
+<p class="body">${t(locale, 'auth.html.verify.successBody', {
+          email: `<span class="mono">${escapeHtml(user.email ?? payload.eml)}</span>`,
+        })}</p>
+<a class="btn btn-primary" href="${escapeHtml(consoleBase(cfg))}">${escapeHtml(t(locale, 'auth.html.verify.goButton'))}</a>`,
+        locale,
       ),
       200,
     );
@@ -774,31 +795,31 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
 
   /** 接受邀请:凭一次性 token 建号并登录(handle 仍走首登确认)。 */
   app.post('/auth/accept-invite', async (c) => {
-    if (cfg.authMode !== 'password') return c.json({ detail: '当前实例不支持邀请注册' }, 403);
+    if (cfg.authMode !== 'password') return jsonError(c, 403, 'auth.invite.notSupported');
     if ((await effectiveRegistrationMode(deps)) === 'closed')
-      return c.json({ detail: '注册已关闭' }, 403);
+      return jsonError(c, 403, 'auth.signup.closed');
     const { body } = await readBody(c);
     const token = (body.token ?? '').trim();
     const password = body.password ?? '';
     const displayName = (body.display_name ?? '').trim();
-    if (!token) return c.json({ detail: '缺少邀请 token' }, 422);
-    if (password.length < 8) return c.json({ detail: '密码至少 8 位' }, 422);
+    if (!token) return jsonError(c, 422, 'auth.invite.tokenMissing');
+    if (password.length < 8) return jsonError(c, 422, 'auth.password.tooShort');
 
     const tokenHash = await sha256Hex(token);
     const inv = (await deps.db.select().from(invites).where(eq(invites.tokenHash, tokenHash)))[0];
     if (!inv || inv.acceptedAt !== null || Date.parse(inv.expiresAt) <= Date.now()) {
-      return c.json({ detail: '邀请无效或已过期' }, 400);
+      return jsonError(c, 400, 'auth.invite.invalidOrExpired');
     }
     const email = (inv.email ?? body.email ?? '').trim();
-    if (!validEmail(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
+    if (!validEmail(email)) return jsonError(c, 422, 'auth.email.invalid');
     const canonical = canonicalEmail(email);
-    if (!canonical) return c.json({ detail: '邮箱格式不正确' }, 422);
+    if (!canonical) return jsonError(c, 422, 'auth.email.invalid');
 
     const passwordHash = await hashPassword(password);
     const now = nowIso();
     // 常见 dup 先拦(不消耗邀请)
     const dup = (await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical)))[0];
-    if (dup) return c.json({ detail: '该邮箱已注册' }, 409);
+    if (dup) return jsonError(c, 409, 'auth.email.taken');
     // D1 无交互事务:① 先条件认领邀请(WHERE accepted_at IS NULL,RETURNING 检测命中=一次性语义),
     // ② 认领成功才建号,③ 建号失败则补偿释放邀请。跨进程安全,无需交互事务。
     const newUserId = uuid();
@@ -808,7 +829,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
         .set({ acceptedAt: now, acceptedUserId: newUserId })
         .where(and(eq(invites.id, inv.id), isNull(invites.acceptedAt))),
     );
-    if (!claimed) return c.json({ detail: '邀请已被使用' }, 400);
+    if (!claimed) return jsonError(c, 400, 'auth.invite.alreadyUsed');
     try {
       await deps.db.insert(users).values({
         id: newUserId,
@@ -829,7 +850,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
       const exists = (
         await deps.db.select().from(users).where(eq(users.canonicalEmail, canonical))
       )[0];
-      if (exists) return c.json({ detail: '该邮箱已注册' }, 409);
+      if (exists) return jsonError(c, 409, 'auth.email.taken');
       throw e;
     }
     const created = (await deps.db.select().from(users).where(eq(users.id, newUserId)))[0]!;
@@ -837,7 +858,7 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     if (deps.mailer) {
       // 验证邮件尽力而为发送 —— 失败不阻断注册(邮箱保持未验证,用户可在设置里重发)
       try {
-        await sendVerificationEmail(deps, created);
+        await sendVerificationEmail(deps, created, localeOf(c));
       } catch (e) {
         console.error('验证邮件发送失败(不阻断注册):', e);
       }

@@ -4,6 +4,29 @@ All notable changes to pagepin are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Internationalization (English / 中文).** Every user-facing surface is now
+  localized: the React console (with a one-click language switcher), server-rendered
+  HTML (login wall, markdown/image viewer shells, directory index, 404/expired/takedown
+  pages), the injected comment overlay (`comments.js`), the verification email, and all
+  API error bodies. Language is resolved per request in the order `?lang=` →
+  `pp_lang` cookie → `Accept-Language` → `PAGEPIN_DEFAULT_LOCALE` (new env var,
+  default `en`). The catalog is split by domain under `src/i18n/messages/` (server)
+  and `console/src/i18n/messages/` (console); `test/i18n.test.ts` guards en/zh parity,
+  cross-file key uniqueness, and that every referenced key exists.
+
+### Changed
+
+- **API error bodies now include a stable `code`.** Error responses changed from
+  `{ detail }` to `{ detail, code }`, where `detail` is localized and `code` is a
+  language-independent key (e.g. `auth.unauthenticated`, `site.quota.exceeded`) for
+  programmatic handling. The previous one-off `code: "email_unverified"` is now
+  `auth.emailUnverified`. The `/api/me/handle/check` `reason` field now returns a
+  stable code (`invalid` / `taken`) instead of a localized string.
+
 ## [0.3.0] — 2026-06-26
 
 ### Added

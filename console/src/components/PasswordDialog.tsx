@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertCircle, Check, Loader2, Lock, X } from 'lucide-react';
 import { api } from '../api';
+import { useT } from '../i18n';
 import { toast, toastError } from './Toast';
 
 /** 改密码弹窗（仅 password 模式，从 Settings 触发）。只校验长度≥8 + 两次一致。 */
 export function PasswordDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -28,11 +30,11 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
     api
       .changePassword(current, next)
       .then(() => {
-        toast('Password updated');
+        toast(t('core.passwordUpdated'));
         onClose();
       })
       .catch((e) => {
-        toastError(e, 'Could not update password');
+        toastError(e, t('core.passwordUpdateFailed'));
         setSubmitting(false);
       });
   };
@@ -49,7 +51,7 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-ink-800">
             <Lock className="h-4 w-4 text-tide-600" />
-            <span className="text-sm font-bold">Change password</span>
+            <span className="text-sm font-bold">{t('core.changePassword')}</span>
           </div>
           <button
             type="button"
@@ -64,7 +66,7 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
           <input
             className="input"
             type="password"
-            placeholder="Enter current password"
+            placeholder={t('core.currentPasswordPlaceholder')}
             autoFocus
             autoComplete="current-password"
             value={current}
@@ -73,7 +75,7 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
           <input
             className={`input ${tooShort ? 'border-red-300 focus:border-red-400 focus:ring-red-500/10' : ''}`}
             type="password"
-            placeholder="At least 8 characters"
+            placeholder={t('core.newPasswordPlaceholder')}
             autoComplete="new-password"
             value={next}
             onChange={(e) => setNext(e.target.value)}
@@ -81,7 +83,7 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
           <input
             className={`input ${mismatch ? 'border-red-300 focus:border-red-400 focus:ring-red-500/10' : ''}`}
             type="password"
-            placeholder="Re-enter new password"
+            placeholder={t('core.confirmPasswordPlaceholder')}
             autoComplete="new-password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
@@ -92,22 +94,22 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
         <div className="mt-2 flex min-h-[18px] items-center gap-1 text-xs">
           {tooShort ? (
             <span className="flex items-center gap-1 text-red-600">
-              <AlertCircle className="h-3.5 w-3.5" /> New password must be at least 8 characters.
+              <AlertCircle className="h-3.5 w-3.5" /> {t('core.passwordTooShort')}
             </span>
           ) : mismatch ? (
             <span className="flex items-center gap-1 text-red-600">
-              <AlertCircle className="h-3.5 w-3.5" /> New passwords don&apos;t match.
+              <AlertCircle className="h-3.5 w-3.5" /> {t('core.passwordMismatch')}
             </span>
           ) : ready ? (
             <span className="flex items-center gap-1 text-tide-700">
-              <Check className="h-3.5 w-3.5" /> Passwords match.
+              <Check className="h-3.5 w-3.5" /> {t('core.passwordsMatch')}
             </span>
           ) : null}
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" className="btn-ghost" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -116,7 +118,7 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
             onClick={submit}
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Update password
+            {t('core.updatePassword')}
           </button>
         </div>
       </div>

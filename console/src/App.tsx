@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { useT } from './i18n';
 import { useStore } from './store';
 import { AcceptInvite } from './components/AcceptInvite';
 import { Activate } from './components/Activate';
 import { Admin } from './components/Admin';
 import { Confirmer } from './components/ConfirmDialog';
 import { HandleSetup } from './components/HandleSetup';
+import { CornerLang } from './components/LanguageSwitcher';
 import { Login } from './components/Login';
 import { Settings } from './components/Settings';
 import { Signup } from './components/Signup';
@@ -14,6 +16,7 @@ import { Toaster } from './components/Toast';
 import { TopBar } from './components/TopBar';
 
 export default function App() {
+  const t = useT();
   const me = useStore((s) => s.me);
   const booting = useStore((s) => s.booting);
   const bootError = useStore((s) => s.bootError);
@@ -28,11 +31,21 @@ export default function App() {
   }, [init, onPreAuth]);
 
   if (path === '/login') {
-    return <Login />;
+    return (
+      <>
+        <CornerLang />
+        <Login />
+      </>
+    );
   }
   if (path === '/signup') {
     const invite = new URLSearchParams(location.search).get('invite');
-    return invite ? <AcceptInvite token={invite} /> : <Signup />;
+    return (
+      <>
+        <CornerLang />
+        {invite ? <AcceptInvite token={invite} /> : <Signup />}
+      </>
+    );
   }
 
   if (booting) {
@@ -40,7 +53,7 @@ export default function App() {
       <div className="flex min-h-screen items-center justify-center">
         <div className="flex items-center gap-2 text-ink-400">
           <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">Loading pagepin…</span>
+          <span className="text-sm">{t('app.loading')}</span>
         </div>
       </div>
     );
@@ -49,12 +62,13 @@ export default function App() {
   if (bootError || !me) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
+        <CornerLang />
         <div className="max-w-sm rounded-card border border-red-200 bg-white p-8 text-center shadow-card">
           <div className="text-2xl">🫥</div>
-          <p className="mt-3 text-sm font-semibold text-ink-700">Failed to load</p>
-          <p className="mt-1 text-xs text-ink-400">{bootError ?? 'Unknown error'}</p>
+          <p className="mt-3 text-sm font-semibold text-ink-700">{t('app.failedToLoad')}</p>
+          <p className="mt-1 text-xs text-ink-400">{bootError ?? t('app.unknownError')}</p>
           <button type="button" className="btn-primary mt-5" onClick={() => location.reload()}>
-            Retry
+            {t('common.retry')}
           </button>
         </div>
       </div>
@@ -65,6 +79,7 @@ export default function App() {
   if (path === '/activate') {
     return (
       <>
+        <CornerLang />
         <Activate />
         <Toaster />
       </>
@@ -97,9 +112,7 @@ export default function App() {
       {me.needs_handle ? <HandleSetup /> : <SitesView />}
       <Toaster />
       <Confirmer />
-      <footer className="pb-8 pt-4 text-center text-xs text-ink-300">
-        pagepin · static hosting with built-in review
-      </footer>
+      <footer className="pb-8 pt-4 text-center text-xs text-ink-300">{t('app.footer')}</footer>
     </div>
   );
 }

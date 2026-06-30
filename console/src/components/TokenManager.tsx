@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Copy, Loader2, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { api } from '../api';
+import { useT } from '../i18n';
 import { confirmDanger } from './ConfirmDialog';
 import { copyText, formatRelative } from '../lib/format';
 import type { TokenItem } from '../types';
@@ -15,6 +16,7 @@ function aiPrompt(): string {
 
 /** API token 列表 + 创建 + 复制/轮换/吊销 —— 不带任何外框，供 TokenDialog 与 Settings 复用。 */
 export function TokenManager() {
+  const t = useT();
   const [tokens, setTokens] = useState<TokenItem[] | null>(null);
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -26,9 +28,9 @@ export function TokenManager() {
       if (ok) {
         setCopied(key);
         window.setTimeout(() => setCopied((cur) => (cur === key ? null : cur)), 1500);
-        toast('Copied');
+        toast(t('common.copied'));
       } else {
-        toast('Copy failed — select and copy manually', 'err');
+        toast(t('tokens.copyFailed'), 'err');
       }
     });
   };
@@ -37,8 +39,8 @@ export function TokenManager() {
     api
       .listTokens()
       .then(({ tokens }) => setTokens(tokens))
-      .catch((e) => toastError(e, 'Failed to load tokens'));
-  }, []);
+      .catch((e) => toastError(e, t('tokens.loadFailed')));
+  }, [t]);
 
   useEffect(() => refresh(), [refresh]);
 
@@ -47,73 +49,72 @@ export function TokenManager() {
     setCreating(true);
     api
       .createToken(n)
-      .then((t) => {
+      .then((tok) => {
         setName('');
-        setTokens((prev) => [t, ...(prev ?? [])]);
-        toast(`“${t.name}” created`);
+        setTokens((prev) => [tok, ...(prev ?? [])]);
+        toast(t('tokens.created', { name: tok.name }));
       })
-      .catch((e) => toastError(e, 'Create failed'))
+      .catch((e) => toastError(e, t('tokens.createFailed')))
       .finally(() => setCreating(false));
   };
 
-  const rotate = async (t: TokenItem) => {
+  const rotate = async (tok: TokenItem) => {
     const ok = await confirmDanger({
-      title: `Rotate “${t.name}”?`,
-      body: 'The old token stops working immediately; any agent or script using it needs the new value.',
-      confirmText: 'Rotate',
+      title: t('tokens.rotateTitle', { name: tok.name }),
+      body: t('tokens.rotateBody'),
+      confirmText: t('tokens.rotateConfirm'),
     });
     if (!ok) return;
     api
-      .rotateToken(t.id)
+      .rotateToken(tok.id)
       .then((nt) => {
         setTokens((prev) => (prev ?? []).map((x) => (x.id === nt.id ? nt : x)));
-        toast('Rotated — copy the new value to your agent');
+        toast(t('tokens.rotated'));
       })
-      .catch((e) => toastError(e, 'Rotate failed'));
+      .catch((e) => toastError(e, t('tokens.rotateFailed')));
   };
 
-  const revoke = async (t: TokenItem) => {
+  const revoke = async (tok: TokenItem) => {
     const ok = await confirmDanger({
-      title: `Revoke “${t.name}”?`,
-      body: 'Any agent or script using it stops working immediately, and this cannot be undone.',
-      confirmText: 'Revoke',
+      title: t('tokens.revokeTitle', { name: tok.name }),
+      body: t('tokens.revokeBody'),
+      confirmText: t('tokens.revokeConfirm'),
     });
     if (!ok) return;
     api
-      .revokeToken(t.id)
+      .revokeToken(tok.id)
       .then(() => {
-        toast('Revoked');
+        toast(t('tokens.revoked'));
         refresh();
       })
-      .catch((e) => toastError(e, 'Revoke failed'));
+      .catch((e) => toastError(e, t('tokens.revokeFailed')));
   };
 
   return (
     <div>
       <p className="text-xs leading-relaxed text-ink-400">
-        Deploy credentials for agents &amp; CI, scoped to your sites. The{' '}
-        <Sparkles className="inline h-3 w-3 -translate-y-px text-tide-500" /> button copies the
-        one-line{' '}
+        {t('tokens.hintLead')}
+        <Sparkles className="inline h-3 w-3 -translate-y-px text-tide-500" />
+        {t('tokens.hintButtonCopies')}
         <a
           href="https://github.com/vercel-labs/skills"
           target="_blank"
           rel="noreferrer"
           className="text-tide-600 underline"
         >
-          npx skills
-        </a>{' '}
-        install command (or read the{' '}
-        <a href="/skill.md" target="_blank" rel="noreferrer" className="text-tide-600 underline">
-          skill guide
+          {t('tokens.hintNpxSkills')}
         </a>
-        ). The token stays out of it — the agent gets it via browser login, so it never lands in a
-        chat.
+        {t('tokens.hintInstallCmd')}
+        <a href="/skill.md" target="_blank" rel="noreferrer" className="text-tide-600 underline">
+          {t('tokens.hintSkillGuide')}
+        </a>
+        {t('tokens.hintTail')}
       </p>
 
       <div className="mt-4 flex gap-2">
         <input
           className="input font-mono"
-          placeholder="Label, e.g. claude-deploy"
+          placeholder={t('tokens.namePlaceholder')}
           maxLength={64}
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -121,54 +122,58 @@ export function TokenManager() {
         />
         <button type="button" className="btn-primary shrink-0" disabled={creating} onClick={create}>
           {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          Create token
+          {t('tokens.createButton')}
         </button>
       </div>
 
       <div className="mt-4 divide-y divide-ink-100 border-t border-ink-100">
         {tokens === null ? (
           <div className="flex items-center gap-2 py-4 text-xs text-ink-400">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('common.loading')}
           </div>
         ) : tokens.length === 0 ? (
-          <div className="py-4 text-xs text-ink-400">No tokens yet — create one.</div>
+          <div className="py-4 text-xs text-ink-400">{t('tokens.empty')}</div>
         ) : (
-          tokens.map((t) => (
-            <div key={t.id} className="flex items-center justify-between gap-3 py-2.5">
+          tokens.map((tok) => (
+            <div key={tok.id} className="flex items-center justify-between gap-3 py-2.5">
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-ink-700">{t.name}</div>
+                <div className="truncate text-sm font-semibold text-ink-700">{tok.name}</div>
                 <div className="truncate font-mono text-xs text-ink-400">
-                  {t.token
-                    ? `${t.prefix}●●●●●●●●●●`
-                    : `${t.prefix}… (legacy token — can't be shown; revoke & recreate)`}
+                  {tok.token
+                    ? `${tok.prefix}●●●●●●●●●●`
+                    : `${tok.prefix}${t('tokens.legacySuffix')}`}
                 </div>
                 <div className="text-xs text-ink-300">
-                  {t.last_used_at ? `Last used ${formatRelative(t.last_used_at)}` : 'Never used'}
-                  {t.expires_at ? ` · expires ${new Date(t.expires_at).toLocaleDateString()}` : ''}
+                  {tok.last_used_at
+                    ? t('tokens.lastUsed', { time: formatRelative(tok.last_used_at) })
+                    : t('tokens.neverUsed')}
+                  {tok.expires_at
+                    ? t('tokens.expires', { date: new Date(tok.expires_at).toLocaleDateString() })
+                    : ''}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
-                  title="Copy install command (token-free)"
+                  title={t('tokens.copyInstallTitle')}
                   className="rounded-chip p-2 text-tide-500 hover:bg-tide-50 hover:text-tide-700"
-                  onClick={() => copy(aiPrompt(), `${t.id}:prompt`)}
+                  onClick={() => copy(aiPrompt(), `${tok.id}:prompt`)}
                 >
-                  {copied === `${t.id}:prompt` ? (
+                  {copied === `${tok.id}:prompt` ? (
                     <Check className="h-3.5 w-3.5" />
                   ) : (
                     <Sparkles className="h-3.5 w-3.5" />
                   )}
                 </button>
-                {t.token && (
+                {tok.token && (
                   <>
                     <button
                       type="button"
-                      title="Copy token"
+                      title={t('tokens.copyTokenTitle')}
                       className="rounded-chip p-2 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
-                      onClick={() => copy(t.token!, `${t.id}:token`)}
+                      onClick={() => copy(tok.token!, `${tok.id}:token`)}
                     >
-                      {copied === `${t.id}:token` ? (
+                      {copied === `${tok.id}:token` ? (
                         <Check className="h-3.5 w-3.5" />
                       ) : (
                         <Copy className="h-3.5 w-3.5" />
@@ -176,9 +181,9 @@ export function TokenManager() {
                     </button>
                     <button
                       type="button"
-                      title="Rotate (new value; the old one stops working)"
+                      title={t('tokens.rotateActionTitle')}
                       className="rounded-chip p-2 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
-                      onClick={() => void rotate(t)}
+                      onClick={() => void rotate(tok)}
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                     </button>
@@ -186,9 +191,9 @@ export function TokenManager() {
                 )}
                 <button
                   type="button"
-                  title="Revoke"
+                  title={t('tokens.revokeActionTitle')}
                   className="rounded-chip p-2 text-ink-400 hover:bg-red-50 hover:text-red-600"
-                  onClick={() => void revoke(t)}
+                  onClick={() => void revoke(tok)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>

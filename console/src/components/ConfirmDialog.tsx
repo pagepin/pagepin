@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { create } from 'zustand';
 import { AlertTriangle } from 'lucide-react';
+import { translate, useT } from '../i18n';
 
 interface ConfirmRequest {
   title: string;
@@ -38,7 +39,7 @@ export function confirmDanger(opts: {
     useConfirmStore.getState().open({
       title: opts.title,
       body: opts.body,
-      confirmText: opts.confirmText ?? 'Confirm',
+      confirmText: opts.confirmText ?? translate('common.confirm'),
       resolve: (r) => resolve(r.ok),
     });
   });
@@ -56,7 +57,7 @@ export function confirmWithReason(opts: {
     useConfirmStore.getState().open({
       title: opts.title,
       body: opts.body,
-      confirmText: opts.confirmText ?? 'Confirm',
+      confirmText: opts.confirmText ?? translate('common.confirm'),
       input: { label: opts.label, placeholder: opts.placeholder },
       resolve: (r) => resolve({ ok: r.ok, reason: r.value.trim() }),
     });
@@ -65,6 +66,7 @@ export function confirmWithReason(opts: {
 
 /** 挂在 App 根部；★ createPortal 到 body（同 TokenDialog：避免 backdrop-blur 改变包含块） */
 export function Confirmer() {
+  const t = useT();
   const req = useConfirmStore((s) => s.req);
   const settle = useConfirmStore((s) => s.settle);
   const [value, setValue] = useState('');
@@ -121,7 +123,7 @@ export function Confirmer() {
             className="btn-ghost !px-3.5 !py-1.5 !text-xs"
             onClick={() => settle(false)}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"

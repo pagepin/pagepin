@@ -27,6 +27,8 @@ import {
   type UserRow,
 } from '../db/index.js';
 import { writtenCount } from '../db/ops.js';
+import { t, type Locale } from '../i18n/index.js';
+import { jsonError, localeOf } from '../i18n/locale.js';
 import { purgeSiteStorage, type Storage } from '../storage/index.js';
 import { guessContentType } from '../storage/mime.js';
 import type { AppDeps, AppEnv } from '../types.js';
@@ -112,20 +114,20 @@ async function collectDeployForm(
   try {
     fd = await c.req.formData();
   } catch {
-    return c.json({ detail: '请求体格式错误(需 multipart 表单)' }, 422);
+    return jsonError(c, 422, 'site.deploy.form.notMultipart');
   }
   const fileEntries = fd.getAll('files');
   const pathEntries = fd.getAll('paths');
   if (pathEntries.some((p) => typeof p !== 'string')) {
-    return c.json({ detail: 'paths 字段必须是字符串' }, 422);
+    return jsonError(c, 422, 'site.deploy.paths.notString');
   }
   const paths = pathEntries as string[];
   if (fileEntries.length !== paths.length) {
-    return c.json({ detail: 'files 与 paths 数量不一致' }, 422);
+    return jsonError(c, 422, 'site.deploy.countMismatch');
   }
-  if (fileEntries.length === 0) return c.json({ detail: '没有文件' }, 422);
+  if (fileEntries.length === 0) return jsonError(c, 422, 'site.deploy.noFiles');
   if (fileEntries.some((f) => !(f instanceof File))) {
-    return c.json({ detail: 'files 字段必须是文件' }, 422);
+    return jsonError(c, 422, 'site.deploy.files.notFile');
   }
   const titleEntry = fd.get('title');
   return {
@@ -154,11 +156,12 @@ function validateBatch(
   for (let i = 0; i < files.length; i++) {
     const f = files[i]!;
     const rel = normalizeSitePath(paths[i]!);
-    if (rel === null) return c.json({ detail: `非法路径：${paths[i]}` }, 422);
-    if (seen.has(rel)) return c.json({ detail: `路径重复：${rel}` }, 422);
+    if (rel === null)
+      return jsonError(c, 422, 'site.deploy.pathInvalid', { path: String(paths[i]) });
+    if (seen.has(rel)) return jsonError(c, 422, 'site.deploy.pathDuplicate', { path: rel });
     seen.add(rel);
     if (f.size > perFileLimit) {
-      return c.json({ detail: `单文件超限（≤${cfg.maxFileMb}MB）：${rel}` }, 413);
+      return jsonError(c, 413, 'site.file.tooLarge', { mb: cfg.maxFileMb, path: rel });
     }
     out.push({ rel, size: f.size, file: f });
   }
@@ -202,12 +205,7 @@ async function quotaCheck(
   );
   if (otherBytes + keptBytes > quotaBytes) {
     const usedMb = ((otherBytes + thisBytes.reduce((a, b) => a + b, 0)) / 1048576).toFixed(1);
-    return c.json(
-      {
-        detail: `存储空间不足：账户配额 ${cfg.freeUserMb}MB，当前已用约 ${usedMb}MB，本次部署后将超出。请删除旧站点或减小内容后重试。`,
-      },
-      413,
-    );
+    return jsonError(c, 413, 'site.quota.exceeded', { quota: cfg.freeUserMb, used: usedMb });
   }
   return null;
 }
@@ -251,6 +249,7 @@ async function generateIndexFallback(
   storagePrefix: string,
   manifest: PendingFile[],
   label: string,
+  locale: Locale,
 ): Promise<void> {
   const rels = new Set(manifest.map((e) => e.rel));
   if (rels.has('index.html')) return;
@@ -263,8 +262,8 @@ async function generateIndexFallback(
   } else {
     const html =
       manifest.length === 1
-        ? redirectIndexHtml(manifest[0]!.rel)
-        : galleryIndexHtml(label, manifest);
+        ? redirectIndexHtml(manifest[0]!.rel, locale)
+        : galleryIndexHtml(label, manifest, locale);
     await storage.put(
       storagePrefix + 'index.html',
       new TextEncoder().encode(html),
@@ -439,23 +438,23 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.post('/:slug/deploy', mw.mutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const slug = c.req.param('slug');
-    if (user.handle == null) return c.json({ detail: '请先设置 handle' }, 409);
+    if (user.handle == null) return jsonError(c, 409, 'site.handle.required');
     const handle = user.handle;
     if (!validSlug(slug)) {
-      return c.json({ detail: '站点名需小写字母/数字/中划线，≤64 位' }, 422);
+      return jsonError(c, 422, 'site.slug.invalid');
     }
 
     const form = await collectDeployForm(c);
     if (form instanceof Response) return form;
     const { files, paths, title } = form;
     if (files.length > cfg.maxFiles) {
-      return c.json({ detail: `文件数超限（≤${cfg.maxFiles}）` }, 413);
+      return jsonError(c, 413, 'site.fileCount.exceeded', { max: cfg.maxFiles });
     }
     const batch = validateBatch(c, cfg, files, paths);
     if (batch instanceof Response) return batch;
     const totalBytes = batch.reduce((a, e) => a + e.size, 0);
     if (totalBytes > cfg.maxSiteMb * 1024 * 1024) {
-      return c.json({ detail: `站点总大小超限（≤${cfg.maxSiteMb}MB）` }, 413);
+      return jsonError(c, 413, 'site.size.exceeded', { mb: cfg.maxSiteMb });
     }
     const quotaErr = await quotaCheck(c, db, cfg, user, slug, totalBytes);
     if (quotaErr) return quotaErr;
@@ -467,7 +466,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       await storage.put(storagePrefix + e.rel, e.file.stream(), guessContentType(e.rel));
     }
     const manifest: PendingFile[] = batch.map((e) => ({ rel: e.rel, size: e.size }));
-    await generateIndexFallback(storage, storagePrefix, manifest, title || slug);
+    await generateIndexFallback(storage, storagePrefix, manifest, title || slug, localeOf(c));
     const pruned = await publishVersion(db, storage, cfg, {
       siteId: site.id,
       vid,
@@ -484,7 +483,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         `user=${user.id} via=${c.get('authVia')} ip=${clientIp(c)} ua=${JSON.stringify(c.req.header('user-agent') ?? '-')}`,
     );
     const updated = await ownedSite(db, user.id, slug);
-    if (!updated) return c.json({ detail: '站点不存在' }, 404);
+    if (!updated) return jsonError(c, 404, 'site.notFound');
     // pruned_versions:本次发布因版本上限被回收的旧版本数(>0 → 前端提示)
     return c.json({
       ...siteOut(deps, updated, await unresolvedCount(db, updated.id)),
@@ -497,10 +496,10 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.post('/:slug/deploys', mw.mutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const slug = c.req.param('slug');
-    if (user.handle == null) return c.json({ detail: '请先设置 handle' }, 409);
+    if (user.handle == null) return jsonError(c, 409, 'site.handle.required');
     const handle = user.handle;
     if (!validSlug(slug)) {
-      return c.json({ detail: '站点名需小写字母/数字/中划线，≤64 位' }, 422);
+      return jsonError(c, 422, 'site.slug.invalid');
     }
     const body = await readJson<{ title?: unknown }>(c);
     const title = body && typeof body.title === 'string' ? body.title : null;
@@ -537,7 +536,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.post('/:slug/deploys/:deployId/files', mw.mutatingUser, async (c) => {
     const user = c.get('user');
     const session = await ownedSession(db, user.id, c.req.param('slug'), c.req.param('deployId'));
-    if (!session) return c.json({ detail: '上传会话不存在或已过期' }, 404);
+    if (!session) return jsonError(c, 404, 'site.deploy.session.notFound');
 
     const form = await collectDeployForm(c);
     if (form instanceof Response) return form;
@@ -547,11 +546,11 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     // 用「合并后」的清单查限额:重传同 rel 不重复计数,避免重试误判超限
     const merged = mergeManifest(session.manifest, batch);
     if (merged.length > cfg.maxFiles) {
-      return c.json({ detail: `文件数超限（≤${cfg.maxFiles}）` }, 413);
+      return jsonError(c, 413, 'site.fileCount.exceeded', { max: cfg.maxFiles });
     }
     const mergedBytes = merged.reduce((a, e) => a + e.size, 0);
     if (mergedBytes > cfg.maxSiteMb * 1024 * 1024) {
-      return c.json({ detail: `站点总大小超限（≤${cfg.maxSiteMb}MB）` }, 413);
+      return jsonError(c, 413, 'site.size.exceeded', { mb: cfg.maxSiteMb });
     }
     const quotaErr = await quotaCheck(c, db, cfg, user, session.slug, mergedBytes);
     if (quotaErr) return quotaErr;
@@ -570,17 +569,17 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.post('/:slug/deploys/:deployId/commit', mw.mutatingUser, async (c) => {
     const user = c.get('user');
     const session = await ownedSession(db, user.id, c.req.param('slug'), c.req.param('deployId'));
-    if (!session) return c.json({ detail: '上传会话不存在或已过期' }, 404);
-    if (session.manifest.length === 0) return c.json({ detail: '没有文件' }, 422);
+    if (!session) return jsonError(c, 404, 'site.deploy.session.notFound');
+    if (session.manifest.length === 0) return jsonError(c, 422, 'site.deploy.noFiles');
 
     const body = await readJson<{ title?: unknown }>(c);
     const title = body && typeof body.title === 'string' ? body.title : session.title;
     const totalBytes = session.manifest.reduce((a, e) => a + e.size, 0);
     if (session.manifest.length > cfg.maxFiles) {
-      return c.json({ detail: `文件数超限（≤${cfg.maxFiles}）` }, 413);
+      return jsonError(c, 413, 'site.fileCount.exceeded', { max: cfg.maxFiles });
     }
     if (totalBytes > cfg.maxSiteMb * 1024 * 1024) {
-      return c.json({ detail: `站点总大小超限（≤${cfg.maxSiteMb}MB）` }, 413);
+      return jsonError(c, 413, 'site.size.exceeded', { mb: cfg.maxSiteMb });
     }
     const quotaErr = await quotaCheck(c, db, cfg, user, session.slug, totalBytes);
     if (quotaErr) return quotaErr;
@@ -590,6 +589,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       session.storagePrefix,
       session.manifest,
       title || session.slug,
+      localeOf(c),
     );
     const pruned = await publishVersion(db, storage, cfg, {
       siteId: session.siteId,
@@ -608,7 +608,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         `ip=${clientIp(c)} ua=${JSON.stringify(c.req.header('user-agent') ?? '-')}`,
     );
     const updated = await ownedSite(db, user.id, session.slug);
-    if (!updated) return c.json({ detail: '站点不存在' }, 404);
+    if (!updated) return jsonError(c, 404, 'site.notFound');
     return c.json({
       ...siteOut(deps, updated, await unresolvedCount(db, updated.id)),
       pruned_versions: pruned,
@@ -619,7 +619,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.delete('/:slug/deploys/:deployId', mw.mutatingUser, async (c) => {
     const user = c.get('user');
     const session = await ownedSession(db, user.id, c.req.param('slug'), c.req.param('deployId'));
-    if (!session) return c.json({ detail: '上传会话不存在或已过期' }, 404);
+    if (!session) return jsonError(c, 404, 'site.deploy.session.notFound');
     if (storage.deletePrefix) {
       try {
         await storage.deletePrefix(session.storagePrefix);
@@ -636,24 +636,24 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const user = c.get('user');
     const slug = c.req.param('slug');
     const body = await readJson<SitePatchBody>(c);
-    if (body === null) return c.json({ detail: '请求体格式错误' }, 422);
+    if (body === null) return jsonError(c, 422, 'request.body.malformed');
 
     const site = await ownedSite(db, user.id, slug);
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
 
     const set: Partial<typeof sites.$inferInsert> = {};
     if (body.visibility != null) {
       if (body.visibility !== 'private' && body.visibility !== 'public') {
-        return c.json({ detail: 'visibility 只能是 private/public' }, 422);
+        return jsonError(c, 422, 'site.visibility.invalid');
       }
       if (body.visibility === 'public') {
         // 对齐 pydantic int|None:非整数(含 bool/字符串/小数)一律 422,而非 NaN 落库或 500
         const raw = body.public_hours;
         if (raw != null && (typeof raw !== 'number' || !Number.isInteger(raw))) {
-          return c.json({ detail: 'public_hours 必须是整数' }, 422);
+          return jsonError(c, 422, 'site.publicHours.notInteger');
         }
         const hours0 = raw || 24;
-        if (hours0 < 1) return c.json({ detail: '公开时长至少 1 小时' }, 422);
+        if (hours0 < 1) return jsonError(c, 422, 'site.publicHours.tooSmall');
         const hours = Math.min(hours0, cfg.publicMaxHours); // 硬上限(默认 7 天)
         set.publicExpiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
       } else {
@@ -662,24 +662,24 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       set.visibility = body.visibility;
     }
     if (body.title != null) {
-      if (typeof body.title !== 'string') return c.json({ detail: 'title 必须是字符串' }, 422);
+      if (typeof body.title !== 'string') return jsonError(c, 422, 'site.title.notString');
       set.title = body.title;
     }
     if (body.spa_fallback != null) {
       const b = parseLaxBool(body.spa_fallback);
-      if (b === null) return c.json({ detail: 'spa_fallback 必须是布尔值' }, 422);
+      if (b === null) return jsonError(c, 422, 'site.spaFallback.notBool');
       set.spaFallback = b;
     }
     if (body.comments_enabled != null) {
       const b = parseLaxBool(body.comments_enabled);
-      if (b === null) return c.json({ detail: 'comments_enabled 必须是布尔值' }, 422);
+      if (b === null) return jsonError(c, 422, 'site.commentsEnabled.notBool');
       set.commentsEnabled = b;
     }
     set.updatedAt = nowIso();
     await db.update(sites).set(set).where(eq(sites.id, site.id));
 
     const updated = await ownedSite(db, user.id, slug);
-    if (!updated) return c.json({ detail: '站点不存在' }, 404);
+    if (!updated) return jsonError(c, 404, 'site.notFound');
     return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
   });
 
@@ -687,7 +687,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.delete('/:slug', mw.mutatingUser, async (c) => {
     const user = c.get('user');
     const site = await ownedSite(db, user.id, c.req.param('slug'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
     const now = nowIso();
     // 软删:同时把 slug 改成墓碑名,让出活命名空间 → 普通唯一索引下同名 slug 可复用(跨方言通用)。
     await db
@@ -703,7 +703,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.get('/:slug/comments', mw.currentUser, async (c) => {
     const user = c.get('user');
     const site = await ownedSite(db, user.id, c.req.param('slug'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
     const all = boolQuery(c.req.query('all'));
 
     const conds = [eq(commentThreads.siteId, site.id), isNull(commentThreads.deletedAt)];
@@ -758,11 +758,11 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const user = c.get('user');
     const body = await readJson<{ resolved?: unknown }>(c);
     if (body === null || typeof body.resolved !== 'boolean') {
-      return c.json({ detail: 'resolved 必须是布尔值' }, 422);
+      return jsonError(c, 422, 'comment.resolved.notBool');
     }
     const { site, thread } = await ownedThread(user.id, c.req.param('slug'), c.req.param('tid'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
-    if (!thread) return c.json({ detail: '评论不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
+    if (!thread) return jsonError(c, 404, 'comment.notFound');
     await db
       .update(commentThreads)
       .set({ resolved: body.resolved, updatedAt: nowIso() })
@@ -774,19 +774,19 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.post('/:slug/comments/:tid/replies', mw.mutatingUser, async (c) => {
     const user = c.get('user');
     const body = await readJson<{ text?: unknown }>(c);
-    if (body === null) return c.json({ detail: '请求体格式错误' }, 422);
+    if (body === null) return jsonError(c, 422, 'request.body.malformed');
     const { site, thread } = await ownedThread(user.id, c.req.param('slug'), c.req.param('tid'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
-    if (!thread) return c.json({ detail: '评论不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
+    if (!thread) return jsonError(c, 404, 'comment.notFound');
 
     const text = typeof body.text === 'string' ? body.text.trim() : '';
-    if (!text) return c.json({ detail: '回复内容不能为空' }, 422);
-    if (text.length > 4000) return c.json({ detail: '回复过长（≤4000 字）' }, 422);
+    if (!text) return jsonError(c, 422, 'site.reply.empty');
+    if (text.length > 4000) return jsonError(c, 422, 'site.reply.tooLong', { max: 4000 });
 
     const reply: ThreadComment = {
       id: uuid(),
       author_sub: user.id,
-      author_name: replyAuthorName(user),
+      author_name: replyAuthorName(user, localeOf(c)),
       text,
       created_at: nowIso(),
     };
@@ -819,7 +819,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.get('/:slug/versions', mw.currentUser, async (c) => {
     const user = c.get('user');
     const site = await ownedSite(db, user.id, c.req.param('slug'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
     const versions = [...site.versions].sort((a, b) => b.created_at.localeCompare(a.created_at));
     return c.json({
       current: site.currentVersionId,
@@ -837,26 +837,26 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     const user = c.get('user');
     const body = await readJson<{ version_id?: unknown }>(c);
     if (body === null || typeof body.version_id !== 'string') {
-      return c.json({ detail: '缺少 version_id' }, 422);
+      return jsonError(c, 422, 'site.version.missingId');
     }
     const versionId = body.version_id;
     const site = await ownedSite(db, user.id, c.req.param('slug'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
     if (!site.versions.some((v) => v.id === versionId)) {
-      return c.json({ detail: '版本不存在' }, 404);
+      return jsonError(c, 404, 'site.version.notFound');
     }
     await db
       .update(sites)
       .set({ currentVersionId: versionId, updatedAt: nowIso() })
       .where(eq(sites.id, site.id));
     const updated = await ownedSite(db, user.id, c.req.param('slug'));
-    if (!updated) return c.json({ detail: '站点不存在' }, 404);
+    if (!updated) return jsonError(c, 404, 'site.notFound');
     return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
   });
 
   return r;
 }
 
-function replyAuthorName(user: UserRow): string {
-  return user.displayName || user.handle || '成员';
+function replyAuthorName(user: UserRow, locale: Locale): string {
+  return user.displayName || user.handle || t(locale, 'comment.anonymousAuthor');
 }

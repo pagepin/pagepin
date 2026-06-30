@@ -24,6 +24,8 @@ import { makeSiteRoutes } from './api/sites.js';
 import { makeTokenRoutes } from './api/tokens.js';
 import { makeAuthRoutes } from './auth/routes.js';
 import { makeCommentRoutes } from './comments.js';
+import { errorBody } from './i18n/index.js';
+import { localeOf, makeLocaleMiddleware } from './i18n/locale.js';
 import { makeServingRoutes } from './serving.js';
 import type { AppDeps, AppEnv } from './types.js';
 
@@ -81,11 +83,11 @@ function mountSkillDocs(app: Hono<AppEnv>, skillMd: string, apiMd?: string): voi
   }
 }
 
-/** 未捕获异常统一为 JSON 500(API 消费方拿到的错误体保持 {detail} 形状)。 */
+/** 未捕获异常统一为 JSON 500(API 消费方拿到的错误体保持 { detail, code } 形状,detail 随 locale)。 */
 function jsonOnError(app: Hono<AppEnv>): void {
   app.onError((err, c) => {
     console.error(`未捕获异常 ${c.req.method} ${c.req.path}:`, err);
-    return c.json({ detail: '服务器内部错误' }, 500);
+    return c.json(errorBody(localeOf(c), 'server.internalError'), 500);
   });
 }
 
@@ -130,6 +132,7 @@ async function createSingleApp(deps: AppDeps, opts: CreateAppOptions): Promise<A
   const app = new Hono<AppEnv>();
   jsonOnError(app);
   app.use(requestLogger);
+  app.use(makeLocaleMiddleware(deps.config.defaultLocale, deps.config.secureCookies));
   app.get('/healthz', (c) => c.text('ok'));
   await mountConsolePlane(app, deps, opts);
   app.route('/', makeCommentRoutes(deps)); // 数据平面 /api/viewer + /api/comments/*
@@ -142,14 +145,18 @@ async function createSingleApp(deps: AppDeps, opts: CreateAppOptions): Promise<A
 async function createDualApp(deps: AppDeps, opts: CreateAppOptions): Promise<AppHandle> {
   const cfg = deps.config;
 
+  const localeMw = makeLocaleMiddleware(cfg.defaultLocale, cfg.secureCookies);
+
   const content = new Hono<AppEnv>();
   jsonOnError(content);
+  content.use(localeMw); // 双域:中间件不从 outer 透传,须挂到子 app(见 i18n/locale.ts 注释)
   content.route('/', makeAuthRoutes(deps, 'view'));
   content.route('/', makeCommentRoutes(deps)); // 须先于 serving 的通配路由
   content.route('/', makeServingRoutes(deps, { injectHtmlStream: opts.injectHtmlStream })); // /:handle/:slug/* + /_pagepin/*
 
   const consoleApp = new Hono<AppEnv>();
   jsonOnError(consoleApp);
+  consoleApp.use(localeMw);
   await mountConsolePlane(consoleApp, deps, opts);
   mountConsoleFallback(consoleApp, opts);
 

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Loader2, Lock, UserPlus } from 'lucide-react';
 import { acceptInvite, fetchInviteInfo } from '../api';
+import { useT } from '../i18n';
 import { EMAIL_RE } from '../types';
 
 /** 接受邀请屏（/signup?invite=<token>）：校验邀请 → 设密码建号并登录。handle 仍走首登确认。 */
 export function AcceptInvite({ token }: { token: string }) {
+  const t = useT();
   const [info, setInfo] = useState<{
     ok: boolean;
     email?: string | null;
@@ -36,18 +38,19 @@ export function AcceptInvite({ token }: { token: string }) {
   }
 
   if (!info.ok) {
+    // reason 取值:network / closed / invalid / unsupported / missing —— 后三者归并到「无法使用」文案。
     const network = info.reason === 'network';
     const closed = info.reason === 'closed';
     const title = network
-      ? "Couldn't load this invite"
+      ? t('auth.inviteErrNetworkTitle')
       : closed
-        ? 'Registration is closed'
-        : "This invite can't be used";
+        ? t('auth.registrationClosed')
+        : t('auth.inviteErrInvalidTitle');
     const body = network
-      ? "We couldn't reach the server. Check your connection and try again."
+      ? t('auth.inviteErrNetworkBody')
       : closed
-        ? 'This instance has stopped accepting new accounts. Ask an admin to re-open registration.'
-        : 'Invite links are one-time and expire after a short window. This one has already been used or has passed its window.';
+        ? t('auth.inviteErrClosedBody')
+        : t('auth.inviteErrInvalidBody');
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-md animate-fade-up rounded-card border border-ink-200 bg-white p-7 text-center shadow-login">
@@ -62,11 +65,11 @@ export function AcceptInvite({ token }: { token: string }) {
               className="btn-primary mt-5 w-full !py-2.5"
               onClick={() => location.reload()}
             >
-              Try again
+              {t('auth.tryAgain')}
             </button>
           ) : (
             <a href="/login" className="btn-primary mt-5 w-full !py-2.5">
-              Go to sign in
+              {t('auth.goToSignIn')}
             </a>
           )}
         </div>
@@ -90,7 +93,7 @@ export function AcceptInvite({ token }: { token: string }) {
         location.href = '/';
       })
       .catch((e) => {
-        setError(e instanceof Error ? e.message : 'Could not create account');
+        setError(e instanceof Error ? e.message : t('auth.couldNotCreateAccount'));
         setSubmitting(false);
       });
   };
@@ -102,15 +105,14 @@ export function AcceptInvite({ token }: { token: string }) {
           <UserPlus className="h-5 w-5" />
         </div>
         <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-tide-600">
-          You&apos;re invited{info.is_admin ? ' · as admin' : ''}
+          {t('auth.youreInvited')}
+          {info.is_admin ? t('auth.asAdminSuffix') : ''}
         </div>
         <h1 className="mt-1 text-[19px] font-bold tracking-tight text-ink-900">
-          Set a password to join
+          {t('auth.setPasswordTitle')}
         </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-          {lockedEmail
-            ? 'Your account will be created with the email your invite was sent to.'
-            : 'Choose the email and password for your new account.'}
+          {lockedEmail ? t('auth.inviteLockedEmailDesc') : t('auth.inviteChooseEmailDesc')}
         </p>
 
         <div className="mt-5 space-y-2.5">
@@ -118,14 +120,14 @@ export function AcceptInvite({ token }: { token: string }) {
             <div className="flex items-center justify-between rounded-field border border-ink-200 bg-ink-50 px-3 py-2">
               <span className="truncate text-sm text-ink-600">{lockedEmail}</span>
               <span className="flex shrink-0 items-center gap-1 text-xs text-ink-400">
-                <Lock className="h-3 w-3" /> From invite
+                <Lock className="h-3 w-3" /> {t('auth.fromInvite')}
               </span>
             </div>
           ) : (
             <input
               className="input"
               type="email"
-              placeholder="you@email.com"
+              placeholder={t('auth.emailExamplePlaceholder')}
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -134,7 +136,7 @@ export function AcceptInvite({ token }: { token: string }) {
           <input
             className={`input ${tooShort ? 'border-red-300 focus:border-red-400 focus:ring-red-500/10' : ''}`}
             type="password"
-            placeholder="At least 8 characters"
+            placeholder={t('auth.passwordMinPlaceholder')}
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -142,7 +144,7 @@ export function AcceptInvite({ token }: { token: string }) {
           <input
             className={`input ${mismatch ? 'border-red-300 focus:border-red-400 focus:ring-red-500/10' : ''}`}
             type="password"
-            placeholder="Re-enter password"
+            placeholder={t('auth.reenterPasswordPlaceholder')}
             autoComplete="new-password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
@@ -154,12 +156,12 @@ export function AcceptInvite({ token }: { token: string }) {
           {error ? (
             <span className="text-red-600">{error}</span>
           ) : tooShort ? (
-            <span className="text-red-600">Password must be at least 8 characters.</span>
+            <span className="text-red-600">{t('auth.passwordMin8Period')}</span>
           ) : mismatch ? (
-            <span className="text-red-600">Passwords don&apos;t match.</span>
+            <span className="text-red-600">{t('auth.passwordsMismatch')}</span>
           ) : ready ? (
             <span className="flex items-center gap-1 text-tide-700">
-              <Check className="h-3.5 w-3.5" /> Looks good — ready to create your account.
+              <Check className="h-3.5 w-3.5" /> {t('auth.readyToCreate')}
             </span>
           ) : null}
         </div>
@@ -171,7 +173,7 @@ export function AcceptInvite({ token }: { token: string }) {
           onClick={submit}
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          Create account &amp; sign in
+          {t('auth.createAndSignIn')}
         </button>
       </div>
     </div>

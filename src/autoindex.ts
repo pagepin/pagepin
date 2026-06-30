@@ -6,6 +6,7 @@
  */
 
 import { FAVICON } from './brand-gate.js';
+import { t as tr, type Locale } from './i18n/index.js';
 
 const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif']);
 const CODE_EXTS = new Set([
@@ -96,17 +97,18 @@ export interface IndexEntry {
 const FONTS = `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">`;
 
 /** 单文件:meta refresh 秒跳(查看器壳/原文件由 serving 按 Accept 决定)。 */
-export function redirectIndexHtml(rel: string): string {
+export function redirectIndexHtml(rel: string, locale: Locale = 'en'): string {
   const href = relHref(rel);
   const name = escapeHtml(rel);
+  const link = `<a href="./${escapeHtml(href)}" style="color:#0f7c72;font-family:'JetBrains Mono',monospace">${name}</a>`;
   return `<!doctype html>
-<html lang="en">
+<html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="0;url=./${escapeHtml(href)}">
 ${FAVICON}${FONTS}
 <title>${name}</title></head>
 <body style="font-family:'Hanken Grotesk',system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;color:#6b7480;font-size:14px">
-<p>Opening <a href="./${escapeHtml(href)}" style="color:#0f7c72;font-family:'JetBrains Mono',monospace">${name}</a> …</p>
+<p>${tr(locale, 'dirIndex.redirect.opening', { name: link })}</p>
 </body></html>`;
 }
 
@@ -116,7 +118,11 @@ const ICON_CODE = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" s
 const ICON_FILE = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
 
 /** 多文件:统一文件卡片网格(图片显示缩略图,其他显示类型图标)。 */
-export function galleryIndexHtml(title: string, entries: IndexEntry[]): string {
+export function galleryIndexHtml(
+  title: string,
+  entries: IndexEntry[],
+  locale: Locale = 'en',
+): string {
   const sorted = [...entries].sort((a, b) => a.rel.localeCompare(b.rel));
   const t = escapeHtml(title);
 
@@ -135,8 +141,10 @@ export function galleryIndexHtml(title: string, entries: IndexEntry[]): string {
     })
     .join('\n');
 
+  const countKey =
+    entries.length === 1 ? 'dirIndex.gallery.count.one' : 'dirIndex.gallery.count.other';
   return `<!doctype html>
-<html lang="en">
+<html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${FAVICON}${FONTS}
 <title>${t}</title>
@@ -172,8 +180,8 @@ body{font-family:'Hanken Grotesk',system-ui,sans-serif;color:#1b2127;max-width:1
 <body>
 <div class="head">
   <span class="folder">${t}<span class="sl">/</span></span>
-  <span class="count">${entries.length} item${entries.length === 1 ? '' : 's'}</span>
-  <span class="badge"><svg width="14" height="14" viewBox="0 0 100 100"><path fill="#0f7c72" d="M24,2 H76 A22,22 0 0 1 98,24 V76 A22,22 0 0 1 76,98 H24 A22,22 0 0 1 2,76 V24 A22,22 0 0 1 24,2 Z"/><path fill="#fff" d="M24,52 A26,26 0 1 1 50,78 L27,78 A2,2 0 0 1 25,76 Z"/><circle cx="49.7" cy="51" r="9" fill="#0f7c72"/></svg>pagepin auto-generated index</span>
+  <span class="count">${tr(locale, countKey, { n: entries.length })}</span>
+  <span class="badge"><svg width="14" height="14" viewBox="0 0 100 100"><path fill="#0f7c72" d="M24,2 H76 A22,22 0 0 1 98,24 V76 A22,22 0 0 1 76,98 H24 A22,22 0 0 1 2,76 V24 A22,22 0 0 1 24,2 Z"/><path fill="#fff" d="M24,52 A26,26 0 1 1 50,78 L27,78 A2,2 0 0 1 25,76 Z"/><circle cx="49.7" cy="51" r="9" fill="#0f7c72"/></svg>${escapeHtml(tr(locale, 'dirIndex.gallery.badge'))}</span>
 </div>
 <div class="grid">
 ${cards}

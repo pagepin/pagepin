@@ -25,6 +25,7 @@
 - **可插拔数据库** —— 默认 SQLite/libSQL（开箱即用），自托管 Node 也可用 PostgreSQL / MySQL。
 - **占用小** —— 一个 Node 进程 + SQLite；单个 Docker 镜像，内含 React 控制台。
 - **单域或双域服务** —— 全部跑在一个 origin 上，或把托管内容隔离到独立的内容域（见[架构](#架构)）。
+- **中英双语** —— 控制台、服务端渲染页面（登录墙、查看器壳、目录索引）、评论浮层、验证邮件以及 API 错误体均已本地化。语言按请求解析（`?lang=` → `pp_lang` cookie → `Accept-Language` → `PAGEPIN_DEFAULT_LOCALE`），控制台可一键切换。API 错误体新增稳定的机器可读 `code`（见 [面向 AI agent 的部署与 API](#面向-ai-agent-的部署与-api)）。
 
 ## 快速开始
 
@@ -78,6 +79,7 @@ Claude Code 也可作为插件安装：
 | `PAGEPIN_BASE_URL` | `http://localhost:8000` | 实例的公开 URL（单域模式）。 |
 | `PAGEPIN_ADMIN_EMAIL` / `…_PASSWORD` | — | 两者都设则启动时 upsert 一个管理员；否则首个注册者成为管理员。 |
 | `PAGEPIN_AUTH_MODE` | `password` | `password`、`oidc` 或 `none`（仅开发：自动以管理员身份登录）。 |
+| `PAGEPIN_DEFAULT_LOCALE` | `en` | 回落语言（`en` 或 `zh`）。每次请求按 `?lang=` → `pp_lang` cookie → `Accept-Language` 覆盖。 |
 | `PAGEPIN_STORAGE` | `fs` | `fs`（本地磁盘）或 `s3`（S3 兼容）。 |
 
 复制模板即可开始：
@@ -122,6 +124,8 @@ curl -sf "http://localhost:8000/api/sites/my-report/comments" \
 ```
 
 部署响应中包含可分享的 `url`。评论响应列出未解决的线程，带 `selector`、`kind`、`page_path` 和深链 `url` —— 处理它们、重新部署，搞定。
+
+错误响应为 `{ "detail": "<人读文案>", "code": "<稳定 key>" }`。`detail` 随语言本地化（`?lang=` / `pp_lang` cookie / `Accept-Language`）；`code` 是语言无关的稳定标识（如 `site.quota.exceeded`、`auth.unauthenticated`）—— 按 `code` 分支、展示 `detail`。
 
 面向 agent 的 skill 在 [`skills/pagepin`](skills/pagepin/SKILL.md) —— 用 `npx skills add pagepin/pagepin -g` 一行安装（见 [`install.md`](install.md)），agent 即可自行驱动完整的「部署 → 评审 → 修改」闭环。同一份指南也实时托管在 **`/skill.md`**，供没有本地 skill 目录的 agent 使用。
 

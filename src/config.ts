@@ -2,6 +2,7 @@
 
 import { isSupportedSocialProvider, SOCIAL_PROVIDER_IDS } from './auth/social.js';
 import { inferDbDriver, type DbDriver } from './db/driver.js';
+import { SUPPORTED, type Locale } from './i18n/index.js';
 
 /** 社交登录 provider(与 password/oidc 并存,独立配置)。 */
 export interface SocialProvider {
@@ -90,6 +91,8 @@ export interface Config {
   /** 设备授权(/api/device)铸出的 token 的有效期(天);0 = 不过期。普通 PAT 不受此限。 */
   deviceTokenTtlDays: number;
   secureCookies: boolean;
+  /** 默认语言:无 ?lang / pp_lang cookie / Accept-Language 信号时的回落(PAGEPIN_DEFAULT_LOCALE,默认 en)。 */
+  defaultLocale: Locale;
 }
 
 type Env = Record<string, string | undefined>;
@@ -126,6 +129,11 @@ export function loadConfig(env: Env): Config {
   const authMode = str(env, 'PAGEPIN_AUTH_MODE', 'password') as Config['authMode'];
   if (!['password', 'oidc', 'none'].includes(authMode)) {
     throw new Error(`PAGEPIN_AUTH_MODE 只能是 password/oidc/none,收到:${authMode}`);
+  }
+
+  const defaultLocale = str(env, 'PAGEPIN_DEFAULT_LOCALE', 'en') as Locale;
+  if (!SUPPORTED.includes(defaultLocale)) {
+    throw new Error(`PAGEPIN_DEFAULT_LOCALE 只能是 ${SUPPORTED.join('/')},收到:${defaultLocale}`);
   }
 
   // 注册模式 env 覆盖:仅 PAGEPIN_REGISTRATION_MODE 显式给才锁定 UI(env 启动覆盖语义)。
@@ -283,6 +291,7 @@ export function loadConfig(env: Env): Config {
     publicMaxHours: num(env, 'PAGEPIN_PUBLIC_MAX_HOURS', 168),
     deviceTokenTtlDays: num(env, 'PAGEPIN_DEVICE_TOKEN_TTL_DAYS', 90),
     secureCookies: mode === 'dual' ? externalScheme === 'https' : baseUrl.startsWith('https://'),
+    defaultLocale,
   };
 }
 

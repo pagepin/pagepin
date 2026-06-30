@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Loader2, Search, UploadCloud } from 'lucide-react';
+import { useT } from '../i18n';
 import { collectFromDataTransfer, collectFromFileList } from '../lib/collect';
 import type { Collection } from '../lib/collect';
 import { copyText } from '../lib/format';
@@ -11,28 +12,30 @@ import { toast, toastError } from './Toast';
 
 /** 空状态：首个站点的投放入口（拖到页面任意位置同样有效）。 */
 function EmptyState({ onPick, onCopyInstall }: { onPick: () => void; onCopyInstall: () => void }) {
+  const t = useT();
   return (
     <section className="animate-fade-up">
       <h2 className="mb-4 flex items-baseline gap-2">
-        <span className="text-xs font-bold uppercase tracking-[0.14em] text-ink-500">My sites</span>
+        <span className="text-xs font-bold uppercase tracking-[0.14em] text-ink-500">
+          {t('sites.heading')}
+        </span>
         <span className="font-mono text-xs text-ink-400">0</span>
       </h2>
       <div className="rounded-card border border-dashed border-ink-300 bg-white px-7 py-12 text-center">
         <div className="mx-auto flex h-[52px] w-[52px] items-center justify-center rounded-panel bg-tide-50 text-tide-600">
           <UploadCloud className="h-6 w-6" />
         </div>
-        <div className="mt-4 text-[15px] font-semibold text-ink-700">No sites yet</div>
+        <div className="mt-4 text-[15px] font-semibold text-ink-700">{t('sites.empty.title')}</div>
         <p className="mx-auto mt-1.5 max-w-md text-[13px] leading-relaxed text-ink-400">
-          Drop an HTML or Markdown file — or a whole folder — to publish your first page.
-          You&rsquo;ll get a shareable link the moment it lands.
+          {t('sites.empty.desc')}
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2.5">
           <button type="button" className="btn-primary" onClick={onPick}>
             <UploadCloud className="h-4 w-4" />
-            Drop your first file
+            {t('sites.empty.pick')}
           </button>
           <button type="button" className="btn-ghost" onClick={onCopyInstall}>
-            Deploying from an agent?{' '}
+            {t('sites.empty.agent')}{' '}
             <span className="font-mono text-tide-600">npx skills add pagepin</span>
           </button>
         </div>
@@ -46,6 +49,7 @@ function EmptyState({ onPick, onCopyInstall }: { onPick: () => void; onCopyInsta
  * （紧凑投放区 + AI agent 副卡）、站点行/空状态，以及覆盖整页的「拖到任意位置即部署」浮层。
  */
 export function SitesView() {
+  const t = useT();
   const sites = useStore((s) => s.sites);
   const loading = useStore((s) => s.loadingSites);
   const deployTarget = useStore((s) => s.deployTarget);
@@ -53,8 +57,8 @@ export function SitesView() {
   // 公开倒计时用的时钟，30s 一跳
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(t);
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
   }, []);
 
   const [query, setQuery] = useState('');
@@ -112,19 +116,19 @@ export function SitesView() {
     try {
       const c = await collectFromDataTransfer(e.dataTransfer);
       if (c.files.length === 0) {
-        toast('No files were collected', 'err');
+        toast(t('sites.toast.noFiles'), 'err');
         return;
       }
       setCollection(c);
       setDeployOpen(true);
     } catch (err) {
-      toastError(err, 'Failed to read dropped content');
+      toastError(err, t('sites.toast.dropFailed'));
     }
   }
 
   const copyInstall = () => {
     void copyText(INSTALL_CMD).then((ok) =>
-      ok ? toast('Copied — run it in your terminal') : toast('Copy failed', 'err'),
+      ok ? toast(t('sites.toast.installCopied')) : toast(t('sites.toast.copyFailed'), 'err'),
     );
   };
 
@@ -175,7 +179,7 @@ export function SitesView() {
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="flex shrink-0 items-baseline gap-2">
               <span className="text-xs font-bold uppercase tracking-[0.14em] text-ink-500">
-                My sites
+                {t('sites.heading')}
               </span>
               <span className="font-mono text-xs text-ink-400">{sites.length}</span>
             </h2>
@@ -187,7 +191,7 @@ export function SitesView() {
                   <input
                     data-testid="site-list-search"
                     className="input !w-44 !py-1.5 !pl-8 !text-xs sm:!w-52"
-                    placeholder="Search slug / title"
+                    placeholder={t('sites.search.placeholder')}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                   />
@@ -204,7 +208,7 @@ export function SitesView() {
                 }`}
               >
                 <UploadCloud className="h-3.5 w-3.5" />
-                Deploy
+                {t('sites.deploy')}
                 <ChevronDown
                   className={`h-3.5 w-3.5 transition-transform ${deployOpen ? 'rotate-180' : ''}`}
                 />
@@ -228,7 +232,7 @@ export function SitesView() {
 
           {filtered.length === 0 && q ? (
             <div className="rounded-card border border-dashed border-ink-200 bg-white/60 px-6 py-10 text-center text-[13px] text-ink-400">
-              No sites match &ldquo;{query.trim()}&rdquo;
+              {t('sites.noMatch', { query: query.trim() })}
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -252,10 +256,8 @@ export function SitesView() {
           <span className="flex h-14 w-14 items-center justify-center rounded-panel bg-tide-600 text-white shadow-lift">
             <UploadCloud className="h-7 w-7" />
           </span>
-          <div className="text-[17px] font-bold text-tide-800">Release to deploy</div>
-          <div className="text-[12.5px] text-tide-600">
-            Drop anywhere — new site, or a new version of a matching slug
-          </div>
+          <div className="text-[17px] font-bold text-tide-800">{t('sites.drop.release')}</div>
+          <div className="text-[12.5px] text-tide-600">{t('sites.drop.hint')}</div>
         </div>
       )}
     </main>

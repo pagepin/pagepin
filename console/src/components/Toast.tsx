@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { CheckCircle2, XCircle } from 'lucide-react';
+import { translate } from '../i18n';
 
 type Kind = 'ok' | 'err';
 
@@ -33,8 +34,8 @@ export function toast(message: string, kind: Kind = 'ok'): void {
   useToastStore.getState().push(kind, message);
 }
 
-export function toastError(e: unknown, fallback = 'Action failed'): void {
-  toast(e instanceof Error ? e.message : fallback, 'err');
+export function toastError(e: unknown, fallback?: string): void {
+  toast(e instanceof Error ? e.message : (fallback ?? translate('core.actionFailed')), 'err');
 }
 
 export function Toaster() {

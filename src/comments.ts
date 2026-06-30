@@ -17,6 +17,8 @@ import { readSession } from './auth/sessions.js';
 import { commentThreads, sites } from './db/index.js';
 import type { CommentThreadRow, SiteRow, ThreadComment, UserRow } from './db/index.js';
 import { users } from './db/index.js';
+import { errorBody, t, type Locale, type TParams } from './i18n/index.js';
+import { localeOf } from './i18n/locale.js';
 import type { AppDeps, AppEnv } from './types.js';
 import { normalizeSitePath, nowIso, shortId } from './util.js';
 
@@ -26,23 +28,25 @@ const MAX_SELECTOR = 600;
 const KINDS = new Set(['copy', 'style', 'question', 'bug']);
 const KINDS_HINT = [...KINDS].sort().join('/'); // bug/copy/question/style,同 Python sorted()
 
+/** 错误携带「文案 key + 占位参数」而非成品字面量;翻译延后到 wrap() 出口按请求 locale 进行。 */
 class ApiError extends Error {
   constructor(
     public status: ContentfulStatusCode,
-    public detail: string,
+    public key: string,
+    public params?: TParams,
   ) {
-    super(detail);
+    super(key);
   }
 }
 
-/** 错误响应统一 { detail: string },对齐 FastAPI HTTPException 输出形状。 */
+/** 错误响应统一 { detail, code },detail 随请求 locale,code = 稳定 key(对齐 FastAPI HTTPException 形状并扩展 code)。 */
 const wrap =
   (fn: (c: Context<AppEnv>) => Promise<Response>) =>
   async (c: Context<AppEnv>): Promise<Response> => {
     try {
       return await fn(c);
     } catch (e) {
-      if (e instanceof ApiError) return c.json({ detail: e.detail }, e.status);
+      if (e instanceof ApiError) return c.json(errorBody(localeOf(c), e.key, e.params), e.status);
       throw e;
     }
   };
@@ -50,7 +54,8 @@ const wrap =
 /** Python len() 数码点;JS .length 数 UTF-16 单元,用展开对齐 */
 const cpLen = (s: string) => [...s].length;
 
-const authorName = (u: UserRow) => u.displayName || u.handle || '成员';
+const authorName = (u: UserRow, locale: Locale) =>
+  u.displayName || u.handle || t(locale, 'comment.anonymousAuthor');
 
 function commentOut(cm: ThreadComment) {
   return {
@@ -81,17 +86,17 @@ function threadOut(t: CommentThreadRow) {
 }
 
 function cleanText(text: string): string {
-  const t = text.trim();
-  if (!t) throw new ApiError(422, '评论内容不能为空');
-  if (cpLen(t) > MAX_TEXT) throw new ApiError(422, `评论过长（≤${MAX_TEXT} 字）`);
-  return t;
+  const trimmed = text.trim();
+  if (!trimmed) throw new ApiError(422, 'comment.text.empty');
+  if (cpLen(trimmed) > MAX_TEXT) throw new ApiError(422, 'comment.text.tooLong', { max: MAX_TEXT });
+  return trimmed;
 }
 
 async function readJson(c: Context<AppEnv>): Promise<unknown> {
   try {
     return await c.req.json();
   } catch {
-    throw new ApiError(422, '请求体不是合法 JSON');
+    throw new ApiError(422, 'request.body.invalidJson');
   }
 }
 
@@ -110,40 +115,40 @@ interface ThreadCreateIn {
 /** 对齐 Python ThreadCreateIn 的 pydantic 校验(请求体形状错误一律 422)。 */
 function parseThreadCreate(raw: unknown): ThreadCreateIn {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new ApiError(422, '请求体格式错误');
+    throw new ApiError(422, 'request.body.malformed');
   }
   const b = raw as Record<string, unknown>;
-  if (typeof b.path !== 'string') throw new ApiError(422, 'path 必须是字符串');
+  if (typeof b.path !== 'string') throw new ApiError(422, 'comment.path.notString');
   if (typeof b.selector !== 'string' || cpLen(b.selector) < 1 || cpLen(b.selector) > MAX_SELECTOR) {
-    throw new ApiError(422, `selector 长度需在 1~${MAX_SELECTOR} 字符之间`);
+    throw new ApiError(422, 'comment.selector.length', { max: MAX_SELECTOR });
   }
   for (const k of ['rx', 'ry'] as const) {
     const v = b[k];
     if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
-      throw new ApiError(422, `${k} 必须是 0~1 之间的数字`);
+      throw new ApiError(422, 'comment.coord.range', { field: k });
     }
   }
   // 框选区域:rw/rh 成对出现,(0,1] 区间
   const hasRw = b.rw !== undefined && b.rw !== null;
   const hasRh = b.rh !== undefined && b.rh !== null;
-  if (hasRw !== hasRh) throw new ApiError(422, 'rw/rh 必须成对出现');
+  if (hasRw !== hasRh) throw new ApiError(422, 'comment.rect.pairRequired');
   if (hasRw) {
     for (const k of ['rw', 'rh'] as const) {
       const v = b[k];
       if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > 1) {
-        throw new ApiError(422, `${k} 必须是 0~1 之间的数字`);
+        throw new ApiError(422, 'comment.coord.range', { field: k });
       }
     }
   }
   const kind = b.kind === undefined || b.kind === null ? null : b.kind;
-  if (kind !== null && typeof kind !== 'string') throw new ApiError(422, 'kind 必须是字符串');
+  if (kind !== null && typeof kind !== 'string') throw new ApiError(422, 'comment.kind.notString');
   const anchor = b.anchor_text === undefined || b.anchor_text === null ? null : b.anchor_text;
   if (anchor !== null && typeof anchor !== 'string') {
-    throw new ApiError(422, 'anchor_text 必须是字符串');
+    throw new ApiError(422, 'comment.anchorText.notString');
   }
   if (anchor !== null && cpLen(anchor) > 200)
-    throw new ApiError(422, 'anchor_text 过长（≤200 字）');
-  if (typeof b.text !== 'string') throw new ApiError(422, 'text 必须是字符串');
+    throw new ApiError(422, 'comment.anchorText.tooLong', { max: 200 });
+  if (typeof b.text !== 'string') throw new ApiError(422, 'comment.text.notString');
   return {
     path: b.path,
     selector: b.selector,
@@ -168,10 +173,10 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     c: Context<AppEnv>,
   ): Promise<{ claims: SessionClaims; user: UserRow }> {
     const claims = await readSession(c, cfg, plane);
-    if (claims === null) throw new ApiError(401, '未登录');
+    if (claims === null) throw new ApiError(401, 'auth.unauthenticated');
     const user = (await db.select().from(users).where(eq(users.id, claims.sub)))[0];
-    if (!user) throw new ApiError(401, '用户不存在，请重新登录');
-    if (user.disabled) throw new ApiError(403, '账号已被禁用');
+    if (!user) throw new ApiError(401, 'auth.userNotFound');
+    if (user.disabled) throw new ApiError(403, 'auth.account.disabled');
     return { claims, user };
   }
 
@@ -190,8 +195,8 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         .from(sites)
         .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
     )[0];
-    if (!site) throw new ApiError(404, '站点不存在');
-    if (!site.commentsEnabled) throw new ApiError(403, '该站点未开启评论');
+    if (!site) throw new ApiError(404, 'site.notFound');
+    if (!site.commentsEnabled) throw new ApiError(403, 'comment.site.disabled');
     return site;
   }
 
@@ -199,7 +204,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     const thread = (
       await db.select().from(commentThreads).where(eq(commentThreads.id, threadId))
     )[0];
-    if (!thread || thread.deletedAt !== null) throw new ApiError(404, '评论不存在');
+    if (!thread || thread.deletedAt !== null) throw new ApiError(404, 'comment.notFound');
     return thread;
   }
 
@@ -210,7 +215,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       const user = await viewerUser(c);
       return c.json({
         sub: user.id,
-        name: user.displayName || user.handle || '成员',
+        name: authorName(user, localeOf(c)),
         handle: user.handle,
       });
     }),
@@ -221,13 +226,13 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     wrap(async (c) => {
       // path 是必填查询参数:缺失时先于鉴权 422(对齐 FastAPI 参数校验时序)
       const rawPath = c.req.query('path');
-      if (rawPath === undefined) throw new ApiError(422, '缺少 path 参数');
+      if (rawPath === undefined) throw new ApiError(422, 'comment.path.missing');
       await viewer(c);
       const handle = c.req.param('handle') ?? '';
       const slug = c.req.param('slug') ?? '';
       await commentableSite(handle, slug);
       const rel = normalizeSitePath(rawPath);
-      if (rel === null) throw new ApiError(422, '非法路径');
+      if (rel === null) throw new ApiError(422, 'site.path.invalid');
       const threads = await db
         .select()
         .from(commentThreads)
@@ -254,15 +259,15 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       const slug = c.req.param('slug') ?? '';
       const site = await commentableSite(handle, slug);
       const rel = normalizeSitePath(body.path);
-      if (rel === null) throw new ApiError(422, '非法路径');
+      if (rel === null) throw new ApiError(422, 'site.path.invalid');
       if (body.kind !== null && !KINDS.has(body.kind)) {
-        throw new ApiError(422, `kind 只能是 ${KINDS_HINT}`);
+        throw new ApiError(422, 'comment.kind.invalid', { kinds: KINDS_HINT });
       }
       const now = nowIso();
       const first: ThreadComment = {
         id: shortId(),
         author_sub: user.id,
-        author_name: authorName(user),
+        author_name: authorName(user, localeOf(c)),
         text: cleanText(body.text),
         created_at: now,
       };
@@ -300,14 +305,14 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         raw === null ||
         typeof (raw as Record<string, unknown>).text !== 'string'
       ) {
-        throw new ApiError(422, 'text 必须是字符串');
+        throw new ApiError(422, 'comment.text.notString');
       }
       const user = await viewerUser(c);
       const thread = await getThread(c.req.param('tid') ?? '');
       const reply: ThreadComment = {
         id: shortId(),
         author_sub: user.id,
-        author_name: authorName(user),
+        author_name: authorName(user, localeOf(c)),
         text: cleanText((raw as { text: string }).text),
         created_at: nowIso(),
       };
@@ -323,22 +328,23 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     '/api/comments/threads/:tid',
     wrap(async (c) => {
       const raw = await readJson(c);
-      if (typeof raw !== 'object' || raw === null) throw new ApiError(422, '请求体格式错误');
+      if (typeof raw !== 'object' || raw === null)
+        throw new ApiError(422, 'request.body.malformed');
       const body = raw as Record<string, unknown>;
       const hasResolved = 'resolved' in body;
       const hasKind = 'kind' in body;
-      if (!hasResolved && !hasKind) throw new ApiError(422, '需提供 resolved 或 kind');
+      if (!hasResolved && !hasKind) throw new ApiError(422, 'comment.patch.empty');
       const set: { resolved?: boolean; kind?: string | null; updatedAt: string } = {
         updatedAt: nowIso(),
       };
       if (hasResolved) {
-        if (typeof body.resolved !== 'boolean') throw new ApiError(422, 'resolved 必须是布尔值');
+        if (typeof body.resolved !== 'boolean') throw new ApiError(422, 'comment.resolved.notBool');
         set.resolved = body.resolved;
       }
       if (hasKind) {
         const k = body.kind;
         if (k !== null && (typeof k !== 'string' || !KINDS.has(k))) {
-          throw new ApiError(422, `kind 只能是 ${KINDS_HINT} 或 null`);
+          throw new ApiError(422, 'comment.kind.invalidOrNull', { kinds: KINDS_HINT });
         }
         set.kind = k as string | null;
       }
@@ -365,7 +371,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       const isAuthor = thread.comments[0]?.author_sub === user.id;
       const isSiteOwner = site !== undefined && site.ownerId === user.id;
       if (!isAuthor && !isSiteOwner) {
-        throw new ApiError(403, '只有评论作者或站点所有者可以删除');
+        throw new ApiError(403, 'comment.delete.forbidden');
       }
       const now = nowIso();
       await db

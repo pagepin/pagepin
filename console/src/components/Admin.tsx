@@ -19,7 +19,9 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import { confirmDanger, confirmWithReason } from './ConfirmDialog';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { copyText, formatBytes, formatRelative } from '../lib/format';
+import { useT } from '../i18n';
 import { useStore } from '../store';
 import type {
   AdminOverview,
@@ -32,18 +34,10 @@ import type {
 } from '../types';
 import { toast, toastError } from './Toast';
 
-const REG_MODES: { key: RegistrationMode; label: string; desc: string }[] = [
-  { key: 'closed', label: 'Closed', desc: 'No new accounts. Existing users only.' },
-  {
-    key: 'invite',
-    label: 'Invite-only',
-    desc: 'Join only via a one-time invite link you generate.',
-  },
-  {
-    key: 'open',
-    label: 'Open',
-    desc: 'Anyone with the URL can self-register. Best for trusted networks.',
-  },
+const REG_MODES: { key: RegistrationMode; labelKey: string; descKey: string }[] = [
+  { key: 'closed', labelKey: 'admin.reg.closed.label', descKey: 'admin.reg.closed.desc' },
+  { key: 'invite', labelKey: 'admin.reg.invite.label', descKey: 'admin.reg.invite.desc' },
+  { key: 'open', labelKey: 'admin.reg.open.label', descKey: 'admin.reg.open.desc' },
 ];
 
 const AVA = ['#0b6358', '#1f4f86', '#8a560b', '#5b3596', '#b14a42'];
@@ -96,26 +90,28 @@ function StatCard({
 }
 
 function RolePill({ u }: { u: AdminUser }) {
+  const t = useT();
   if (u.disabled)
     return (
       <span className="rounded-chip border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">
-        disabled
+        {t('admin.role.disabled')}
       </span>
     );
   if (u.is_admin)
     return (
       <span className="rounded-chip border border-tide-200 bg-tide-50 px-2 py-0.5 text-xs font-medium text-tide-700">
-        admin
+        {t('admin.role.admin')}
       </span>
     );
   return (
     <span className="rounded-chip border border-ink-200 bg-ink-100 px-2 py-0.5 text-xs font-medium text-ink-500">
-      member
+      {t('admin.role.member')}
     </span>
   );
 }
 
 export function Admin() {
+  const t = useT();
   const me = useStore((s) => s.me)!;
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -134,19 +130,19 @@ export function Admin() {
     api
       .adminOverview()
       .then(setOverview)
-      .catch((e) => toastError(e, 'Failed to load overview'));
+      .catch((e) => toastError(e, t('admin.load.overview')));
     api
       .adminSettings()
       .then(setSettings)
-      .catch((e) => toastError(e, 'Failed to load settings'));
+      .catch((e) => toastError(e, t('admin.load.settings')));
     api
       .adminUsers()
       .then((r) => setUsers(r.users))
-      .catch((e) => toastError(e, 'Failed to load users'));
+      .catch((e) => toastError(e, t('admin.load.users')));
     api
       .adminSites()
       .then((r) => setSites(r.sites))
-      .catch((e) => toastError(e, 'Failed to load sites'));
+      .catch((e) => toastError(e, t('admin.load.sites')));
     api
       .listInvites()
       .then((r) => setInvites(r.invites))
@@ -163,9 +159,9 @@ export function Admin() {
       .setRegistrationMode(mode)
       .then(() => {
         setSettings({ ...settings, registration_mode: mode });
-        toast(`Registration: ${mode}`);
+        toast(t('admin.reg.changed', { mode }));
       })
-      .catch((e) => toastError(e, 'Could not change mode'));
+      .catch((e) => toastError(e, t('admin.reg.changeFailed')));
   };
 
   const generate = () => {
@@ -187,24 +183,25 @@ export function Admin() {
           .then((r) => setInvites(r.invites))
           .catch(() => {});
       })
-      .catch((e) => toastError(e, 'Could not create invite'))
+      .catch((e) => toastError(e, t('admin.invite.createFailed')))
       .finally(() => setGenerating(false));
   };
 
   const revokeInvite = async (inv: Invite) => {
+    const target = inv.email ? t('admin.invite.revokeFor', { email: inv.email }) : '';
     const ok = await confirmDanger({
-      title: 'Revoke invite?',
-      body: `The link${inv.email ? ` for ${inv.email}` : ''} stops working immediately.`,
-      confirmText: 'Revoke',
+      title: t('admin.invite.revokeTitle'),
+      body: t('admin.invite.revokeBody', { target }),
+      confirmText: t('admin.invite.revoke'),
     });
     if (!ok) return;
     api
       .revokeInvite(inv.id)
       .then(() => {
         setInvites((prev) => prev.filter((x) => x.id !== inv.id));
-        toast('Invite revoked');
+        toast(t('admin.invite.revoked'));
       })
-      .catch((e) => toastError(e, 'Revoke failed'));
+      .catch((e) => toastError(e, t('admin.invite.revokeFailed')));
   };
 
   const patchUser = (
@@ -219,7 +216,7 @@ export function Admin() {
         setUsers((prev) => (prev ?? []).map((x) => (x.id === updated.id ? updated : x)));
         toast(label);
       })
-      .catch((e) => toastError(e, 'Update failed'))
+      .catch((e) => toastError(e, t('admin.user.updateFailed')))
       .finally(() => setBusy(null));
   };
 
@@ -232,22 +229,27 @@ export function Admin() {
         setUsers((prev) =>
           (prev ?? []).map((x) => (x.id === u.id ? { ...x, email_verified: true } : x)),
         );
-        toast('Email verified');
+        toast(t('admin.user.emailVerified'));
       })
-      .catch((e) => toastError(e, 'Verify failed'))
+      .catch((e) => toastError(e, t('admin.user.verifyFailed')))
       .finally(() => setBusy(null));
   };
 
   const toggleDisabled = async (u: AdminUser) => {
     if (!u.disabled) {
+      const target = u.handle ? '@' + u.handle : (u.email ?? t('admin.user.thisUser'));
       const ok = await confirmDanger({
-        title: `Disable ${u.handle ? '@' + u.handle : (u.email ?? 'this user')}?`,
-        body: 'They lose access immediately — across the console, private pages and the comment layer.',
-        confirmText: 'Disable',
+        title: t('admin.user.disableTitle', { target }),
+        body: t('admin.user.disableBody'),
+        confirmText: t('admin.user.disableConfirm'),
       });
       if (!ok) return;
     }
-    patchUser(u, { disabled: !u.disabled }, u.disabled ? 'User re-enabled' : 'User disabled');
+    patchUser(
+      u,
+      { disabled: !u.disabled },
+      u.disabled ? t('admin.user.reEnabled') : t('admin.user.disabled'),
+    );
   };
 
   const replaceSite = (u: AdminSite) =>
@@ -255,11 +257,11 @@ export function Admin() {
 
   const suspendSite = async (s: AdminSite) => {
     const { ok, reason } = await confirmWithReason({
-      title: `Disable “${s.slug}”?`,
-      body: "The page returns 451 to everyone immediately — owner, public links, all of it. Redeploys won't bring it back; you can re-enable it here anytime.",
-      confirmText: 'Disable page',
-      label: 'Reason (optional — shown to the owner)',
-      placeholder: 'e.g. phishing page reported via abuse@',
+      title: t('admin.site.disableTitle', { slug: s.slug }),
+      body: t('admin.site.disableBody'),
+      confirmText: t('admin.site.disableConfirm'),
+      label: t('admin.site.disableReasonLabel'),
+      placeholder: t('admin.site.disableReasonPlaceholder'),
     });
     if (!ok) return;
     setBusySite(s.id);
@@ -267,9 +269,9 @@ export function Admin() {
       .suspendSite(s.id, reason || undefined)
       .then((u) => {
         replaceSite(u);
-        toast('Page disabled');
+        toast(t('admin.site.disabled'));
       })
-      .catch((e) => toastError(e, 'Could not disable'))
+      .catch((e) => toastError(e, t('admin.site.disableFailed')))
       .finally(() => setBusySite(null));
   };
 
@@ -279,17 +281,17 @@ export function Admin() {
       .unsuspendSite(s.id)
       .then((u) => {
         replaceSite(u);
-        toast('Page re-enabled');
+        toast(t('admin.site.reEnabled'));
       })
-      .catch((e) => toastError(e, 'Could not re-enable'))
+      .catch((e) => toastError(e, t('admin.site.reEnableFailed')))
       .finally(() => setBusySite(null));
   };
 
   const deleteSiteAdmin = async (s: AdminSite) => {
     const ok = await confirmDanger({
-      title: `Delete “${s.slug}” (@${s.owner_handle})?`,
-      body: 'Removes the site and purges its stored files. The owner loses it and the link dies. This cannot be undone.',
-      confirmText: 'Delete site',
+      title: t('admin.site.deleteTitle', { slug: s.slug, handle: s.owner_handle }),
+      body: t('admin.site.deleteBody'),
+      confirmText: t('admin.site.deleteConfirm'),
     });
     if (!ok) return;
     setBusySite(s.id);
@@ -297,9 +299,9 @@ export function Admin() {
       .adminDeleteSite(s.id)
       .then(() => {
         setSites((prev) => (prev ?? []).filter((x) => x.id !== s.id));
-        toast('Site deleted');
+        toast(t('admin.site.deleted'));
       })
-      .catch((e) => toastError(e, 'Delete failed'))
+      .catch((e) => toastError(e, t('admin.site.deleteFailed')))
       .finally(() => setBusySite(null));
   };
 
@@ -312,61 +314,71 @@ export function Admin() {
               page<span className="text-ink-800">pin</span>
             </span>
             <span className="inline-flex items-center gap-1 rounded-chip bg-ink-900 px-2 py-0.5 text-xs font-semibold text-white">
-              <Shield className="h-3 w-3" /> Admin
+              <Shield className="h-3 w-3" /> {t('admin.badge')}
             </span>
             <a
               href="/"
               className="flex items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-tide-700"
             >
-              <ArrowLeft className="h-4 w-4" /> Back to sites
+              <ArrowLeft className="h-4 w-4" /> {t('admin.backToSites')}
             </a>
           </div>
-          <div className="text-right leading-tight">
-            <div className="text-sm font-semibold text-ink-700">{me.display_name}</div>
-            {me.handle && <div className="font-mono text-xs text-ink-400">@{me.handle}</div>}
+          <div className="flex items-center gap-3">
+            <LanguageSwitcher />
+            <div className="text-right leading-tight">
+              <div className="text-sm font-semibold text-ink-700">{me.display_name}</div>
+              {me.handle && <div className="font-mono text-xs text-ink-400">@{me.handle}</div>}
+            </div>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-5xl space-y-5 px-4 py-8 sm:px-6">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-ink-900">Instance admin</h1>
-          <p className="mt-1 text-sm text-ink-500">
-            Manage who can sign in and keep an eye on what&apos;s stored. Only admins see this.
-          </p>
+          <h1 className="text-xl font-bold tracking-tight text-ink-900">{t('admin.title')}</h1>
+          <p className="mt-1 text-sm text-ink-500">{t('admin.subtitle')}</p>
         </div>
 
         {/* Overview */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard
             icon={<Database className="h-4 w-4" />}
-            label="Sites"
+            label={t('admin.stat.sites')}
             value={overview ? String(overview.sites) : '—'}
-            sub="across all users"
+            sub={t('admin.stat.sitesSub')}
             tint="#e6f4f2"
             ink="#0b6358"
           />
           <StatCard
             icon={<UsersIcon className="h-4 w-4" />}
-            label="Users"
+            label={t('admin.stat.users')}
             value={overview ? String(overview.users) : '—'}
-            sub={overview ? `${overview.admins} admin${overview.admins === 1 ? '' : 's'}` : ' '}
+            sub={
+              overview
+                ? t(
+                    overview.admins === 1
+                      ? 'admin.stat.adminsSub.one'
+                      : 'admin.stat.adminsSub.other',
+                    { n: overview.admins },
+                  )
+                : ' '
+            }
             tint="#e8f0f9"
             ink="#1f4f86"
           />
           <StatCard
             icon={<HardDrive className="h-4 w-4" />}
-            label="Storage"
+            label={t('admin.stat.storage')}
             value={overview ? formatBytes(overview.storage_bytes) : '—'}
-            sub="across all sites"
+            sub={t('admin.stat.storageSub')}
             tint="#faf0db"
             ink="#8a560b"
           />
           <StatCard
             icon={<Database className="h-4 w-4" />}
-            label="Versions"
+            label={t('admin.stat.versions')}
             value={overview ? String(overview.versions) : '—'}
-            sub="immutable deploys"
+            sub={t('admin.stat.versionsSub')}
             tint="#f0eafb"
             ink="#5b3596"
           />
@@ -374,11 +386,12 @@ export function Admin() {
 
         {/* Registration & invites */}
         <Card>
-          <h2 className="text-sm font-bold text-ink-800">Registration</h2>
+          <h2 className="text-sm font-bold text-ink-800">{t('admin.reg.heading')}</h2>
           {!isPassword ? (
             <p className="mt-3 text-xs text-ink-400">
-              This instance uses <span className="font-mono">{settings?.auth_mode ?? '…'}</span>{' '}
-              sign-in; registration mode and invites apply to password mode only.
+              {t('admin.reg.authPrefix')}{' '}
+              <span className="font-mono">{settings?.auth_mode ?? '…'}</span>{' '}
+              {t('admin.reg.authSuffix')}
             </p>
           ) : (
             <>
@@ -400,17 +413,18 @@ export function Admin() {
                       <div
                         className={`text-sm font-semibold ${active ? 'text-tide-700' : 'text-ink-700'}`}
                       >
-                        {m.label}
+                        {t(m.labelKey)}
                       </div>
-                      <div className="mt-0.5 text-xs text-ink-400">{m.desc}</div>
+                      <div className="mt-0.5 text-xs text-ink-400">{t(m.descKey)}</div>
                     </button>
                   );
                 })}
               </div>
               {locked && (
                 <p className="mt-2 text-xs text-ink-400">
-                  Locked by <span className="font-mono">PAGEPIN_REGISTRATION_MODE</span> — unset it
-                  to change here.
+                  {t('admin.reg.lockedPre')}{' '}
+                  <span className="font-mono">PAGEPIN_REGISTRATION_MODE</span>{' '}
+                  {t('admin.reg.lockedPost')}
                 </p>
               )}
 
@@ -418,14 +432,14 @@ export function Admin() {
                 <div className="mt-5 rounded-panel border border-ink-200 bg-ink-50 p-4">
                   <div className="flex items-center gap-2 text-ink-700">
                     <Mail className="h-4 w-4 text-tide-600" />
-                    <span className="text-sm font-semibold">Invite a user</span>
-                    <span className="text-xs text-ink-400">· one-time link, expires soon</span>
+                    <span className="text-sm font-semibold">{t('admin.invite.heading')}</span>
+                    <span className="text-xs text-ink-400">{t('admin.invite.oneTimeNote')}</span>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <input
                       className="input !w-56"
                       type="email"
-                      placeholder="teammate@email.com (optional)"
+                      placeholder={t('admin.invite.emailPlaceholder')}
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && generate()}
@@ -436,7 +450,7 @@ export function Admin() {
                         checked={inviteAdmin}
                         onChange={(e) => setInviteAdmin(e.target.checked)}
                       />
-                      as admin
+                      {t('admin.invite.asAdmin')}
                     </label>
                     <button
                       type="button"
@@ -449,16 +463,18 @@ export function Admin() {
                       ) : (
                         <Plus className="h-4 w-4" />
                       )}
-                      Generate link
+                      {t('admin.invite.generate')}
                     </button>
                   </div>
 
                   {generated && (
                     <div className="mt-3 rounded-field border border-amber-200 bg-amber-50 p-3">
                       <p className="text-xs text-amber-800">
-                        Copy it now — shown only once.
-                        {generated.email ? ` Send it to ${generated.email}; ` : ' '}works a single
-                        time.
+                        {t('admin.invite.copyNow')}
+                        {generated.email
+                          ? t('admin.invite.sendTo', { email: generated.email })
+                          : ' '}
+                        {t('admin.invite.worksOnce')}
                       </p>
                       <div className="mt-2 flex items-center gap-2">
                         <code className="min-w-0 flex-1 truncate rounded bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-tide-200">
@@ -471,12 +487,15 @@ export function Admin() {
                             void copyText(generated.url).then((ok) => {
                               setCopied(ok);
                               if (ok) window.setTimeout(() => setCopied(false), 1500);
-                              toast(ok ? 'Invite link copied' : 'Copy failed', ok ? 'ok' : 'err');
+                              toast(
+                                ok ? t('admin.invite.linkCopied') : t('admin.invite.copyFailed'),
+                                ok ? 'ok' : 'err',
+                              );
                             })
                           }
                         >
                           {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                          Copy
+                          {t('common.copy')}
                         </button>
                       </div>
                     </div>
@@ -485,7 +504,7 @@ export function Admin() {
                   {invites.length > 0 && (
                     <div className="mt-4 border-t border-ink-200 pt-3">
                       <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">
-                        Invite links
+                        {t('admin.invite.linksHeading')}
                       </div>
                       <div className="mt-2 space-y-1.5">
                         {invites.map((inv) => (
@@ -494,21 +513,27 @@ export function Admin() {
                             className="flex items-center justify-between gap-2 text-xs"
                           >
                             <span className="truncate font-mono text-ink-600">
-                              {inv.email ?? '(any email)'}
-                              {inv.is_admin && <span className="ml-1 text-tide-600">· admin</span>}
+                              {inv.email ?? t('admin.invite.anyEmail')}
+                              {inv.is_admin && (
+                                <span className="ml-1 text-tide-600">
+                                  {t('admin.invite.adminTag')}
+                                </span>
+                              )}
                             </span>
                             <div className="flex shrink-0 items-center gap-2">
                               <span className={inv.expired ? 'text-red-500' : 'text-ink-400'}>
                                 {inv.expired
-                                  ? 'expired'
-                                  : `expires ${formatRelative(inv.expires_at)}`}
+                                  ? t('admin.invite.expired')
+                                  : t('admin.invite.expiresIn', {
+                                      when: formatRelative(inv.expires_at),
+                                    })}
                               </span>
                               <button
                                 type="button"
                                 className="text-red-500 hover:text-red-600 hover:underline"
                                 onClick={() => void revokeInvite(inv)}
                               >
-                                Revoke
+                                {t('admin.invite.revoke')}
                               </button>
                             </div>
                           </div>
@@ -525,13 +550,15 @@ export function Admin() {
         {/* Users */}
         <Card>
           <div className="flex items-baseline justify-between">
-            <h2 className="text-sm font-bold text-ink-800">Users</h2>
-            <span className="text-xs text-ink-400">{users ? `${users.length} total` : ''}</span>
+            <h2 className="text-sm font-bold text-ink-800">{t('admin.users.heading')}</h2>
+            <span className="text-xs text-ink-400">
+              {users ? t('admin.users.total', { n: users.length }) : ''}
+            </span>
           </div>
           <div className="mt-3 divide-y divide-ink-100 border-t border-ink-100">
             {users === null ? (
               <div className="flex items-center gap-2 py-4 text-xs text-ink-400">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('common.loading')}
               </div>
             ) : (
               users.map((u) => (
@@ -547,20 +574,26 @@ export function Admin() {
                       <span
                         className={`truncate font-mono text-sm font-semibold ${u.disabled ? 'text-ink-400' : 'text-ink-700'}`}
                       >
-                        {u.handle ? `@${u.handle}` : '(no handle)'}
+                        {u.handle ? `@${u.handle}` : t('admin.users.noHandle')}
                       </span>
                       <RolePill u={u} />
-                      {u.id === me.sub && <span className="text-[11px] text-ink-400">you</span>}
+                      {u.id === me.sub && (
+                        <span className="text-[11px] text-ink-400">{t('admin.users.you')}</span>
+                      )}
                     </div>
                     <div className="truncate text-xs text-ink-400">{u.email ?? '—'}</div>
                   </div>
                   <div className="hidden text-right text-xs text-ink-400 sm:block">
                     <div>
-                      {u.site_count} site{u.site_count === 1 ? '' : 's'} ·{' '}
-                      {formatBytes(u.storage_bytes)}
+                      {t(u.site_count === 1 ? 'admin.users.sites.one' : 'admin.users.sites.other', {
+                        n: u.site_count,
+                      })}{' '}
+                      · {formatBytes(u.storage_bytes)}
                     </div>
                     <div>
-                      {u.last_login_at ? `active ${formatRelative(u.last_login_at)}` : 'never'}
+                      {u.last_login_at
+                        ? t('admin.users.active', { when: formatRelative(u.last_login_at) })
+                        : t('admin.users.never')}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
@@ -570,26 +603,26 @@ export function Admin() {
                         type="button"
                         className="rounded-chip px-2 py-1 text-xs text-tide-600 hover:bg-tide-50 disabled:opacity-40 disabled:hover:bg-transparent"
                         disabled={busy === u.id}
-                        title="Mark this email verified (rescue: bounced/dead address)"
+                        title={t('admin.users.verifyTitle')}
                         onClick={() => verifyUser(u)}
                       >
-                        Verify email
+                        {t('admin.users.verifyEmail')}
                       </button>
                     )}
                     <button
                       type="button"
                       className="rounded-chip px-2 py-1 text-xs text-ink-500 hover:bg-ink-100 hover:text-ink-700 disabled:opacity-40 disabled:hover:bg-transparent"
                       disabled={busy === u.id || u.id === me.sub}
-                      title={u.id === me.sub ? "You can't change your own role here" : undefined}
+                      title={u.id === me.sub ? t('admin.users.ownRoleTitle') : undefined}
                       onClick={() =>
                         patchUser(
                           u,
                           { is_admin: !u.is_admin },
-                          u.is_admin ? 'Admin removed' : 'Promoted to admin',
+                          u.is_admin ? t('admin.user.adminRemoved') : t('admin.user.promoted'),
                         )
                       }
                     >
-                      {u.is_admin ? 'Remove admin' : 'Make admin'}
+                      {u.is_admin ? t('admin.users.removeAdmin') : t('admin.users.makeAdmin')}
                     </button>
                     <button
                       type="button"
@@ -599,10 +632,10 @@ export function Admin() {
                           : 'text-red-500 hover:bg-red-50 hover:text-red-600'
                       }`}
                       disabled={busy === u.id || u.id === me.sub}
-                      title={u.id === me.sub ? "You can't change your own access here" : undefined}
+                      title={u.id === me.sub ? t('admin.users.ownAccessTitle') : undefined}
                       onClick={() => void toggleDisabled(u)}
                     >
-                      {u.disabled ? 'Enable' : 'Disable'}
+                      {u.disabled ? t('admin.users.enable') : t('admin.users.disable')}
                     </button>
                   </div>
                 </div>
@@ -614,20 +647,19 @@ export function Admin() {
         {/* Sites — moderation */}
         <Card>
           <div className="flex items-baseline justify-between">
-            <h2 className="text-sm font-bold text-ink-800">Sites</h2>
-            <span className="text-xs text-ink-400">{sites ? `${sites.length} total` : ''}</span>
+            <h2 className="text-sm font-bold text-ink-800">{t('admin.sitesSection.heading')}</h2>
+            <span className="text-xs text-ink-400">
+              {sites ? t('admin.users.total', { n: sites.length }) : ''}
+            </span>
           </div>
-          <p className="mt-1 text-xs text-ink-400">
-            Disable a page to make it return 451 to everyone (reversible). Delete also purges its
-            stored files.
-          </p>
+          <p className="mt-1 text-xs text-ink-400">{t('admin.sitesSection.note')}</p>
           <div className="mt-3 divide-y divide-ink-100 border-t border-ink-100">
             {sites === null ? (
               <div className="flex items-center gap-2 py-4 text-xs text-ink-400">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('common.loading')}
               </div>
             ) : sites.length === 0 ? (
-              <div className="py-4 text-xs text-ink-400">No sites yet.</div>
+              <div className="py-4 text-xs text-ink-400">{t('admin.sitesSection.empty')}</div>
             ) : (
               sites.map((s) => (
                 <div key={s.id} className="flex flex-wrap items-center gap-3 py-3">
@@ -640,30 +672,37 @@ export function Admin() {
                       </span>
                       {s.suspended ? (
                         <span className="rounded-chip border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">
-                          disabled
+                          {t('admin.site.badgeDisabled')}
                         </span>
                       ) : s.visibility === 'public' ? (
                         <span className="inline-flex items-center gap-1 rounded-chip border border-tide-200 bg-tide-50 px-2 py-0.5 text-xs font-medium text-tide-700">
-                          <Globe2 className="h-3 w-3" /> public
+                          <Globe2 className="h-3 w-3" /> {t('admin.site.public')}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded-chip border border-ink-200 bg-ink-100 px-2 py-0.5 text-xs font-medium text-ink-500">
-                          <Lock className="h-3 w-3" /> private
+                          <Lock className="h-3 w-3" /> {t('admin.site.private')}
                         </span>
                       )}
                       <a
                         href={s.url}
                         target="_blank"
                         rel="noreferrer"
-                        title="Open page"
+                        title={t('admin.sitesSection.openPage')}
                         className="text-ink-300 hover:text-tide-700"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                       </a>
                     </div>
                     <div className="truncate text-xs text-ink-400">
-                      @{s.owner_handle} · {s.file_count} {s.file_count === 1 ? 'file' : 'files'} ·{' '}
-                      {formatBytes(s.total_bytes)} · updated {formatRelative(s.updated_at)}
+                      @{s.owner_handle} ·{' '}
+                      {t(
+                        s.file_count === 1
+                          ? 'admin.sitesSection.files.one'
+                          : 'admin.sitesSection.files.other',
+                        { n: s.file_count },
+                      )}{' '}
+                      · {formatBytes(s.total_bytes)} ·{' '}
+                      {t('admin.sitesSection.updated', { when: formatRelative(s.updated_at) })}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
@@ -677,7 +716,7 @@ export function Admin() {
                         disabled={busySite === s.id}
                         onClick={() => unsuspendSite(s)}
                       >
-                        <RotateCcw className="h-3.5 w-3.5" /> Re-enable
+                        <RotateCcw className="h-3.5 w-3.5" /> {t('admin.sitesSection.reEnable')}
                       </button>
                     ) : (
                       <button
@@ -686,7 +725,7 @@ export function Admin() {
                         disabled={busySite === s.id}
                         onClick={() => void suspendSite(s)}
                       >
-                        <Ban className="h-3.5 w-3.5" /> Disable
+                        <Ban className="h-3.5 w-3.5" /> {t('admin.users.disable')}
                       </button>
                     )}
                     <button
@@ -694,7 +733,7 @@ export function Admin() {
                       className="inline-flex items-center gap-1 rounded-chip px-2 py-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
                       disabled={busySite === s.id}
                       onClick={() => void deleteSiteAdmin(s)}
-                      title="Delete site & purge files"
+                      title={t('admin.sitesSection.deleteTitle')}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -708,8 +747,8 @@ export function Admin() {
         {/* Instance limits (read-only) */}
         {settings && (
           <Card>
-            <h2 className="text-sm font-bold text-ink-800">Instance limits</h2>
-            <p className="mt-1 text-xs text-ink-400">Set via environment variables at boot.</p>
+            <h2 className="text-sm font-bold text-ink-800">{t('admin.limits.heading')}</h2>
+            <p className="mt-1 text-xs text-ink-400">{t('admin.limits.note')}</p>
             <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
               <Limit name="PAGEPIN_MAX_SITE_MB" value={`${settings.limits.max_site_mb} MB`} />
               <Limit name="PAGEPIN_MAX_FILE_MB" value={`${settings.limits.max_file_mb} MB`} />

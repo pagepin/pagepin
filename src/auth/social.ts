@@ -32,9 +32,9 @@ async function fetchJson(url: string, headers: Record<string, string>): Promise<
   try {
     resp = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch {
-    throw new OidcError('社交登录 provider 端点请求失败');
+    throw new OidcError('auth.social.endpointRequestFailed');
   }
-  if (!resp.ok) throw new OidcError(`社交登录 provider 端点返回 HTTP ${resp.status}`);
+  if (!resp.ok) throw new OidcError('auth.social.endpointHttp', { status: resp.status });
   return resp.json();
 }
 
@@ -57,7 +57,7 @@ const GOOGLE: ProviderDef = {
       }),
     );
     const sub = str(u, 'sub');
-    if (!sub) throw new OidcError('Google userinfo 缺 sub');
+    if (!sub) throw new OidcError('auth.social.googleMissingSub');
     const verified = u.email_verified === true;
     return {
       sub: `google:${sub}`,
@@ -81,7 +81,8 @@ const GITHUB: ProviderDef = {
     };
     const u = asRecord(await fetchJson('https://api.github.com/user', headers));
     const id = u.id;
-    if (typeof id !== 'number' && typeof id !== 'string') throw new OidcError('GitHub user 缺 id');
+    if (typeof id !== 'number' && typeof id !== 'string')
+      throw new OidcError('auth.social.githubMissingId');
     // email 仅取 primary+verified(/user 的 email 可能为 null;需 user:email scope);
     // 排除 *.users.noreply.github.com —— 非真实可达邮箱,不能作账号键/连接提示(安全评审要求)。
     let email: string | undefined;
@@ -121,7 +122,7 @@ export function socialAuthorizeUrl(
   state: string,
 ): string {
   const p = SOCIAL_PROVIDERS[id];
-  if (!p) throw new OidcError(`未知社交登录 provider:${id}`);
+  if (!p) throw new OidcError('auth.social.unknownProvider', { id });
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -141,7 +142,7 @@ export async function exchangeSocialCode(
   redirectUri: string,
 ): Promise<SocialIdentity> {
   const p = SOCIAL_PROVIDERS[id];
-  if (!p) throw new OidcError(`未知社交登录 provider:${id}`);
+  if (!p) throw new OidcError('auth.social.unknownProvider', { id });
   let tokenResp: Response;
   try {
     tokenResp = await fetch(p.tokenUrl, {
@@ -158,11 +159,11 @@ export async function exchangeSocialCode(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
-    throw new OidcError('社交登录 token 端点请求失败');
+    throw new OidcError('auth.social.tokenRequestFailed');
   }
-  if (!tokenResp.ok) throw new OidcError(`社交登录 token 端点返回 HTTP ${tokenResp.status}`);
+  if (!tokenResp.ok) throw new OidcError('auth.social.tokenHttp', { status: tokenResp.status });
   const tok = asRecord(await tokenResp.json());
   const accessToken = str(tok, 'access_token');
-  if (!accessToken) throw new OidcError('社交登录 provider 未返回 access_token');
+  if (!accessToken) throw new OidcError('auth.social.noAccessToken');
   return p.fetchIdentity(accessToken);
 }

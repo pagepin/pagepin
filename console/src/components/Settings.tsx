@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Loader2, Lock } from 'lucide-react';
 import { api } from '../api';
+import { useT, type TFn } from '../i18n';
 import { formatBytes } from '../lib/format';
 import { useStore } from '../store';
 import type { Identity, Me, Usage } from '../types';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { PasswordDialog } from './PasswordDialog';
 import { toast, toastError } from './Toast';
 import { TokenManager } from './TokenManager';
@@ -58,15 +60,18 @@ function barColor(pct: number): string {
   return '#14958a';
 }
 
-const PROVIDER_LABEL: Record<string, string> = {
-  password: 'Password',
-  google: 'Google',
-  github: 'GitHub',
-  oidc: 'SSO',
-};
+/** 登录方式展示名:品牌名(Google/GitHub)原样保留,密码/SSO 走翻译。 */
+function providerLabel(t: TFn, provider: string): string {
+  if (provider === 'google') return 'Google';
+  if (provider === 'github') return 'GitHub';
+  if (provider === 'password') return t('settings.providerPassword');
+  if (provider === 'oidc') return t('settings.providerSso');
+  return provider;
+}
 
 /** 「连接账号」区：列出已连接登录身份，可连接尚未连接的 provider、断开（保留至少一个）。 */
 function ConnectedAccounts({ me }: { me: Me }) {
+  const t = useT();
   const [items, setItems] = useState<Identity[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -74,7 +79,7 @@ function ConnectedAccounts({ me }: { me: Me }) {
     api
       .listIdentities()
       .then((r) => setItems(r.identities))
-      .catch((e) => toastError(e, 'Failed to load connected accounts'));
+      .catch((e) => toastError(e, t('settings.failedLoadAccounts')));
 
   useEffect(() => {
     void load();
@@ -82,15 +87,11 @@ function ConnectedAccounts({ me }: { me: Me }) {
     const q = new URLSearchParams(location.search);
     const linked = q.get('linked');
     const err = q.get('link_error');
-    if (linked) toast(`Connected ${PROVIDER_LABEL[linked] ?? linked}`);
+    if (linked) toast(t('settings.connectedProvider', { provider: providerLabel(t, linked) }));
     else if (err)
       toastError(
-        new Error(
-          err === 'conflict'
-            ? 'That account is already linked to a different pagepin user.'
-            : 'Could not connect that account.',
-        ),
-        'Connect failed',
+        new Error(err === 'conflict' ? t('settings.linkConflict') : t('settings.linkError')),
+        t('settings.connectFailed'),
       );
     if (linked || err) {
       q.delete('linked');
@@ -109,17 +110,17 @@ function ConnectedAccounts({ me }: { me: Me }) {
     api
       .disconnectIdentity(id)
       .then(() => {
-        toast('Disconnected');
+        toast(t('settings.disconnected'));
         return load();
       })
-      .catch((e) => toastError(e, 'Disconnect failed'))
+      .catch((e) => toastError(e, t('settings.disconnectFailed')))
       .finally(() => setBusy(null));
   };
 
   if (items === null) {
     return (
       <div className="flex items-center gap-2 py-2 text-xs text-ink-400">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('common.loading')}
       </div>
     );
   }
@@ -140,26 +141,28 @@ function ConnectedAccounts({ me }: { me: Me }) {
       {ordered.map((it, idx) => (
         <Row
           key={it.id}
-          label={PROVIDER_LABEL[it.provider] ?? it.provider}
-          desc={it.email ?? 'Connected'}
+          label={providerLabel(t, it.provider)}
+          desc={it.email ?? t('settings.connectedDesc')}
           last={idx === ordered.length - 1 && available.length === 0}
         >
           {it.provider === 'password' ? (
             // 邮箱密码是主登录方式，不可断开（账号锚点，且无重设入口）
             <span className="inline-flex items-center gap-1 rounded-chip bg-ink-100 px-2 py-0.5 text-xs text-ink-500">
-              <Lock className="h-3 w-3" /> Primary
+              <Lock className="h-3 w-3" /> {t('settings.primary')}
             </span>
           ) : (
             <button
               type="button"
               className="btn-ghost"
               disabled={onlyOne || busy === it.id}
-              title={
-                onlyOne ? 'Add another sign-in method before disconnecting this one' : undefined
-              }
+              title={onlyOne ? t('settings.disconnectHint') : undefined}
               onClick={() => disconnect(it.id)}
             >
-              {busy === it.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Disconnect'}
+              {busy === it.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                t('settings.disconnect')
+              )}
             </button>
           )}
         </Row>
@@ -167,12 +170,12 @@ function ConnectedAccounts({ me }: { me: Me }) {
       {available.map((p, idx) => (
         <Row
           key={p}
-          label={PROVIDER_LABEL[p] ?? p}
-          desc="Not connected"
+          label={providerLabel(t, p)}
+          desc={t('settings.notConnected')}
           last={idx === available.length - 1}
         >
           <button type="button" className="btn-primary" onClick={() => connect(p)}>
-            Connect
+            {t('settings.connect')}
           </button>
         </Row>
       ))}
@@ -182,6 +185,7 @@ function ConnectedAccounts({ me }: { me: Me }) {
 
 /** 邮箱未验证横幅（仅 password 账号 + 实例配了邮件发送时显示）。 */
 function VerifyEmailBanner({ me }: { me: Me }) {
+  const t = useT();
   const [sending, setSending] = useState(false);
   if (!(me.auth_mode === 'password' && me.has_password && !me.email_verified && me.mail_enabled)) {
     return null;
@@ -191,27 +195,27 @@ function VerifyEmailBanner({ me }: { me: Me }) {
     api
       .resendVerifyEmail()
       .then((r) =>
-        toast(
-          r.sent ? 'Verification email sent' : 'Email sending is not configured on this instance',
-        ),
+        toast(r.sent ? t('settings.verifyEmailSent') : t('settings.verifyEmailNotConfigured')),
       )
-      .catch((e) => toastError(e, 'Could not send verification email'))
+      .catch((e) => toastError(e, t('settings.verifyEmailFailed')))
       .finally(() => setSending(false));
   };
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-amber-200 bg-amber-50 px-5 py-3.5">
       <div className="text-sm text-amber-800">
-        <span className="font-semibold">Verify your email.</span> Confirm{' '}
-        <span className="font-mono">{me.email}</span> to secure your account.
+        <span className="font-semibold">{t('settings.verifyEmailTitle')}</span>{' '}
+        {t('settings.verifyEmailBefore')} <span className="font-mono">{me.email}</span>{' '}
+        {t('settings.verifyEmailAfter')}
       </div>
       <button type="button" className="btn-ghost shrink-0" disabled={sending} onClick={resend}>
-        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Resend email'}
+        {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : t('settings.resendEmail')}
       </button>
     </div>
   );
 }
 
 export function Settings() {
+  const t = useT();
   const me = useStore((s) => s.me)!;
   const setMe = useStore((s) => s.setMe);
   const [name, setName] = useState(me.display_name ?? '');
@@ -223,8 +227,8 @@ export function Settings() {
     api
       .usage()
       .then(setUsage)
-      .catch((e) => toastError(e, 'Failed to load usage'));
-  }, []);
+      .catch((e) => toastError(e, t('settings.failedLoadUsage')));
+  }, [t]);
 
   const dirty = name.trim() !== (me.display_name ?? '');
   const saveName = () => {
@@ -235,9 +239,9 @@ export function Settings() {
       .updateProfile(value || null)
       .then((r) => {
         setMe({ ...me, display_name: r.display_name ?? '' });
-        toast('Profile saved');
+        toast(t('settings.profileSaved'));
       })
-      .catch((e) => toastError(e, 'Save failed'))
+      .catch((e) => toastError(e, t('settings.saveFailed')))
       .finally(() => setSavingName(false));
   };
 
@@ -256,35 +260,38 @@ export function Settings() {
               href="/"
               className="flex items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-tide-700"
             >
-              <ArrowLeft className="h-4 w-4" /> Back to sites
+              <ArrowLeft className="h-4 w-4" /> {t('settings.backToSites')}
             </a>
           </div>
-          <div className="text-right leading-tight">
-            <div className="text-sm font-semibold text-ink-700">{me.display_name}</div>
-            {me.handle && <div className="font-mono text-xs text-ink-400">@{me.handle}</div>}
+          <div className="flex items-center gap-3">
+            <LanguageSwitcher />
+            <div className="text-right leading-tight">
+              <div className="text-sm font-semibold text-ink-700">{me.display_name}</div>
+              {me.handle && <div className="font-mono text-xs text-ink-400">@{me.handle}</div>}
+            </div>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl space-y-5 px-4 py-8 sm:px-6">
-        <h1 className="text-xl font-bold tracking-tight text-ink-900">Account &amp; settings</h1>
+        <h1 className="text-xl font-bold tracking-tight text-ink-900">{t('settings.pageTitle')}</h1>
 
         <VerifyEmailBanner me={me} />
 
-        <Card title="Profile">
-          <Row label="Handle" desc="Permanent — appears in every share link.">
+        <Card title={t('settings.profile')}>
+          <Row label={t('settings.handle')} desc={t('settings.handleDesc')}>
             {me.handle ? (
               <>
                 <span className="font-mono text-sm text-ink-700">@{me.handle}</span>
                 <span className="inline-flex items-center gap-1 rounded-chip bg-ink-100 px-2 py-0.5 text-xs text-ink-500">
-                  <Lock className="h-3 w-3" /> Locked
+                  <Lock className="h-3 w-3" /> {t('settings.locked')}
                 </span>
               </>
             ) : (
-              <span className="text-xs text-ink-400">Not set yet</span>
+              <span className="text-xs text-ink-400">{t('settings.notSetYet')}</span>
             )}
           </Row>
-          <Row label="Display name" desc="Shown in this console only.">
+          <Row label={t('settings.displayName')} desc={t('settings.displayNameDesc')}>
             <input
               className="input !w-48"
               maxLength={64}
@@ -299,57 +306,65 @@ export function Settings() {
               onClick={saveName}
             >
               {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Save
+              {t('common.save')}
             </button>
           </Row>
           <Row
-            label="Email"
-            desc="Used for sign-in."
+            label={t('settings.email')}
+            desc={t('settings.emailDesc')}
             last={!(me.auth_mode === 'password' && me.has_password)}
           >
             <span className="text-sm text-ink-600">{me.email || '—'}</span>
           </Row>
           {me.auth_mode === 'password' && me.has_password && (
-            <Row label="Password" desc="Your sign-in password." last>
+            <Row label={t('settings.password')} desc={t('settings.passwordDesc')} last>
               <button type="button" className="btn-ghost" onClick={() => setShowPw(true)}>
-                Change password
+                {t('settings.changePassword')}
               </button>
             </Row>
           )}
         </Card>
 
-        <Card title="Connected accounts" sub="Ways to sign in to this account">
+        <Card title={t('settings.connectedAccounts')} sub={t('settings.connectedAccountsSub')}>
           <ConnectedAccounts me={me} />
         </Card>
 
-        <Card title="API tokens" sub="Deploy credentials for agents & CI">
+        <Card title={t('settings.apiTokens')} sub={t('settings.apiTokensSub')}>
           <TokenManager />
         </Card>
 
-        <Card title="Usage" sub="Against this instance's limits">
+        <Card title={t('settings.usage')} sub={t('settings.usageSub')}>
           {usage === null ? (
             <div className="flex items-center gap-2 py-2 text-xs text-ink-400">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('common.loading')}
             </div>
           ) : (
             <>
               <div className="grid grid-cols-3 gap-3">
-                <Stat label="SITES" value={String(usage.sites)} sub="hosted here" />
                 <Stat
-                  label="STORAGE"
-                  value={formatBytes(usage.storage_bytes)}
-                  sub="across all versions"
+                  label={t('settings.statSites')}
+                  value={String(usage.sites)}
+                  sub={t('settings.statSitesSub')}
                 />
                 <Stat
-                  label="PER-SITE LIMIT"
+                  label={t('settings.statStorage')}
+                  value={formatBytes(usage.storage_bytes)}
+                  sub={t('settings.statStorageSub')}
+                />
+                <Stat
+                  label={t('settings.perSiteLimit')}
                   value={`${limitMb} MB`}
-                  sub={`· ${me.limits.max_files} files · ${me.limits.max_file_mb} MB/file`}
+                  sub={`· ${me.limits.max_files} ${t(
+                    me.limits.max_files === 1
+                      ? 'settings.filesUnit.one'
+                      : 'settings.filesUnit.other',
+                  )} · ${me.limits.max_file_mb} ${t('settings.mbPerFile')}`}
                 />
               </div>
               {usage.per_site.length > 0 && (
                 <div className="mt-5">
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">
-                    Per-site storage
+                    {t('settings.perSiteStorage')}
                   </div>
                   <div className="mt-2.5 space-y-3">
                     {usage.per_site.map((s) => {
@@ -364,7 +379,12 @@ export function Settings() {
                             <span className="shrink-0 text-ink-400">
                               {formatBytes(s.total_bytes)}
                               {hasLimit ? ` / ${limitMb} MB` : ''} · {s.file_count}
-                              {me.limits.max_files > 0 ? ` / ${me.limits.max_files}` : ''} files
+                              {me.limits.max_files > 0 ? ` / ${me.limits.max_files}` : ''}{' '}
+                              {t(
+                                s.file_count === 1
+                                  ? 'settings.filesUnit.one'
+                                  : 'settings.filesUnit.other',
+                              )}
                             </span>
                           </div>
                           <div className="mt-1.5 h-[7px] overflow-hidden rounded-full bg-ink-100">

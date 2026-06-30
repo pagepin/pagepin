@@ -1,3 +1,5 @@
+import { translate } from '../i18n';
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -13,10 +15,10 @@ export function formatRelative(iso: string): string {
   const min = 60_000;
   const hour = 60 * min;
   const day = 24 * hour;
-  if (diff < min) return 'just now';
-  if (diff < hour) return `${Math.floor(diff / min)}m ago`;
-  if (diff < day) return `${Math.floor(diff / hour)}h ago`;
-  if (diff < 14 * day) return `${Math.floor(diff / day)}d ago`;
+  if (diff < min) return translate('core.justNow');
+  if (diff < hour) return translate('core.minutesAgo', { n: Math.floor(diff / min) });
+  if (diff < day) return translate('core.hoursAgo', { n: Math.floor(diff / hour) });
+  if (diff < 14 * day) return translate('core.daysAgo', { n: Math.floor(diff / day) });
   const d = new Date(t);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -33,14 +35,16 @@ export function formatRemaining(expiresIso: string, now: number): string | null 
   if (diff >= day) {
     const d = Math.floor(diff / day);
     const h = Math.floor((diff % day) / hour);
-    return h > 0 ? `${d}d ${h}h left` : `${d}d left`;
+    return h > 0 ? translate('core.daysHoursLeft', { d, h }) : translate('core.daysLeft', { d });
   }
   if (diff >= hour) {
     const h = Math.floor(diff / hour);
     const m = Math.floor((diff % hour) / min);
-    return m > 0 ? `${h}h ${m}m left` : `${h}h left`;
+    return m > 0
+      ? translate('core.hoursMinutesLeft', { h, m })
+      : translate('core.hoursLeft', { h });
   }
-  return `${Math.max(1, Math.floor(diff / min))}m left`;
+  return translate('core.minutesLeft', { m: Math.max(1, Math.floor(diff / min)) });
 }
 
 export async function copyText(text: string): Promise<boolean> {

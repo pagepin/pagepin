@@ -5,6 +5,8 @@
  *
  * edge-safe:纯字符串拼接,无运行时依赖;字体走公共 CDN(非控制台资产,被托管的内容域可引)。 */
 
+import type { Locale } from './i18n/index.js';
+
 /** html.escape(quote=True) 等价 */
 export function escapeHtml(s: string): string {
   return s
@@ -26,9 +28,9 @@ export const LOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="n
 export const CLOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
 
 /** 居中卡片 + 点阵底纹的品牌门页外壳。含表单控件样式,供内容域登录表单复用同一品牌。 */
-export function gateDoc(title: string, inner: string): string {
+export function gateDoc(title: string, inner: string, locale: Locale = 'en'): string {
   return `<!doctype html>
-<html lang="en">
+<html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${FAVICON}${FONTS}<title>${title}</title>
 <style>
