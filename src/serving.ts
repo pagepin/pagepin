@@ -14,7 +14,15 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 import { extOf, relHref } from './autoindex.js';
-import { CLOCK_SVG, escapeHtml, FAVICON, FONTS, gateDoc, LOCK_SVG } from './brand-gate.js';
+import {
+  CLOCK_SVG,
+  escapeHtml,
+  FAVICON,
+  FONTS,
+  gateDoc,
+  GLOBE_SVG,
+  LOCK_SVG,
+} from './brand-gate.js';
 import { COMMENTS_JS, FAVICON_ICO_B64, MARKED_JS } from './generated/edge-assets.js';
 import { t, type Locale } from './i18n/index.js';
 import { jsonError, localeOf } from './i18n/locale.js';
@@ -121,9 +129,14 @@ const MD_EXTS = new Set(['.md', '.markdown']);
 function loginWallHtml(slug: string, ownerName: string, loginHref: string, locale: Locale): string {
   const initial = escapeHtml((ownerName.replace(/^@/, '').trim()[0] || 'P').toUpperCase());
   const slugSpan = `<span class="mono teal">${escapeHtml(slug)}</span>`;
+  // ?lang 语言切换:相对 href 重载当前私有页(仍匿名 → 再次渲染登录墙,但已是另一语言);
+  // 中间件会据 ?lang 回写 pp_lang cookie,后续内容域页面随之切换。
+  const otherLocale: Locale = locale === 'zh' ? 'en' : 'zh';
+  const otherLabel = otherLocale === 'zh' ? '中文' : 'English';
+  const langLink = `<div class="pp-lang"><a href="?lang=${otherLocale}">${GLOBE_SVG} ${otherLabel}</a></div>`;
   return gateDoc(
     t(locale, 'html.loginWall.title'),
-    `<div class="chip chip-teal">${LOCK_SVG}</div>
+    `${langLink}<div class="chip chip-teal">${LOCK_SVG}</div>
 <h1>${t(locale, 'html.loginWall.heading')}</h1>
 <p class="body">${t(locale, 'html.loginWall.body', { slug: slugSpan })}</p>
 <a class="btn btn-primary" href="${escapeHtml(loginHref)}">${t(locale, 'html.loginWall.button')}</a>

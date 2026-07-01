@@ -15,7 +15,7 @@ import { Hono } from 'hono';
 import { sign, verify as jwtVerify } from 'hono/jwt';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
-import { escapeHtml, gateDoc, LOCK_SVG } from '../brand-gate.js';
+import { escapeHtml, gateDoc, GLOBE_SVG, LOCK_SVG } from '../brand-gate.js';
 import { consoleBase, type Config } from '../config.js';
 import { identities, invites, users, type UserRow } from '../db/index.js';
 import { writtenCount } from '../db/ops.js';
@@ -177,9 +177,16 @@ function loginPage(
   const msgFail = jsStr(t(locale, 'auth.html.signInFailed'));
   const msgNetwork = jsStr(t(locale, 'auth.html.networkError'));
   const msgBtn = jsStr(btnLabel);
+  // 双域内容域登录页没有 SPA 切换器 —— 给个 ?lang 链接切到另一语言(中间件会回写 pp_lang cookie);
+  // href 服务端拼好并保留 next,无 JS 也能用。语言名用各自母语写法(endonym),与当前 UI 语言无关。
+  const otherLocale: Locale = locale === 'zh' ? 'en' : 'zh';
+  const otherLabel = otherLocale === 'zh' ? '中文' : 'English';
+  const langHref =
+    `/auth/login?lang=${otherLocale}` + (next ? `&next=${encodeURIComponent(next)}` : '');
+  const langLink = `<div class="pp-lang"><a href="${escapeHtml(langHref)}">${GLOBE_SVG} ${otherLabel}</a></div>`;
   return gateDoc(
     t(locale, 'auth.html.signIn.title'),
-    `<div class="chip chip-teal">${LOCK_SVG}</div>
+    `${langLink}<div class="chip chip-teal">${LOCK_SVG}</div>
 <h1>${escapeHtml(t(locale, 'auth.html.signIn.heading'))}</h1>
 <p class="body">${escapeHtml(t(locale, 'auth.html.signIn.subtitle'))}</p>
 ${socialButtonsHtml(social, next, locale)}<form id="f" method="post" action="/auth/password">
