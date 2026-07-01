@@ -13,6 +13,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { csrfOk, readSession } from '../auth/sessions.js';
 import { apiTokens, identities, users } from '../db/index.js';
 import type { UserRow } from '../db/index.js';
+import { jsonError } from '../i18n/locale.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso } from '../util.js';
 
@@ -58,7 +59,7 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
 
   async function tokenUser(c: Context<AppEnv>, token: string): Promise<Response | undefined> {
     if (!token.startsWith('pp_')) {
-      return c.json({ detail: 'token 无效（应为 pp_ 开头的 PAT）' }, 401);
+      return jsonError(c, 401, 'auth.token.malformed');
     }
     const h = await sha256Hex(token);
     const rec = (
@@ -67,13 +68,13 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
         .from(apiTokens)
         .where(and(eq(apiTokens.tokenHash, h), isNull(apiTokens.revokedAt)))
     )[0];
-    if (!rec) return c.json({ detail: 'token 无效或已吊销' }, 401);
+    if (!rec) return jsonError(c, 401, 'auth.token.invalidOrRevoked');
     if (rec.expiresAt && Date.parse(rec.expiresAt) <= Date.now()) {
-      return c.json({ detail: 'token 已过期，请重新登录获取' }, 401);
+      return jsonError(c, 401, 'auth.token.expired');
     }
     const user = (await db.select().from(users).where(eq(users.id, rec.userId)))[0];
-    if (!user) return c.json({ detail: 'token 对应用户不存在' }, 401);
-    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
+    if (!user) return jsonError(c, 401, 'auth.token.userNotFound');
+    if (user.disabled) return jsonError(c, 403, 'auth.account.disabled');
     c.set('authVia', 'token');
     // last_used_at 节流写(5 分钟粒度足够审计,省掉每请求一次写库)
     if (!rec.lastUsedAt || Date.now() - Date.parse(rec.lastUsedAt) > 300_000) {
@@ -90,13 +91,12 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
       return tokenUser(c, authz.slice(7).trim());
     }
     const claims = await readSession(c, cfg, 'session');
-    if (!claims) return c.json({ detail: '未登录' }, 401);
+    if (!claims) return jsonError(c, 401, 'auth.unauthenticated');
     const user = (await db.select().from(users).where(eq(users.id, claims.sub)))[0];
-    if (!user) return c.json({ detail: '用户不存在，请重新登录' }, 401);
-    if (user.disabled) return c.json({ detail: '账号已被禁用' }, 403);
+    if (!user) return jsonError(c, 401, 'auth.userNotFound');
+    if (user.disabled) return jsonError(c, 403, 'auth.account.disabled');
     // sessionEpoch 比对:断开身份/禁用会 bump epoch,旧会话(epo 不匹配)即失效(?? 0 兼容旧 token)
-    if ((claims.epo ?? 0) !== user.sessionEpoch)
-      return c.json({ detail: '会话已失效，请重新登录' }, 401);
+    if ((claims.epo ?? 0) !== user.sessionEpoch) return jsonError(c, 401, 'auth.sessionExpired');
     c.set('sessionClaims', claims);
     c.set('authVia', 'cookie');
     c.set('user', user);
@@ -107,19 +107,19 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
   function csrfGuard(c: Context<AppEnv>): Response | undefined {
     if (c.get('authVia') === 'token') return undefined;
     const claims = c.get('sessionClaims');
-    if (!claims || !csrfOk(c, claims)) return c.json({ detail: 'CSRF 校验失败' }, 403);
+    if (!claims || !csrfOk(c, claims)) return jsonError(c, 403, 'auth.csrf.failed');
     return undefined;
   }
 
   function requireCookie(c: Context<AppEnv>): Response | undefined {
     if (c.get('authVia') !== 'cookie') {
-      return c.json({ detail: '请在控制台浏览器里操作（API token 不能管理 token）' }, 403);
+      return jsonError(c, 403, 'auth.token.consoleOnly');
     }
     return undefined;
   }
 
   function requireAdmin(c: Context<AppEnv>): Response | undefined {
-    if (!c.get('user').isAdmin) return c.json({ detail: '需要管理员权限' }, 403);
+    if (!c.get('user').isAdmin) return jsonError(c, 403, 'auth.adminRequired');
     return undefined;
   }
 
@@ -164,7 +164,7 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
   // 须链在某个 *User 之后(读 c.get('user'));未验证账号(且无验证社交身份)拒创建内容。
   const requireVerified = createMiddleware<AppEnv>(async (c, next) => {
     if (!(await canPublish(deps, c.get('user')))) {
-      return c.json({ detail: '请先验证邮箱后再创建内容', code: 'email_unverified' }, 403);
+      return jsonError(c, 403, 'auth.emailUnverified');
     }
     await next();
   });

@@ -25,6 +25,7 @@ Deploy any HTML report or static site with one `curl`, share the link, and let r
 - **Pluggable database** — SQLite/libSQL by default (zero-config), or PostgreSQL / MySQL for self-hosted Node.
 - **Small footprint** — one Node process + SQLite; single Docker image with a React console included.
 - **Single- or dual-domain serving** — run everything on one origin, or isolate hosted content on a separate content domain (see [Architecture](#architecture)).
+- **Bilingual (English / 中文)** — the console, server-rendered pages (login wall, viewer shells, directory index), the comment overlay, verification email, and API error bodies are all localized. Language is resolved per request (`?lang=` → `pp_lang` cookie → `Accept-Language` → `PAGEPIN_DEFAULT_LOCALE`); the console has a one-click switcher. API errors now also carry a stable machine-readable `code` (see [Deploy & API](#deploy--api-for-ai-agents)).
 
 ## Quick start
 
@@ -78,6 +79,7 @@ All configuration is via environment variables. The most common settings are bel
 | `PAGEPIN_BASE_URL` | `http://localhost:8000` | Public URL of the instance (single-domain mode). |
 | `PAGEPIN_ADMIN_EMAIL` / `…_PASSWORD` | — | Set both to upsert an admin at startup; otherwise the first signup becomes admin. |
 | `PAGEPIN_AUTH_MODE` | `password` | `password`, `oidc`, or `none` (dev only: auto-login as an admin). |
+| `PAGEPIN_DEFAULT_LOCALE` | `en` | Fallback UI/API language (`en` or `zh`). Per request, `?lang=` → `pp_lang` cookie → `Accept-Language` override it. |
 | `PAGEPIN_STORAGE` | `fs` | `fs` (local disk) or `s3` (S3-compatible). |
 
 Copy the template to get started:
@@ -122,6 +124,8 @@ curl -sf "http://localhost:8000/api/sites/my-report/comments" \
 ```
 
 The deploy response contains the shareable `url`. The comments response lists unresolved threads with `selector`, `kind`, `page_path` and a deep-link `url` — process them, redeploy, done.
+
+Error responses are `{ "detail": "<human message>", "code": "<stable.key>" }`. The `detail` is localized (by `?lang=` / `pp_lang` cookie / `Accept-Language`); the `code` is a stable, language-independent identifier (e.g. `site.quota.exceeded`, `auth.unauthenticated`) — branch on `code`, show `detail`.
 
 The agent-facing skill lives in [`skills/pagepin`](skills/pagepin/SKILL.md) — install it once with `npx skills add pagepin/pagepin -g` (see [`install.md`](install.md)) and the agent can drive the full deploy → review → fix loop on its own. The same guide is served live at **`/skill.md`** for agents without a local skill directory.
 

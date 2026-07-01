@@ -15,6 +15,7 @@ import type { Context } from 'hono';
 
 import { consoleBase } from '../config.js';
 import { deviceAuths } from '../db/index.js';
+import { jsonError } from '../i18n/locale.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso, uuid } from '../util.js';
 import type { AuthMiddleware } from './deps.js';
@@ -105,7 +106,7 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
   app.post('/api/device/token', async (c) => {
     const body = await readJson<{ device_code?: unknown }>(c);
     const deviceCode = typeof body?.device_code === 'string' ? body.device_code : '';
-    if (!deviceCode) return c.json({ detail: '缺少 device_code' }, 422);
+    if (!deviceCode) return jsonError(c, 422, 'device.deviceCode.missing');
 
     const rec = (
       await db.select().from(deviceAuths).where(eq(deviceAuths.deviceCode, deviceCode))
@@ -132,14 +133,14 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     const user = c.get('user');
     const body = await readJson<{ user_code?: unknown }>(c);
     const userCode = typeof body?.user_code === 'string' ? body.user_code.trim().toUpperCase() : '';
-    if (!userCode) return c.json({ detail: '缺少 user_code' }, 422);
+    if (!userCode) return jsonError(c, 422, 'device.userCode.missing');
 
     const rec = (await db.select().from(deviceAuths).where(eq(deviceAuths.userCode, userCode)))[0];
     if (!rec || Date.parse(rec.expiresAt) <= Date.now()) {
       if (rec) await db.delete(deviceAuths).where(eq(deviceAuths.id, rec.id));
-      return c.json({ detail: '设备码不存在或已过期，请在工具里重新发起登录' }, 404);
+      return jsonError(c, 404, 'device.notFoundOrExpired');
     }
-    if (rec.status !== 'pending') return c.json({ detail: '该设备码已被处理' }, 409);
+    if (rec.status !== 'pending') return jsonError(c, 409, 'device.alreadyHandled');
 
     const name = `Device login ${nowIso().slice(0, 10)}`;
     // 设备登录铸的 token 默认带过期(PAGEPIN_DEVICE_TOKEN_TTL_DAYS,默认 90 天;0 = 不过期),
@@ -168,7 +169,7 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
   app.post('/api/device/deny', mw.cookieMutatingUser, async (c) => {
     const body = await readJson<{ user_code?: unknown }>(c);
     const userCode = typeof body?.user_code === 'string' ? body.user_code.trim().toUpperCase() : '';
-    if (!userCode) return c.json({ detail: '缺少 user_code' }, 422);
+    if (!userCode) return jsonError(c, 422, 'device.userCode.missing');
     const rec = (await db.select().from(deviceAuths).where(eq(deviceAuths.userCode, userCode)))[0];
     if (rec && rec.status === 'pending') {
       await db.update(deviceAuths).set({ status: 'denied' }).where(eq(deviceAuths.id, rec.id));

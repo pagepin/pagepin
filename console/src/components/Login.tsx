@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Loader2, LogIn } from 'lucide-react';
 import { fetchAuthConfig, login, signup } from '../api';
+import { useT } from '../i18n';
 import type { AuthConfig } from '../types';
 import { BrandMark } from './BrandMark';
 import { Turnstile } from './Turnstile';
@@ -35,21 +36,21 @@ function GithubMark() {
     </svg>
   );
 }
-const PROVIDER_META: Record<string, { label: string; icon: ReactNode }> = {
-  google: { label: 'Continue with Google', icon: <GoogleMark /> },
-  github: { label: 'Continue with GitHub', icon: <GithubMark /> },
+const PROVIDER_META: Record<string, { labelKey: string; icon: ReactNode }> = {
+  google: { labelKey: 'auth.continueWithGoogle', icon: <GoogleMark /> },
+  github: { labelKey: 'auth.continueWithGithub', icon: <GithubMark /> },
 };
 
 /** 社交登录按钮区:每家一条,跳服务端 /auth/social/<id>。 */
 function SocialButtons({ providers, next }: { providers: string[]; next: string }) {
+  const t = useT();
   if (!providers.length) return null;
   return (
     <div className="space-y-2.5">
       {providers.map((id) => {
-        const meta = PROVIDER_META[id] ?? {
-          label: `Continue with ${id}`,
-          icon: <LogIn className="h-4 w-4" />,
-        };
+        const meta = PROVIDER_META[id];
+        const label = meta ? t(meta.labelKey) : t('auth.continueWith', { provider: id });
+        const icon = meta ? meta.icon : <LogIn className="h-4 w-4" />;
         return (
           <button
             key={id}
@@ -60,8 +61,8 @@ function SocialButtons({ providers, next }: { providers: string[]; next: string 
                 '/auth/social/' + encodeURIComponent(id) + '?next=' + encodeURIComponent(next);
             }}
           >
-            {meta.icon}
-            {meta.label}
+            {icon}
+            {label}
           </button>
         );
       })}
@@ -71,10 +72,11 @@ function SocialButtons({ providers, next }: { providers: string[]; next: string 
 
 /** 居中"or"分隔线。 */
 function OrDivider() {
+  const t = useT();
   return (
     <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-400">
       <span className="h-px flex-1 bg-ink-100" />
-      or
+      {t('auth.or')}
       <span className="h-px flex-1 bg-ink-100" />
     </div>
   );
@@ -84,6 +86,7 @@ function OrDivider() {
  *  password 模式 + 配了社交 provider 时,密码表单上方加社交登录按钮。
  *  本页不调 /api/me，避免 401 跳转死循环。 */
 export function Login() {
+  const t = useT();
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -111,15 +114,15 @@ export function Login() {
   async function submit() {
     if (submitting) return;
     if (!email.trim() || !password) {
-      setError('Please enter your email and password');
+      setError(t('auth.enterEmailPassword'));
       return;
     }
     if (mode === 'signup' && password.length < 8) {
-      setError('Password must be at least 8 characters');
+      setError(t('auth.passwordTooShort'));
       return;
     }
     if (config?.turnstile_site_key && !turnstileToken) {
-      setError('Please complete the verification below');
+      setError(t('auth.completeVerification'));
       return;
     }
     setSubmitting(true);
@@ -132,7 +135,7 @@ export function Login() {
       }
       location.href = next;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed');
+      setError(e instanceof Error ? e.message : t('auth.requestFailed'));
       setSubmitting(false);
       // token 一次性，失败后重置以重新挑战
       setTurnstileToken('');
@@ -145,7 +148,7 @@ export function Login() {
       <div className="flex min-h-screen items-center justify-center">
         <div className="flex items-center gap-2 text-ink-400">
           <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">Loading pagepin…</span>
+          <span className="text-sm">{t('app.loading')}</span>
         </div>
       </div>
     );
@@ -160,11 +163,9 @@ export function Login() {
         <div className="w-full max-w-md animate-fade-up rounded-card border border-ink-200 bg-white p-7 shadow-login">
           <BrandMark size={44} />
           <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
-            Sign in to pagepin
+            {t('auth.signInTitle')}
           </h1>
-          <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-            This instance uses single sign-on. Continue with your identity provider.
-          </p>
+          <p className="mt-1.5 text-sm leading-relaxed text-ink-500">{t('auth.ssoDesc')}</p>
           {social.length > 0 && (
             <div className="mt-5">
               <SocialButtons providers={social} next={next} />
@@ -179,10 +180,11 @@ export function Login() {
             }}
           >
             <LogIn className="h-4 w-4" />
-            Continue with SSO
+            {t('auth.continueWithSso')}
           </button>
           <div className="mt-4 border-t border-ink-100 pt-3.5 text-center text-[11px] text-ink-400">
-            Configured via <span className="font-mono text-ink-500">AUTH_MODE={config.mode}</span>
+            {t('auth.configuredVia')}{' '}
+            <span className="font-mono text-ink-500">AUTH_MODE={config.mode}</span>
           </div>
         </div>
       </div>
@@ -196,12 +198,10 @@ export function Login() {
       <div className="w-full max-w-md animate-fade-up rounded-card border border-ink-200 bg-white p-7 shadow-login">
         <BrandMark size={44} />
         <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
-          {isSignup ? 'Create your account' : 'Sign in to pagepin'}
+          {isSignup ? t('auth.createAccountTitle') : t('auth.signInTitle')}
         </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-          {isSignup
-            ? 'Host static pages and collect pin-point review comments.'
-            : 'Use your email and password.'}
+          {isSignup ? t('auth.signupSubtitle') : t('auth.loginSubtitle')}
         </p>
 
         {social.length > 0 && (
@@ -215,7 +215,7 @@ export function Login() {
           <input
             className="input"
             type="email"
-            placeholder="Email"
+            placeholder={t('auth.emailPlaceholder')}
             autoFocus
             autoComplete="email"
             value={email}
@@ -227,7 +227,9 @@ export function Login() {
           <input
             className="input"
             type="password"
-            placeholder={isSignup ? 'At least 8 characters' : 'Password'}
+            placeholder={
+              isSignup ? t('auth.passwordMinPlaceholder') : t('auth.passwordPlaceholder')
+            }
             autoComplete={isSignup ? 'new-password' : 'current-password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -239,7 +241,7 @@ export function Login() {
             <input
               className="input"
               type="text"
-              placeholder="Display name (optional)"
+              placeholder={t('auth.displayNamePlaceholder')}
               maxLength={64}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
@@ -269,12 +271,12 @@ export function Login() {
           onClick={() => void submit()}
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          {isSignup ? 'Sign up' : 'Sign in'}
+          {isSignup ? t('auth.signUp') : t('auth.signIn')}
         </button>
 
         {config.allow_signup && (
           <p className="mt-4 text-center text-xs text-ink-400">
-            {isSignup ? 'Already have an account?' : 'No account yet?'}
+            {isSignup ? t('auth.alreadyHaveAccount') : t('auth.noAccountYet')}
             <button
               type="button"
               className="ml-1 font-semibold text-tide-600 underline underline-offset-2 hover:text-tide-700"
@@ -283,7 +285,7 @@ export function Login() {
                 setError(null);
               }}
             >
-              {isSignup ? 'Sign in' : 'Sign up'}
+              {isSignup ? t('auth.signIn') : t('auth.signUp')}
             </button>
           </p>
         )}

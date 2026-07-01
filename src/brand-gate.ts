@@ -5,6 +5,8 @@
  *
  * edge-safe:纯字符串拼接,无运行时依赖;字体走公共 CDN(非控制台资产,被托管的内容域可引)。 */
 
+import type { Locale } from './i18n/index.js';
+
 /** html.escape(quote=True) 等价 */
 export function escapeHtml(s: string): string {
   return s
@@ -24,11 +26,13 @@ export const FAVICON = `<link rel="icon" type="image/svg+xml" href="data:image/s
 
 export const LOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
 export const CLOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
+/** 语言切换链接用的小地球图标(内容域门页 ?lang 切换)。 */
+export const GLOBE_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
 
 /** 居中卡片 + 点阵底纹的品牌门页外壳。含表单控件样式,供内容域登录表单复用同一品牌。 */
-export function gateDoc(title: string, inner: string): string {
+export function gateDoc(title: string, inner: string, locale: Locale = 'en'): string {
   return `<!doctype html>
-<html lang="en">
+<html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${FAVICON}${FONTS}<title>${title}</title>
 <style>
@@ -54,6 +58,10 @@ h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em}
 .row{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12.5px;color:#9aa1a9}
 .avatar{width:22px;height:22px;border-radius:999px;background:#0f7c72;color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700}
 .foot{margin-top:16px;font-size:11px;color:#c3c8cd}
+/* ?lang 语言切换链接(内容域门页右上角;单/双域皆可用,点击后中间件回写 pp_lang cookie) */
+.pp-lang{text-align:right;margin:-6px 0 8px}
+.pp-lang a{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#9aa1a9;text-decoration:none}
+.pp-lang a:hover{color:#0f7c72}
 /* 表单控件 —— 内容域登录表单复用,与上面同一品牌(此前是另一套蓝/灰样式) */
 form{margin:0}
 label{display:block;text-align:left;font-size:12px;font-weight:600;color:#6b7480;margin-top:14px}

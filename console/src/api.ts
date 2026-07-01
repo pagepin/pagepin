@@ -16,6 +16,7 @@ import type {
   VersionsOut,
   Visibility,
 } from './types';
+import { translate } from './i18n';
 
 export class ApiError extends Error {
   status: number;
@@ -66,7 +67,7 @@ async function authPost(path: string, body: Record<string, unknown>): Promise<vo
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    let msg = `请求失败（HTTP ${res.status}）`;
+    let msg = translate('core.requestFailed', { status: res.status });
     try {
       const detail = extractDetail(await res.json());
       if (detail) msg = detail;
@@ -115,10 +116,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, headers, credentials: 'same-origin' });
   if (res.status === 401) {
     redirectToLogin();
-    throw new ApiError(401, '登录已过期，正在跳转…');
+    throw new ApiError(401, translate('core.sessionExpiredRedirect'));
   }
   if (!res.ok) {
-    let msg = `请求失败（HTTP ${res.status}）`;
+    let msg = translate('core.requestFailed', { status: res.status });
     try {
       const detail = extractDetail(await res.json());
       if (detail) msg = detail;
@@ -357,23 +358,23 @@ function xhrPost(
     xhr.onload = () => {
       if (xhr.status === 401) {
         redirectToLogin();
-        reject(new ApiError(401, '登录已过期'));
+        reject(new ApiError(401, translate('core.sessionExpired')));
         return;
       }
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           resolve(xhr.responseText ? JSON.parse(xhr.responseText) : {});
         } catch {
-          reject(new ApiError(xhr.status, '响应解析失败'));
+          reject(new ApiError(xhr.status, translate('core.responseParseFailed')));
         }
         return;
       }
       let msg =
         xhr.status === 413
-          ? '内容超出大小限制'
+          ? translate('core.contentTooLarge')
           : xhr.status === 422
-            ? '路径或参数非法'
-            : `部署失败（HTTP ${xhr.status}）`;
+            ? translate('core.invalidPathOrParams')
+            : translate('core.deployFailed', { status: xhr.status });
       try {
         const detail = extractDetail(JSON.parse(xhr.responseText));
         if (detail) msg = detail;
@@ -382,7 +383,7 @@ function xhrPost(
       }
       reject(new ApiError(xhr.status, msg));
     };
-    xhr.onerror = () => reject(new ApiError(0, '网络错误，上传失败'));
+    xhr.onerror = () => reject(new ApiError(0, translate('core.networkUploadError')));
     xhr.send(fd);
   });
 }

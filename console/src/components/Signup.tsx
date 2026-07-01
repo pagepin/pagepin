@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Lock, UserPlus } from 'lucide-react';
 import { fetchAuthConfig, signup } from '../api';
+import { useT } from '../i18n';
 import { EMAIL_RE, type AuthConfig } from '../types';
 import { Turnstile } from './Turnstile';
 
 /** Open 模式自助注册屏（/signup，无 invite 参数）。仅 registration_mode==='open' 放行;
  *  否则显示「注册未开放」。handle 走首登确认。 */
 export function Signup() {
+  const t = useT();
   const [config, setConfig] = useState<AuthConfig | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -44,15 +46,15 @@ export function Signup() {
             <Lock className="h-5 w-5" />
           </div>
           <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
-            Registration is closed
+            {t('auth.registrationClosed')}
           </h1>
           <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
             {config.registration_mode === 'invite'
-              ? 'This instance is invite-only. Ask an admin for an invite link.'
-              : 'New sign-ups are disabled on this instance.'}
+              ? t('auth.inviteOnly')
+              : t('auth.signupsDisabled')}
           </p>
           <a href="/login" className="btn-primary mt-5 w-full !py-2.5">
-            Go to sign in
+            {t('auth.goToSignIn')}
           </a>
         </div>
       </div>
@@ -72,7 +74,7 @@ export function Signup() {
         location.href = '/';
       })
       .catch((e) => {
-        setError(e instanceof Error ? e.message : 'Could not sign up');
+        setError(e instanceof Error ? e.message : t('auth.couldNotSignUp'));
         setSubmitting(false);
         // token 一次性，失败后重置以重新挑战
         setTurnstileToken('');
@@ -87,17 +89,15 @@ export function Signup() {
           <UserPlus className="h-5 w-5" />
         </div>
         <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
-          Create your account
+          {t('auth.createAccountTitle')}
         </h1>
-        <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-          Host static pages and collect pin-point review comments.
-        </p>
+        <p className="mt-1.5 text-sm leading-relaxed text-ink-500">{t('auth.signupSubtitle')}</p>
 
         <div className="mt-5 space-y-2.5">
           <input
             className="input"
             type="email"
-            placeholder="you@email.com"
+            placeholder={t('auth.emailExamplePlaceholder')}
             autoFocus
             autoComplete="email"
             value={email}
@@ -106,7 +106,7 @@ export function Signup() {
           <input
             className={`input ${tooShort ? 'border-red-300 focus:border-red-400 focus:ring-red-500/10' : ''}`}
             type="password"
-            placeholder="At least 8 characters"
+            placeholder={t('auth.passwordMinPlaceholder')}
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -115,7 +115,7 @@ export function Signup() {
           <input
             className="input"
             type="text"
-            placeholder="Display name (optional)"
+            placeholder={t('auth.displayNamePlaceholder')}
             maxLength={64}
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
@@ -135,7 +135,7 @@ export function Signup() {
           {error ? (
             <span className="text-red-600">{error}</span>
           ) : tooShort ? (
-            <span className="text-red-600">Password must be at least 8 characters.</span>
+            <span className="text-red-600">{t('auth.passwordMin8Period')}</span>
           ) : null}
         </div>
 
@@ -146,16 +146,16 @@ export function Signup() {
           onClick={submit}
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          Sign up
+          {t('auth.signUp')}
         </button>
 
         <p className="mt-4 text-center text-xs text-ink-400">
-          Already have an account?
+          {t('auth.alreadyHaveAccount')}
           <a
             href="/login"
             className="ml-1 font-semibold text-tide-600 underline underline-offset-2 hover:text-tide-700"
           >
-            Sign in
+            {t('auth.signIn')}
           </a>
         </p>
       </div>

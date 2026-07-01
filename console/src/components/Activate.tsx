@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { AlertTriangle, Check, KeyRound, Loader2 } from 'lucide-react';
 import { api } from '../api';
+import { useT } from '../i18n';
 import { useStore } from '../store';
 
 /** 设备授权确认屏(/activate?user_code=XXXX-XXXX)。
  * 由 App.tsx 在登录态确立后渲染 —— 未登录会先被 api 层重定向到 /login?next=/activate…,登录后回到这里。
  * 批准只调 /api/device/approve;明文 token 经发起方轮询交付,本页永远不展示 token。 */
 export function Activate() {
+  const t = useT();
   const me = useStore((s) => s.me);
   const userCode = (new URLSearchParams(location.search).get('user_code') ?? '')
     .trim()
@@ -14,7 +16,7 @@ export function Activate() {
   const [phase, setPhase] = useState<'idle' | 'working' | 'approved' | 'denied' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  const who = me?.handle ?? me?.email ?? 'your account';
+  const who = me?.handle ?? me?.email ?? t('auth.yourAccount');
 
   const card = (children: React.ReactNode) => (
     <div className="flex min-h-screen items-center justify-center px-4">
@@ -31,11 +33,9 @@ export function Activate() {
           <AlertTriangle className="h-5 w-5" />
         </div>
         <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
-          Missing device code
+          {t('auth.deviceMissingTitle')}
         </h1>
-        <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-          Open the link your tool printed, or start the login again from your terminal.
-        </p>
+        <p className="mt-1.5 text-sm leading-relaxed text-ink-500">{t('auth.deviceMissingBody')}</p>
       </>,
     );
   }
@@ -46,10 +46,11 @@ export function Activate() {
         <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
           <Check className="h-5 w-5" />
         </div>
-        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">Approved</h1>
+        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
+          {t('auth.deviceApprovedTitle')}
+        </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-          Return to your terminal — the token has been delivered to the tool that started this. You
-          can close this tab.
+          {t('auth.deviceApprovedBody')}
         </p>
       </>,
     );
@@ -61,10 +62,10 @@ export function Activate() {
         <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-panel bg-ink-50 text-ink-500">
           <AlertTriangle className="h-5 w-5" />
         </div>
-        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">Request denied</h1>
-        <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-          No token was issued. If this was you, start the login again from your tool.
-        </p>
+        <h1 className="mt-4 text-[19px] font-bold tracking-tight text-ink-900">
+          {t('auth.deviceDeniedTitle')}
+        </h1>
+        <p className="mt-1.5 text-sm leading-relaxed text-ink-500">{t('auth.deviceDeniedBody')}</p>
       </>,
     );
   }
@@ -76,7 +77,7 @@ export function Activate() {
       .approveDevice(userCode)
       .then(() => setPhase('approved'))
       .catch((e) => {
-        setError(e instanceof Error ? e.message : 'Approval failed');
+        setError(e instanceof Error ? e.message : t('auth.approvalFailed'));
         setPhase('error');
       });
   };
@@ -88,7 +89,7 @@ export function Activate() {
       .denyDevice(userCode)
       .then(() => setPhase('denied'))
       .catch((e) => {
-        setError(e instanceof Error ? e.message : 'Could not deny');
+        setError(e instanceof Error ? e.message : t('auth.couldNotDeny'));
         setPhase('error');
       });
   };
@@ -101,15 +102,15 @@ export function Activate() {
         <KeyRound className="h-5 w-5" />
       </div>
       <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-tide-600">
-        Device authorization
+        {t('auth.deviceAuthLabel')}
       </div>
       <h1 className="mt-1 text-[19px] font-bold tracking-tight text-ink-900">
-        Approve this sign-in?
+        {t('auth.deviceApproveTitle')}
       </h1>
       <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
-        A tool is requesting an API token for{' '}
-        <span className="font-semibold text-ink-700">{who}</span>. Only approve if the code below
-        matches what your tool is showing.
+        {t('auth.deviceRequestBefore')}
+        <span className="font-semibold text-ink-700">{who}</span>
+        {t('auth.deviceRequestAfter')}
       </p>
 
       <div className="mt-4 rounded-field border border-ink-200 bg-ink-50 px-3 py-2.5 text-center font-mono text-lg font-semibold tracking-[0.3em] text-ink-800">
@@ -128,7 +129,7 @@ export function Activate() {
           onClick={approve}
         >
           {working && <Loader2 className="h-4 w-4 animate-spin" />}
-          Approve
+          {t('auth.approve')}
         </button>
         <button
           type="button"
@@ -136,14 +137,11 @@ export function Activate() {
           disabled={working}
           onClick={deny}
         >
-          Deny
+          {t('auth.deny')}
         </button>
       </div>
 
-      <p className="mt-3 text-xs leading-relaxed text-ink-400">
-        The token is delivered straight to the tool that started this — it is never shown here or
-        pasted into a chat.
-      </p>
+      <p className="mt-3 text-xs leading-relaxed text-ink-400">{t('auth.deviceTokenNote')}</p>
     </>,
   );
 }

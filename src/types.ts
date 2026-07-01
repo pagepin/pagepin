@@ -6,6 +6,7 @@ import type { Storage } from './storage/index.js';
 import type { Mailer } from './mail/index.js';
 import type { RateLimiter } from './ratelimit.js';
 import type { SessionClaims } from './auth/sessions.js';
+import type { Locale } from './i18n/index.js';
 
 export interface AppDeps {
   config: Config;
@@ -22,5 +23,7 @@ export type AppEnv = {
     user: UserRow;
     authVia: 'cookie' | 'token';
     sessionClaims?: SessionClaims;
+    /** 请求 locale,由 makeLocaleMiddleware 解析后注入(见 i18n/locale.ts)。 */
+    locale: Locale;
   };
 };

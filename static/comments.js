@@ -29,16 +29,140 @@
     slug: script.dataset.slug,
     path: script.dataset.path,
     version: script.dataset.version,
+    lang: script.dataset.lang,
   };
   if (!CFG.handle || !CFG.slug || !CFG.path) return;
+
+  /* ---------------- i18n（en 默认；data-lang 或 navigator.language 选 zh） ---------------- */
+  const LANG = CFG.lang === 'zh' ? 'zh'
+    : CFG.lang === 'en' ? 'en'
+    : ((navigator.language || '').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+  const MSG = {
+    en: {
+      'kind.copy': 'Copy',
+      'kind.style': 'Style',
+      'kind.question': 'Question',
+      'kind.bug': 'Bug',
+      'time.justNow': 'just now',
+      'time.minAgo': '{n}m ago',
+      'time.hoursAgo': '{n}h ago',
+      'time.daysAgo': '{n}d ago',
+      'brand.review': 'Review',
+      'action.hideDrawer': 'Hide drawer (\\)',
+      'action.notePage': 'Note on the whole page',
+      'action.copyLink': 'Copy link',
+      'action.resolveNext': 'Resolve & next (r)',
+      'action.resolve': 'Resolve (r)',
+      'action.delete': 'Delete',
+      'action.deleteConfirm': 'Delete?',
+      'meta.openTotal': '{open} open · {total} total',
+      'meta.noComments': 'No comments yet',
+      'filter.open': 'Open {open}',
+      'filter.all': 'All',
+      'btn.clickElement': 'Click an element…',
+      'btn.comment': 'Comment',
+      'btn.reopen': 'Reopen',
+      'btn.reply': 'Reply',
+      'btn.cancel': 'Cancel',
+      'empty.noOpen': 'No open threads. Switch to All to see resolved ones.',
+      'empty.none': 'No comments yet.\nClick Comment then an element — or drag on an image to box a region.',
+      'hint.move': 'move',
+      'hint.comment': 'comment',
+      'hint.resolve': 'resolve',
+      'hint.hide': 'hide',
+      'hint.enterReply': 'Enter to reply',
+      'hint.aim': 'Click an element to comment · drag on an image to box a region · Esc to exit',
+      'hint.narrow': 'Narrow window — drawer tucked away so the page stays full-width',
+      'aria.openDrawer': 'Open review drawer',
+      'aria.openDrawerUnresolved': 'Open review drawer ({open} unresolved)',
+      'aria.openDrawerResolved': 'Open review drawer (all resolved)',
+      'banner.resolved': 'Resolved',
+      'chip.done': 'done',
+      'card.anchorLost': '⚠ Anchor lost — was on {selector}',
+      'placeholder.addNote': 'Add a note…',
+      'placeholder.reply': 'Reply…',
+      'placeholder.pageNote': 'Say something about the whole page…',
+      'placeholder.elementNote': 'What needs changing here?',
+      'draft.newComment': 'New comment',
+      'toast.resolved': 'Resolved',
+      'toast.reopened': 'Reopened',
+      'toast.failed': 'Failed',
+      'toast.deleteFailed': 'Delete failed',
+      'toast.unsent': 'Unsent comment — post it, or press Esc to discard',
+      'toast.pageRecorded': 'Whole-page note recorded',
+      'toast.linkCopied': 'Link copied',
+      'toast.loadFailed': 'Failed to load comments: {error}',
+    },
+    zh: {
+      'kind.copy': '文案',
+      'kind.style': '样式',
+      'kind.question': '疑问',
+      'kind.bug': '缺陷',
+      'time.justNow': '刚刚',
+      'time.minAgo': '{n} 分钟前',
+      'time.hoursAgo': '{n} 小时前',
+      'time.daysAgo': '{n} 天前',
+      'brand.review': '评审',
+      'action.hideDrawer': '隐藏抽屉 (\\)',
+      'action.notePage': '对整个页面留言',
+      'action.copyLink': '复制链接',
+      'action.resolveNext': '解决并前进 (r)',
+      'action.resolve': '解决 (r)',
+      'action.delete': '删除',
+      'action.deleteConfirm': '确认删除？',
+      'meta.openTotal': '{open} 条未解决 · 共 {total} 条',
+      'meta.noComments': '暂无评论',
+      'filter.open': '未解决 {open}',
+      'filter.all': '全部',
+      'btn.clickElement': '点击一个元素…',
+      'btn.comment': '评论',
+      'btn.reopen': '重新打开',
+      'btn.reply': '回复',
+      'btn.cancel': '取消',
+      'empty.noOpen': '没有未解决的线程。切换到「全部」查看已解决的。',
+      'empty.none': '暂无评论。\n点「评论」再点一个元素 —— 或在图片上拖拽框选一块区域。',
+      'hint.move': '移动',
+      'hint.comment': '评论',
+      'hint.resolve': '解决',
+      'hint.hide': '隐藏',
+      'hint.enterReply': '回车发送回复',
+      'hint.aim': '点击一个元素来评论 · 在图片上拖拽框选区域 · 按 Esc 退出',
+      'hint.narrow': '窗口较窄 —— 抽屉已收起，让页面保持满宽',
+      'aria.openDrawer': '打开评审抽屉',
+      'aria.openDrawerUnresolved': '打开评审抽屉（{open} 条未解决）',
+      'aria.openDrawerResolved': '打开评审抽屉（全部已解决）',
+      'banner.resolved': '已解决',
+      'chip.done': '已解决',
+      'card.anchorLost': '⚠ 锚点丢失 —— 原本位于 {selector}',
+      'placeholder.addNote': '添加备注…',
+      'placeholder.reply': '回复…',
+      'placeholder.pageNote': '说点关于整个页面的想法…',
+      'placeholder.elementNote': '这里需要改什么？',
+      'draft.newComment': '新建评论',
+      'toast.resolved': '已解决',
+      'toast.reopened': '已重新打开',
+      'toast.failed': '操作失败',
+      'toast.deleteFailed': '删除失败',
+      'toast.unsent': '评论未发送 —— 发送它，或按 Esc 放弃',
+      'toast.pageRecorded': '整页留言已记录',
+      'toast.linkCopied': '链接已复制',
+      'toast.loadFailed': '加载评论失败：{error}',
+    },
+  };
+  // 命名为 tr 而非 t：本文件大量用 t 作线程参数（threadCard(t,…)/copyThreadLink(t)/const t = byId 等），
+  // 若译函数也叫 t 会被这些局部 t 遮蔽，调用时把线程对象当函数调 → 运行期崩。
+  function tr(key, vars) {
+    var s = (MSG[LANG] && MSG[LANG][key]) || MSG.en[key] || key;
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m; }) : s;
+  }
 
   const PAGE_SELECTOR = '@page';
   // 四种 kind = 评审色彩地图（agent 从 JSON 读 kind 路由修复）
   const KIND = {
-    copy: { label: 'Copy', color: '#2f6fb0', tint: '#e8f0f9', ink: '#1f4f86' },
-    style: { label: 'Style', color: '#c07a16', tint: '#faf0db', ink: '#8a560b' },
-    question: { label: 'Question', color: '#7c4bc0', tint: '#f0eafb', ink: '#5b3596' },
-    bug: { label: 'Bug', color: '#c2361b', tint: '#fbe7e3', ink: '#94260f' },
+    copy: { label: tr('kind.copy'), color: '#2f6fb0', tint: '#e8f0f9', ink: '#1f4f86' },
+    style: { label: tr('kind.style'), color: '#c07a16', tint: '#faf0db', ink: '#8a560b' },
+    question: { label: tr('kind.question'), color: '#7c4bc0', tint: '#f0eafb', ink: '#5b3596' },
+    bug: { label: tr('kind.bug'), color: '#c2361b', tint: '#fbe7e3', ink: '#94260f' },
   };
   const KIND_KEYS = ['copy', 'style', 'question', 'bug'];
   const NO_KIND = '#3a424b';
@@ -133,10 +257,10 @@
   const initialOf = (name) => (name || '?').trim().slice(0, 1).toUpperCase();
   function fmtTime(iso) {
     const d = new Date(iso), diff = (Date.now() - d.getTime()) / 1000;
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-    if (diff < 86400 * 14) return Math.floor(diff / 86400) + 'd ago';
+    if (diff < 60) return tr('time.justNow');
+    if (diff < 3600) return tr('time.minAgo', { n: Math.floor(diff / 60) });
+    if (diff < 86400) return tr('time.hoursAgo', { n: Math.floor(diff / 3600) });
+    if (diff < 86400 * 14) return tr('time.daysAgo', { n: Math.floor(diff / 86400) });
     const p = (x) => String(x).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
@@ -318,7 +442,7 @@
     tabEl = el('button', 'pp-anno-tab');
     tabEl.dataset.ppAnno = '1';
     tabEl.dataset.ppRole = 'tab';
-    tabEl.setAttribute('aria-label', 'Open review drawer');
+    tabEl.setAttribute('aria-label', tr('aria.openDrawer'));
     tabEl.onclick = () => setRail(true);
     tabEl.style.display = state.railOpen ? 'none' : '';
 
@@ -466,19 +590,19 @@
     const hd = el('div', 'pp-anno-dwh');
     const top = el('div', 'pp-anno-dwh-top');
     const brand = el('span', 'pp-anno-brand');
-    const bi = el('i'); bi.appendChild(svg(ICON.cmd, 12)); brand.append(bi, document.createTextNode('Review'));
-    const collapse = el('button', 'pp-anno-dwh-collapse'); collapse.dataset.ppAct = 'collapse'; collapse.title = 'Hide drawer (\\)';
+    const bi = el('i'); bi.appendChild(svg(ICON.cmd, 12)); brand.append(bi, document.createTextNode(tr('brand.review')));
+    const collapse = el('button', 'pp-anno-dwh-collapse'); collapse.dataset.ppAct = 'collapse'; collapse.title = tr('action.hideDrawer');
     collapse.appendChild(svg(ICON.arrowR, 14));
     collapse.onclick = () => setRail(false, { refocusTab: true });
     top.append(brand, collapse);
 
     const meta = el('div', 'pp-anno-dwh-meta');
-    meta.appendChild(el('span', 'pp-anno-dwh-sub', total ? `${open} open · ${total} total` : 'No comments yet'));
+    meta.appendChild(el('span', 'pp-anno-dwh-sub', total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments')));
     const seg = el('div', 'pp-anno-seg');
-    const segOpen = el('button', state.filter === 'open' ? 'pp-anno-on' : null, `Open ${open}`);
+    const segOpen = el('button', state.filter === 'open' ? 'pp-anno-on' : null, tr('filter.open', { open }));
     segOpen.dataset.ppAct = 'filter'; segOpen.dataset.ppFilter = 'open';
     segOpen.onclick = () => setFilter('open');
-    const segAll = el('button', state.filter === 'all' ? 'pp-anno-on' : null, 'All');
+    const segAll = el('button', state.filter === 'all' ? 'pp-anno-on' : null, tr('filter.all'));
     segAll.dataset.ppFilter = 'all';
     segAll.onclick = () => setFilter('all');
     seg.append(segOpen, segAll);
@@ -488,9 +612,9 @@
     const cbtn = el('button', 'pp-anno-cbtn' + (state.mode === 'comment' ? ' pp-anno-on' : ''));
     cbtn.dataset.ppAct = 'comment';
     cbtn.appendChild(svg(ICON.plus, 14));
-    cbtn.appendChild(document.createTextNode(state.mode === 'comment' ? 'Click an element…' : 'Comment'));
+    cbtn.appendChild(document.createTextNode(state.mode === 'comment' ? tr('btn.clickElement') : tr('btn.comment')));
     cbtn.onclick = () => (state.mode === 'comment' ? exitComment() : enterComment());
-    const wbtn = el('button', 'pp-anno-wbtn'); wbtn.dataset.ppAct = 'whole'; wbtn.title = 'Note on the whole page';
+    const wbtn = el('button', 'pp-anno-wbtn'); wbtn.dataset.ppAct = 'whole'; wbtn.title = tr('action.notePage');
     wbtn.appendChild(svg(ICON.msg, 13));
     wbtn.onclick = openDraftForPage;
     acts.append(cbtn, wbtn);
@@ -504,8 +628,8 @@
     const ordered = orderedVisible();
     if (!ordered.length && !state.draft) {
       listEl.appendChild(el('div', 'pp-anno-empty', total
-        ? 'No open threads. Switch to All to see resolved ones.'
-        : 'No comments yet.\nClick Comment then an element — or drag on an image to box a region.'));
+        ? tr('empty.noOpen')
+        : tr('empty.none')));
     } else {
       for (const { t, a } of ordered) listEl.appendChild(threadCard(t, a));
     }
@@ -515,7 +639,7 @@
     // hint strip
     const hint = el('div', 'pp-anno-dwhint');
     const kp = (k, label) => { const w = el('span', 'pp-anno-kpair'); w.appendChild(el('kbd', null, k)); w.appendChild(document.createTextNode(label)); return w; };
-    hint.append(kp('j/k', 'move'), kp('c', 'comment'), kp('r', 'resolve'), kp('\\', 'hide'));
+    hint.append(kp('j/k', tr('hint.move')), kp('c', tr('hint.comment')), kp('r', tr('hint.resolve')), kp('\\', tr('hint.hide')));
     drawer.appendChild(hint);
 
     if (state.focusedId) requestAnimationFrame(() => scrollFocusedCardIntoView());
@@ -526,16 +650,16 @@
     if (drawer && state.railOpen) {
       const sub = drawer.querySelector('.pp-anno-dwh-sub');
       const total = state.threads.length;
-      if (sub) sub.textContent = total ? `${open} open · ${total} total` : 'No comments yet';
+      if (sub) sub.textContent = total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments');
       const so = drawer.querySelector('[data-pp-filter="open"]');
-      if (so) so.textContent = `Open ${open}`;
+      if (so) so.textContent = tr('filter.open', { open });
     }
     if (tabEl && !state.railOpen) {
       tabEl.textContent = '';
       tabEl.appendChild(svg(ICON.cmd, 14));
-      tabEl.appendChild(document.createTextNode('Review'));
+      tabEl.appendChild(document.createTextNode(tr('brand.review')));
       if (open > 0) { const d = el('span', 'pp-anno-tabdot', String(open)); d.dataset.ppRole = 'tab-count'; tabEl.appendChild(d); }
-      tabEl.setAttribute('aria-label', open > 0 ? `Open review drawer (${open} unresolved)` : 'Open review drawer (all resolved)');
+      tabEl.setAttribute('aria-label', open > 0 ? tr('aria.openDrawerUnresolved', { open }) : tr('aria.openDrawerResolved'));
     }
   }
 
@@ -577,7 +701,7 @@
     if (t.resolved && focused) {
       const banner = el('div', 'pp-anno-resolved-banner');
       banner.appendChild(svg(ICON.checks, 12));
-      banner.appendChild(document.createTextNode('Resolved'));
+      banner.appendChild(document.createTextNode(tr('banner.resolved')));
       card.appendChild(banner);
     }
 
@@ -595,7 +719,7 @@
     if (focused) line1.appendChild(el('span', 'pp-anno-when', '· ' + fmtTime(t.comments[0].created_at)));
     const line2 = el('div'); line2.style.display = 'flex'; line2.style.alignItems = 'center'; line2.style.gap = '6px';
     if (stale) {
-      const sb = el('span', 'pp-anno-stalebadge', `⚠ Anchor lost — was on ${t.selector}`);
+      const sb = el('span', 'pp-anno-stalebadge', tr('card.anchorLost', { selector: t.selector }));
       line2.appendChild(sb);
     } else {
       const an = el('span', 'pp-anno-anchor', isPage(t) ? '@page' : `${t._num != null ? t._num + ' · ' : ''}#${anchorLabel(t.selector)}`);
@@ -608,7 +732,7 @@
     // 右侧动作
     const cardActs = el('div', 'pp-anno-card-acts');
     if (focused) {
-      const linkBtn = el('button', 'pp-anno-iconbtn'); linkBtn.dataset.ppRole = 'copy-link'; linkBtn.title = 'Copy link';
+      const linkBtn = el('button', 'pp-anno-iconbtn'); linkBtn.dataset.ppRole = 'copy-link'; linkBtn.title = tr('action.copyLink');
       linkBtn.appendChild(svg(ICON.link, 14));
       linkBtn.onclick = (e) => { e.stopPropagation(); copyThreadLink(t); };
       cardActs.appendChild(linkBtn);
@@ -616,20 +740,20 @@
       if (mine) cardActs.appendChild(deleteBtn(t));
       if (t.resolved) {
         const reopen = el('button', 'pp-anno-ghost'); reopen.dataset.ppRole = 'reopen';
-        reopen.style.padding = '4px 9px'; reopen.appendChild(document.createTextNode('Reopen'));
+        reopen.style.padding = '4px 9px'; reopen.appendChild(document.createTextNode(tr('btn.reopen')));
         reopen.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
         cardActs.appendChild(reopen);
       } else {
-        const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = 'Resolve & next (r)';
+        const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = tr('action.resolveNext');
         rb.appendChild(svg(ICON.check, 14));
         rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
         cardActs.appendChild(rb);
       }
     } else if (t.resolved) {
-      const done = el('span', 'pp-anno-donechip'); done.appendChild(svg(ICON.check, 10)); done.appendChild(document.createTextNode('done'));
+      const done = el('span', 'pp-anno-donechip'); done.appendChild(svg(ICON.check, 10)); done.appendChild(document.createTextNode(tr('chip.done')));
       cardActs.appendChild(done);
     } else {
-      const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = 'Resolve (r)';
+      const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = tr('action.resolve');
       rb.appendChild(svg(ICON.check, 14));
       rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
       cardActs.appendChild(rb);
@@ -658,13 +782,13 @@
   }
 
   function deleteBtn(t) {
-    const delBtn = el('button', 'pp-anno-iconbtn pp-anno-del'); delBtn.dataset.ppRole = 'delete'; delBtn.title = 'Delete';
+    const delBtn = el('button', 'pp-anno-iconbtn pp-anno-del'); delBtn.dataset.ppRole = 'delete'; delBtn.title = tr('action.delete');
     delBtn.appendChild(svg(ICON.x, 14));
     let disarm = null;
     delBtn.onclick = async (e) => {
       e.stopPropagation();
       if (!delBtn.dataset.armed) {
-        delBtn.dataset.armed = '1'; delBtn.textContent = 'Delete?'; delBtn.classList.add('pp-anno-armed');
+        delBtn.dataset.armed = '1'; delBtn.textContent = tr('action.deleteConfirm'); delBtn.classList.add('pp-anno-armed');
         disarm = setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = ''; delBtn.appendChild(svg(ICON.x, 14)); delBtn.classList.remove('pp-anno-armed'); }, 3000);
         return;
       }
@@ -679,7 +803,7 @@
         state.focusedId = ov.length ? ov[Math.min(wasIdx, ov.length - 1)].t.id : null;
         renderDrawer();
         render();
-      } catch (err) { toast(err.message || 'Delete failed'); }
+      } catch (err) { toast(err.message || tr('toast.deleteFailed')); }
     };
     return delBtn;
   }
@@ -737,7 +861,7 @@
           render(); // pin/accent 重新上色
           const railEl = wrap.closest('.pp-anno-card')?.querySelector('.pp-anno-card-rail');
           if (railEl) railEl.style.background = kindColor(t);
-        } catch (err) { toast(err.message || 'Failed'); }
+        } catch (err) { toast(err.message || tr('toast.failed')); }
         kindInFlight = false;
       };
       wrap.appendChild(b);
@@ -751,18 +875,18 @@
     const ta = document.createElement('textarea');
     ta.rows = 2;
     ta.dataset.ppRole = 'reply';
-    ta.placeholder = t.resolved ? 'Add a note…' : 'Reply…';
+    ta.placeholder = t.resolved ? tr('placeholder.addNote') : tr('placeholder.reply');
     const stash = state.replyStash.get(t.id);
     if (stash) ta.value = stash;
     ta.oninput = () => { if (ta.value.trim()) state.replyStash.set(t.id, ta.value); else state.replyStash.delete(t.id); syncFlags(); };
     ta.onfocus = syncFlags;
     ta.onblur = syncFlags;
     const row = el('div', 'pp-anno-ta-row');
-    row.appendChild(el('span', 'pp-anno-hint', 'Enter to reply'));
+    row.appendChild(el('span', 'pp-anno-hint', tr('hint.enterReply')));
     const send = el('button', 'pp-anno-send');
     send.dataset.ppRole = 'send';
     send.appendChild(svg(ICON.enter, 13));
-    send.appendChild(document.createTextNode('Reply'));
+    send.appendChild(document.createTextNode(tr('btn.reply')));
     row.appendChild(send);
     taWrap.append(ta, row);
     wrap.appendChild(taWrap);
@@ -779,7 +903,7 @@
         render();
         // 重新聚焦回复框
         requestAnimationFrame(() => { const f = drawer.querySelector('[data-pp-focused="1"] [data-pp-role="reply"]'); if (f) f.focus(); });
-      } catch (err) { toast(err.message || 'Failed'); send.disabled = false; }
+      } catch (err) { toast(err.message || tr('toast.failed')); send.disabled = false; }
     };
     send.onclick = (e) => { e.stopPropagation(); void submit(); };
     ta.onkeydown = (e) => {
@@ -837,17 +961,17 @@
     try {
       const updated = await patchThread(id, { resolved: !wasResolved });
       Object.assign(t, updated);
-    } catch (e) { toast(e.message || 'Failed'); resolveInFlight = false; return; }
+    } catch (e) { toast(e.message || tr('toast.failed')); resolveInFlight = false; return; }
     resolveInFlight = false;
     // resolve-and-advance：刚解决且 filter=open（卡会消失）→ 焦点前移到下一张
     if (!wasResolved && state.filter === 'open') {
       const ov2 = orderedVisible();
       const nxt = ov2[Math.min(i, ov2.length - 1)];
       state.focusedId = nxt ? nxt.t.id : null;
-      toast('Resolved');
+      toast(tr('toast.resolved'));
       if (state.focusedId) { focusThread(state.focusedId, true); return; }
     } else {
-      toast(wasResolved ? 'Reopened' : 'Resolved');
+      toast(wasResolved ? tr('toast.reopened') : tr('toast.resolved'));
     }
     renderDrawer();
     render();
@@ -860,7 +984,7 @@
     if (!card) return;
     card.classList.remove('pp-anno-shaking'); void card.offsetWidth; card.classList.add('pp-anno-shaking');
     const ta = card.querySelector('textarea'); if (ta) ta.focus();
-    toast('Unsent comment — post it, or press Esc to discard');
+    toast(tr('toast.unsent'));
   }
   function clearDraft(discard) {
     if (!state.draft) return true;
@@ -910,14 +1034,14 @@
     const bd = el('div', 'pp-anno-card-bd');
     const hd = el('div', 'pp-anno-card-hd');
     hd.appendChild(avatar(state.viewer ? state.viewer.name : '?', 20));
-    hd.appendChild(el('span', 'pp-anno-who', d.selector === PAGE_SELECTOR ? 'Note on the whole page' : 'New comment'));
+    hd.appendChild(el('span', 'pp-anno-who', d.selector === PAGE_SELECTOR ? tr('action.notePage') : tr('draft.newComment')));
     if (d.selector !== PAGE_SELECTOR) hd.appendChild(el('span', 'pp-anno-seltag', d.selector));
     bd.appendChild(hd);
 
     const taWrap = el('div', 'pp-anno-ta-wrap'); taWrap.style.marginTop = '8px';
     const ta = document.createElement('textarea');
     ta.rows = 2;
-    ta.placeholder = d.selector === PAGE_SELECTOR ? 'Say something about the whole page…' : 'What needs changing here?';
+    ta.placeholder = d.selector === PAGE_SELECTOR ? tr('placeholder.pageNote') : tr('placeholder.elementNote');
     ta.value = d.text;
     ta.oninput = () => { d.text = ta.value; syncFlags(); };
     taWrap.appendChild(ta);
@@ -944,11 +1068,11 @@
     bd.appendChild(chips);
 
     const row = el('div', 'pp-anno-ta-row');
-    const cancel = el('button', 'pp-anno-ghost', 'Cancel');
+    const cancel = el('button', 'pp-anno-ghost', tr('btn.cancel'));
     cancel.onclick = (e) => { e.stopPropagation(); clearDraft(true); renderDrawer(); render(); syncFlags(); };
     row.appendChild(cancel);
     const send = el('button', 'pp-anno-send'); send.dataset.ppRole = 'send';
-    send.appendChild(document.createTextNode('Comment'));
+    send.appendChild(document.createTextNode(tr('btn.comment')));
     send.appendChild(svg(ICON.arrowR, 13));
     row.appendChild(send);
     bd.appendChild(row);
@@ -973,9 +1097,9 @@
         render();
         const pin = layer.querySelector(`.pp-anno-pin[data-tid="${created.id}"]`);
         if (pin) pin.classList.add('pp-anno-pulse');
-        else if (d.selector === PAGE_SELECTOR) toast('Whole-page note recorded');
+        else if (d.selector === PAGE_SELECTOR) toast(tr('toast.pageRecorded'));
         syncFlags();
-      } catch (err) { toast(err.message || 'Failed'); send.disabled = false; }
+      } catch (err) { toast(err.message || tr('toast.failed')); send.disabled = false; }
     };
     send.onclick = (e) => { e.stopPropagation(); void submit(); };
     ta.onkeydown = (e) => {
@@ -997,7 +1121,7 @@
       try { document.execCommand('copy'); } catch (e2) { /* ignore */ }
       tmp.remove();
     }
-    toast('Link copied');
+    toast(tr('toast.linkCopied'));
   }
 
   /* ---------------- 评论模式 + 宿主级标记 ---------------- */
@@ -1020,7 +1144,7 @@
     // aim hint
     let h = root && root.querySelector('.pp-anno-aimhint');
     if (state.mode === 'comment' && !state.draft) {
-      if (!h) { h = el('div', 'pp-anno-aimhint', 'Click an element to comment · drag on an image to box a region · Esc to exit'); h.dataset.ppAnno = '1'; root.appendChild(h); }
+      if (!h) { h = el('div', 'pp-anno-aimhint', tr('hint.aim')); h.dataset.ppAnno = '1'; root.appendChild(h); }
     } else if (h) h.remove();
   }
 
@@ -1134,7 +1258,7 @@
     if (b === 'narrow' && state.railOpen) {
       setRail(false, { auto: true, discard: false, force: true });
       state.autoHint = true;
-      const h = el('div', 'pp-anno-aimhint', 'Narrow window — drawer tucked away so the page stays full-width');
+      const h = el('div', 'pp-anno-aimhint', tr('hint.narrow'));
       h.dataset.ppAnno = '1'; h.dataset.ppRole = 'auto-hint';
       h.style.top = '50%'; h.style.left = 'auto'; h.style.right = '54px'; h.style.transform = 'translateY(-50%)';
       root.appendChild(h);
@@ -1231,7 +1355,7 @@
       state.threads = data.threads;
     } catch (e) {
       if (e.status === 403) { root.remove(); return; } // 站点已关评论
-      toast('Failed to load comments: ' + (e.message || ''));
+      toast(tr('toast.loadFailed', { error: e.message || '' }));
     }
     renderDrawer();
     render();

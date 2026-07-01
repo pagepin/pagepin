@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { deploySite } from '../api';
+import { useT } from '../i18n';
 import { slugify } from '../lib/collect';
 import type { Collection } from '../lib/collect';
 import { copyText, formatBytes, formatRelative } from '../lib/format';
@@ -39,6 +40,7 @@ export function DropZone({
   /** 成功态进入/退出时通知父级，便于隐藏/恢复并排的 agent 副卡 */
   onDeployedChange?: (deployed: boolean) => void;
 }) {
+  const t = useT();
   const me = useStore((s) => s.me);
   const sites = useStore((s) => s.sites);
   const deployTarget = useStore((s) => s.deployTarget);
@@ -79,23 +81,26 @@ export function DropZone({
     const { limits } = me;
     const out: string[] = [];
     const files = collection.files;
-    if (!SLUG_RE.test(slug))
-      out.push(
-        'Slug must be 1–64 chars: lowercase letters, digits, or hyphens, starting with a letter or digit',
-      );
+    if (!SLUG_RE.test(slug)) out.push(t('deploy.problem.slug'));
     if (files.length > limits.max_files)
-      out.push(`${files.length} files exceeds the limit of ${limits.max_files}`);
+      out.push(t('deploy.problem.tooManyFiles', { count: files.length, max: limits.max_files }));
     const maxFileBytes = limits.max_file_mb * 1024 * 1024;
     const tooBig = files.filter((f) => f.file.size > maxFileBytes);
     if (tooBig.length > 0)
       out.push(
-        `${tooBig.length} file(s) exceed the ${limits.max_file_mb} MB per-file limit (e.g. ${tooBig[0].relPath})`,
+        t('deploy.problem.fileTooBig', {
+          count: tooBig.length,
+          mb: limits.max_file_mb,
+          example: tooBig[0].relPath,
+        }),
       );
     const total = files.reduce((s, f) => s + f.file.size, 0);
     if (total > limits.max_site_mb * 1024 * 1024)
-      out.push(`Total size ${formatBytes(total)} exceeds the ${limits.max_site_mb} MB site limit`);
+      out.push(
+        t('deploy.problem.siteTooBig', { size: formatBytes(total), mb: limits.max_site_mb }),
+      );
     return out;
-  }, [collection, slug, me]);
+  }, [collection, slug, me, t]);
 
   async function deploy() {
     if (!collection || problems.length > 0 || uploading) return;
@@ -110,10 +115,10 @@ export function DropZone({
       setDeployTarget(null);
       setTitle('');
       onClear();
-      toast('Deployed');
+      toast(t('deploy.toast.deployed'));
       void refreshSites();
     } catch (err) {
-      toastError(err, 'Deploy failed');
+      toastError(err, t('deploy.toast.deployFailed'));
       setPercent(null);
     }
   }
@@ -148,17 +153,19 @@ export function DropZone({
           <div>
             <div className="flex items-center gap-2 text-tide-700">
               <Rocket className="h-5 w-5" />
-              <span className="text-lg font-semibold">Deployed</span>
+              <span className="text-lg font-semibold">{t('deploy.done.title')}</span>
             </div>
             <p className="mt-1 text-sm text-ink-500">
-              {done.file_count} {done.file_count === 1 ? 'file' : 'files'} ·{' '}
-              {formatBytes(done.total_bytes)}
+              {t(done.file_count === 1 ? 'deploy.fileCount.one' : 'deploy.fileCount.other', {
+                count: done.file_count,
+              })}{' '}
+              · {formatBytes(done.total_bytes)}
               {done.title ? ` · ${done.title}` : ''}
             </p>
           </div>
           <button type="button" className="btn-ghost shrink-0" onClick={deployAnother}>
             <RotateCcw className="h-4 w-4" />
-            Deploy another
+            {t('deploy.done.deployAnother')}
           </button>
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-2 rounded-panel border border-ink-200 bg-white px-4 py-3">
@@ -176,16 +183,18 @@ export function DropZone({
             className="btn-ghost !px-3 !py-1.5"
             onClick={() => {
               void copyText(done.url).then((ok) =>
-                ok ? toast('Link copied') : toast('Copy failed', 'err'),
+                ok
+                  ? toast(t('deploy.toast.linkCopied'))
+                  : toast(t('deploy.toast.copyFailed'), 'err'),
               );
             }}
           >
             <Copy className="h-3.5 w-3.5" />
-            Copy link
+            {t('deploy.done.copyLink')}
           </button>
           <a className="btn-primary !px-3 !py-1.5" href={done.url} target="_blank" rel="noreferrer">
             <ExternalLink className="h-3.5 w-3.5" />
-            Open
+            {t('deploy.done.open')}
           </a>
         </div>
       </section>
@@ -207,11 +216,16 @@ export function DropZone({
             </span>
             <div>
               <div className="font-semibold text-ink-800">
-                {collection.rootName ? `Folder “${collection.rootName}”` : 'Files to deploy'}
+                {collection.rootName
+                  ? t('deploy.pending.folder', { name: collection.rootName })
+                  : t('deploy.pending.filesToDeploy')}
               </div>
               <div className="text-sm text-ink-500">
-                {collection.files.length} {collection.files.length === 1 ? 'file' : 'files'} ·{' '}
-                {formatBytes(totalBytes)}
+                {t(
+                  collection.files.length === 1 ? 'deploy.fileCount.one' : 'deploy.fileCount.other',
+                  { count: collection.files.length },
+                )}{' '}
+                · {formatBytes(totalBytes)}
               </div>
             </div>
           </div>
@@ -220,7 +234,7 @@ export function DropZone({
               type="button"
               className="rounded-field p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
               onClick={clearSelection}
-              title="Clear"
+              title={t('deploy.clear')}
             >
               <X className="h-4 w-4" />
             </button>
@@ -236,31 +250,36 @@ export function DropZone({
             </div>
           ))}
           {collection.files.length > 50 && (
-            <div className="text-ink-400">… and {collection.files.length - 50} more files</div>
+            <div className="text-ink-400">
+              {t('deploy.moreFiles', { count: collection.files.length - 50 })}
+            </div>
           )}
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-ink-500">
-              Slug (link path){slugLocked && ' · locked to update target'}
+              {t('deploy.field.slug')}
+              {slugLocked && t('deploy.field.slugLocked')}
             </span>
             <input
               className="input font-mono disabled:bg-ink-100 disabled:text-ink-500"
               value={slug}
               disabled={slugLocked || uploading}
               onChange={(e) => setSlug(e.target.value.toLowerCase())}
-              placeholder="my-page"
+              placeholder={t('deploy.field.slugPlaceholder')}
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-ink-500">Title (optional)</span>
+            <span className="mb-1 block text-xs font-semibold text-ink-500">
+              {t('deploy.field.title')}
+            </span>
             <input
               className="input"
               value={title}
               disabled={uploading}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Name this page"
+              placeholder={t('deploy.field.titlePlaceholder')}
             />
           </label>
         </div>
@@ -269,13 +288,18 @@ export function DropZone({
 
         {!uploading && existing && !slugLocked && (
           <div className="mt-3 rounded-field border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
-            Slug “{slug}” is already taken by your site <b>“{existing.title || existing.slug}”</b> —
-            this deploy will publish as a <b>new version</b> of it (currently {existing.file_count}{' '}
-            files, updated {formatRelative(existing.updated_at)};{' '}
-            {me && me.limits.keep_versions > 0
-              ? `only the last ${me.limits.keep_versions} versions are kept`
-              : 'older versions stay rollback-able'}
-            ). To create a separate site, change the slug.
+            {t('deploy.existing.prefix', { slug })}
+            <b>“{existing.title || existing.slug}”</b>
+            {t('deploy.existing.mid')}
+            <b>{t('deploy.existing.newVersion')}</b>
+            {t('deploy.existing.detail', {
+              count: existing.file_count,
+              when: formatRelative(existing.updated_at),
+              versions:
+                me && me.limits.keep_versions > 0
+                  ? t('deploy.existing.keepLimited', { keep: me.limits.keep_versions })
+                  : t('deploy.existing.keepAll'),
+            })}
           </div>
         )}
 
@@ -292,7 +316,7 @@ export function DropZone({
             <div className="flex items-center justify-between text-sm text-ink-600">
               <span className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin text-tide-600" />
-                Uploading…
+                {t('deploy.uploading')}
               </span>
               <span className="font-mono">{percent}%</span>
             </div>
@@ -311,7 +335,9 @@ export function DropZone({
             onClick={() => void deploy()}
           >
             <Rocket className="h-4 w-4" />
-            {existing ? `Update site ${slug}` : `Deploy to ${slug || '…'}`}
+            {existing
+              ? t('deploy.updateSite', { slug })
+              : t('deploy.deployTo', { slug: slug || '…' })}
           </button>
         )}
       </section>
@@ -328,9 +354,9 @@ export function DropZone({
       <span className="flex h-11 w-11 items-center justify-center rounded-panel bg-tide-600 text-white shadow-[0_10px_22px_-10px_rgba(15,124,114,0.7)]">
         <UploadCloud className="h-5 w-5" />
       </span>
-      <span className="text-[15px] font-bold text-ink-800">Drop files or a folder here</span>
+      <span className="text-[15px] font-bold text-ink-800">{t('deploy.idle.title')}</span>
       <span className="max-w-[370px] text-xs leading-relaxed text-ink-500">
-        HTML · Markdown · images · build output — or{' '}
+        {t('deploy.idle.hintPrefix')}
         <span
           role="button"
           tabIndex={0}
@@ -346,14 +372,14 @@ export function DropZone({
             }
           }}
         >
-          choose a whole folder
+          {t('deploy.idle.chooseFolder')}
         </span>
-        . Each deploy is an atomic, versioned release.
+        {t('deploy.idle.hintSuffix')}
       </span>
       {slugLocked ? (
         <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
           <Lock className="h-3 w-3" />
-          Updating site {deployTarget}
+          {t('deploy.idle.updating', { target: deployTarget ?? '' })}
           <span
             role="button"
             tabIndex={0}
@@ -374,8 +400,10 @@ export function DropZone({
         </span>
       ) : me ? (
         <span className="text-[11px] text-ink-400">
-          Single file ≤ {me.limits.max_file_mb} MB · up to {me.limits.max_files} files · drop
-          anywhere on this page
+          {t('deploy.idle.limits', {
+            fileMb: me.limits.max_file_mb,
+            maxFiles: me.limits.max_files,
+          })}
         </span>
       ) : null}
     </button>

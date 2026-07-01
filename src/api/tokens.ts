@@ -10,6 +10,7 @@ import { Hono } from 'hono';
 import type { Context, MiddlewareHandler } from 'hono';
 
 import { apiTokens, type ApiTokenRow, type Db, type UserRow } from '../db/index.js';
+import { jsonError } from '../i18n/locale.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso, uuid } from '../util.js';
 
@@ -115,13 +116,10 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   app.post('/api/tokens', mw.cookieMutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const name = (await readNameField(c)).trim();
-    if (name.length < 1 || name.length > 64) return c.json({ detail: '名称需 1-64 字符' }, 422);
+    if (name.length < 1 || name.length > 64) return jsonError(c, 422, 'token.name.length');
     const row = (await db.select({ n: count() }).from(apiTokens).where(activeOf(user.id)))[0];
     if ((row?.n ?? 0) >= MAX_TOKENS_PER_USER) {
-      return c.json(
-        { detail: `token 数量已达上限（${MAX_TOKENS_PER_USER}），请先吊销不用的` },
-        409,
-      );
+      return jsonError(c, 409, 'token.limit.reached', { max: MAX_TOKENS_PER_USER });
     }
 
     const rec = await mintToken(db, user.id, name);
@@ -133,7 +131,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   app.post('/api/tokens/:tokenId/rotate', mw.cookieMutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const rec = await ownedToken(c.req.param('tokenId'), user);
-    if (!rec) return c.json({ detail: 'token 不存在' }, 404);
+    if (!rec) return jsonError(c, 404, 'token.notFound');
     const raw = newRawToken();
     const tokenHash = await sha256Hex(raw);
     const prefix = raw.slice(0, 15);
@@ -148,7 +146,7 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   app.delete('/api/tokens/:tokenId', mw.cookieMutatingUser, async (c) => {
     const user = c.get('user');
     const rec = await ownedToken(c.req.param('tokenId'), user);
-    if (!rec) return c.json({ detail: 'token 不存在' }, 404);
+    if (!rec) return jsonError(c, 404, 'token.notFound');
     await db.update(apiTokens).set({ revokedAt: nowIso() }).where(eq(apiTokens.id, rec.id));
     console.log(`token revoked handle=${user.handle} prefix=${rec.prefix}`);
     return c.json({ ok: true });

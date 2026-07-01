@@ -20,6 +20,7 @@ import {
   type SiteRow,
   type UserRow,
 } from '../db/index.js';
+import { jsonError } from '../i18n/locale.js';
 import { purgeSiteStorage } from '../storage/index.js';
 import {
   effectiveRegistrationMode,
@@ -155,14 +156,14 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
   // ---- 改用户(设/撤管理员、禁用/恢复) ----
   r.patch('/users/:id', mw.adminMutatingUser, async (c) => {
     const body = await readJson<{ is_admin?: unknown; disabled?: unknown }>(c);
-    if (body === null) return c.json({ detail: '请求体格式错误' }, 422);
+    if (body === null) return jsonError(c, 422, 'request.body.malformed');
     const hasAdmin = body.is_admin !== undefined;
     const hasDisabled = body.disabled !== undefined;
-    if (!hasAdmin && !hasDisabled) return c.json({ detail: '需提供 is_admin 或 disabled' }, 422);
+    if (!hasAdmin && !hasDisabled) return jsonError(c, 422, 'admin.user.patchEmpty');
     if (hasAdmin && typeof body.is_admin !== 'boolean')
-      return c.json({ detail: 'is_admin 必须是布尔值' }, 422);
+      return jsonError(c, 422, 'admin.user.isAdmin.notBool');
     if (hasDisabled && typeof body.disabled !== 'boolean')
-      return c.json({ detail: 'disabled 必须是布尔值' }, 422);
+      return jsonError(c, 422, 'admin.user.disabled.notBool');
 
     const actor = c.get('user');
     const target = (
@@ -171,14 +172,14 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
         .from(users)
         .where(eq(users.id, c.req.param('id')))
     )[0];
-    if (!target) return c.json({ detail: '用户不存在' }, 404);
+    if (!target) return jsonError(c, 404, 'admin.user.notFound');
 
     const resAdmin = hasAdmin ? (body.is_admin as boolean) : target.isAdmin;
     const resDisabled = hasDisabled ? (body.disabled as boolean) : target.disabled;
 
     // 不能禁用自己(会立刻杀掉自己的会话)
     if (target.id === actor.id && resDisabled && !target.disabled) {
-      return c.json({ detail: '不能禁用自己' }, 400);
+      return jsonError(c, 400, 'admin.user.disableSelf');
     }
     // 不能让实例失去最后一名「启用的管理员」
     const wasEnabledAdmin = target.isAdmin && !target.disabled;
@@ -191,7 +192,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
             .from(users)
             .where(and(eq(users.isAdmin, true), eq(users.disabled, false)))
         )[0]?.n ?? 0;
-      if (enabled <= 1) return c.json({ detail: '至少保留一名启用的管理员' }, 400);
+      if (enabled <= 1) return jsonError(c, 400, 'admin.user.lastAdmin');
     }
 
     await db
@@ -212,7 +213,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
         .from(users)
         .where(eq(users.id, c.req.param('id')))
     )[0];
-    if (!target) return c.json({ detail: '用户不存在' }, 404);
+    if (!target) return jsonError(c, 404, 'admin.user.notFound');
     await db.update(users).set({ emailVerified: true }).where(eq(users.id, target.id));
     await db
       .update(identities)
@@ -255,7 +256,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
         .from(sites)
         .where(and(eq(sites.id, id), isNull(sites.deletedAt)))
     )[0];
-    if (!fresh) return c.json({ detail: '站点不存在' }, 404);
+    if (!fresh) return jsonError(c, 404, 'site.notFound');
     const owner = (await db.select().from(users).where(eq(users.id, fresh.ownerId)))[0];
     return c.json(adminSiteOut(cfg, fresh, owner ?? undefined));
   }
@@ -267,7 +268,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
         ? body.reason.trim().slice(0, 500)
         : null;
     const site = await liveSite(c.req.param('id'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
     const now = nowIso();
     // 已下架则保留首次下架时间,仅更新原因(幂等)
     await db
@@ -282,7 +283,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
 
   r.post('/sites/:id/unsuspend', mw.adminMutatingUser, async (c) => {
     const site = await liveSite(c.req.param('id'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
     await db
       .update(sites)
       .set({ suspendedAt: null, suspendedReason: null, updatedAt: nowIso() })
@@ -295,7 +296,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
 
   r.delete('/sites/:id', mw.adminMutatingUser, async (c) => {
     const site = await liveSite(c.req.param('id'));
-    if (!site) return c.json({ detail: '站点不存在' }, 404);
+    if (!site) return jsonError(c, 404, 'site.notFound');
     const now = nowIso();
     // 软删:slug 改墓碑名让出活命名空间(同 sites.ts 软删),普通唯一索引下同名 slug 可复用。
     await db
@@ -326,11 +327,11 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
 
   r.patch('/settings', mw.adminMutatingUser, async (c) => {
     if (registrationModeLocked(deps)) {
-      return c.json({ detail: '注册模式由环境变量锁定，不能在此修改' }, 400);
+      return jsonError(c, 400, 'admin.settings.registrationLocked');
     }
     const body = await readJson<{ registration_mode?: unknown }>(c);
     if (!body || !isRegistrationMode(body.registration_mode)) {
-      return c.json({ detail: 'registration_mode 只能是 open/invite/closed' }, 422);
+      return jsonError(c, 422, 'admin.settings.registrationMode.invalid');
     }
     await setRegistrationMode(deps, body.registration_mode);
     return c.json({ registration_mode: body.registration_mode });
@@ -349,16 +350,16 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
 
   r.post('/invites', mw.adminMutatingUser, async (c) => {
     if (cfg.authMode !== 'password') {
-      return c.json({ detail: '邀请注册仅在密码登录模式可用' }, 400);
+      return jsonError(c, 400, 'admin.invite.passwordModeOnly');
     }
     if ((await effectiveRegistrationMode(deps)) === 'closed') {
-      return c.json({ detail: '注册已关闭，无法签发邀请（先把注册模式切到 invite 或 open）' }, 400);
+      return jsonError(c, 400, 'admin.invite.registrationClosed');
     }
     const body = await readJson<{ email?: unknown; is_admin?: unknown }>(c);
     let email: string | null = null;
     if (body && typeof body.email === 'string' && body.email.trim()) {
       email = body.email.trim();
-      if (!validEmail(email)) return c.json({ detail: '邮箱格式不正确' }, 422);
+      if (!validEmail(email)) return jsonError(c, 422, 'admin.invite.email.invalid');
     }
     const isAdmin = body?.is_admin === true;
     const raw = newInviteToken();
@@ -393,7 +394,7 @@ export function makeAdminRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
         .from(invites)
         .where(eq(invites.id, c.req.param('id')))
     )[0];
-    if (!inv || inv.acceptedAt !== null) return c.json({ detail: '邀请不存在' }, 404);
+    if (!inv || inv.acceptedAt !== null) return jsonError(c, 404, 'admin.invite.notFound');
     await db.delete(invites).where(eq(invites.id, inv.id));
     return c.json({ ok: true });
   });

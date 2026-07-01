@@ -15,19 +15,14 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { api } from '../api';
+import { useT } from '../i18n';
 import { confirmDanger } from './ConfirmDialog';
 import { copyText, formatBytes, formatRelative, formatRemaining } from '../lib/format';
 import { useStore } from '../store';
 import type { SiteOut, VersionsOut } from '../types';
 import { toast, toastError } from './Toast';
 
-const SHARE_OPTIONS: { label: string; hours: number }[] = [
-  { label: '1 hour', hours: 1 },
-  { label: '6 hours', hours: 6 },
-  { label: '24 hours', hours: 24 },
-  { label: '3 days', hours: 72 },
-  { label: '7 days', hours: 168 },
-];
+const SHARE_HOURS = [1, 6, 24, 72, 168] as const;
 
 type Panel = 'share' | 'settings' | 'versions' | null;
 
@@ -42,10 +37,16 @@ export function SiteCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const t = useT();
   const me = useStore((s) => s.me);
   const upsertSite = useStore((s) => s.upsertSite);
   const removeSite = useStore((s) => s.removeSite);
   const setDeployTarget = useStore((s) => s.setDeployTarget);
+
+  // 文件计数 / 公开窗口时长 的文案助手
+  const fileCount = (n: number) =>
+    t(n === 1 ? 'sites.fileCount.one' : 'sites.fileCount.other', { n });
+  const windowLabel = (hours: number) => t(`sites.window.${hours}h`);
 
   const [panel, setPanel] = useState<Panel>(null);
   const [busy, setBusy] = useState(false);
@@ -60,8 +61,8 @@ export function SiteCard({
   const isExpired = site.visibility === 'public' && remaining === null;
 
   const shareOptions = me
-    ? SHARE_OPTIONS.filter((o) => o.hours <= me.limits.public_max_hours)
-    : SHARE_OPTIONS;
+    ? SHARE_HOURS.filter((h) => h <= me.limits.public_max_hours)
+    : SHARE_HOURS;
 
   function togglePanel(p: Panel) {
     setPanel((cur) => (cur === p ? null : p));
@@ -70,7 +71,7 @@ export function SiteCard({
       void api
         .versions(site.slug)
         .then(setVersions)
-        .catch((e) => toastError(e, 'Failed to load versions'))
+        .catch((e) => toastError(e, t('sites.toast.loadVersionsFailed')))
         .finally(() => setVersionsLoading(false));
     }
   }
@@ -93,11 +94,7 @@ export function SiteCard({
       (updated) => {
         upsertSite(updated);
         setPanel(null);
-        toast(
-          `Public now — auto-reverts to private in ${
-            SHARE_OPTIONS.find((o) => o.hours === hours)?.label ?? hours + 'h'
-          }`,
-        );
+        toast(t('sites.toast.public', { window: windowLabel(hours) }));
       },
     );
   }
@@ -108,7 +105,7 @@ export function SiteCard({
       (updated) => {
         upsertSite(updated);
         setPanel(null);
-        toast('Switched to private');
+        toast(t('sites.toast.private'));
       },
     );
   }
@@ -118,7 +115,7 @@ export function SiteCard({
       () => api.patchSite(site.slug, { spa_fallback: next }),
       (updated) => {
         upsertSite(updated);
-        toast(next ? 'SPA fallback enabled' : 'SPA fallback disabled');
+        toast(next ? t('sites.toast.spaOn') : t('sites.toast.spaOff'));
       },
     );
   }
@@ -128,7 +125,7 @@ export function SiteCard({
       () => api.patchSite(site.slug, { comments_enabled: next }),
       (updated) => {
         upsertSite(updated);
-        toast(next ? 'Page comments enabled' : 'Page comments disabled');
+        toast(next ? t('sites.toast.commentsOn') : t('sites.toast.commentsOff'));
       },
     );
   }
@@ -139,23 +136,23 @@ export function SiteCard({
       (updated) => {
         upsertSite(updated);
         setPanel(null);
-        toast('Rolled back to the selected version');
+        toast(t('sites.toast.rolledBack'));
       },
     );
   }
 
   async function remove() {
     const ok = await confirmDanger({
-      title: `Delete site “${site.slug}”?`,
-      body: 'The site and all its version history will be deleted, the link stops working immediately, and this cannot be undone.',
-      confirmText: 'Delete site',
+      title: t('sites.delete.title', { slug: site.slug }),
+      body: t('sites.delete.body'),
+      confirmText: t('sites.delete.confirm'),
     });
     if (!ok) return;
     void run(
       () => api.deleteSite(site.slug),
       () => {
         removeSite(site.slug);
-        toast('Site deleted');
+        toast(t('sites.toast.deleted'));
       },
     );
   }
@@ -185,7 +182,10 @@ export function SiteCard({
         </span>
         {site.unresolved_comments > 0 && (
           <span
-            title={`${site.unresolved_comments} unresolved comments`}
+            title={t(
+              site.unresolved_comments === 1 ? 'sites.unresolved.one' : 'sites.unresolved.other',
+              { n: site.unresolved_comments },
+            )}
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200"
           >
             <MessageSquare className="h-3 w-3" />
@@ -194,29 +194,29 @@ export function SiteCard({
         )}
         {site.suspended ? (
           <span
-            title="Disabled by an administrator — returns 451 to everyone"
+            title={t('sites.badge.disabledTitle')}
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600 ring-1 ring-red-200"
           >
             <Ban className="h-3 w-3" />
-            Disabled
+            {t('sites.badge.disabled')}
           </span>
         ) : isPublicLive ? (
           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-tide-50 px-2.5 py-1 text-xs font-semibold text-tide-700 ring-1 ring-tide-200">
             <Globe2 className="h-3 w-3" />
-            Public · {remaining}
+            {t('sites.badge.public', { remaining: remaining ?? '' })}
           </span>
         ) : isExpired ? (
           <span
-            title="Public window ended — reverted to private"
+            title={t('sites.badge.revertedTitle')}
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink-100 px-2.5 py-1 text-xs font-semibold text-ink-500 ring-1 ring-ink-200"
           >
             <Clock className="h-3 w-3" />
-            Reverted
+            {t('sites.badge.reverted')}
           </span>
         ) : (
           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink-100 px-2.5 py-1 text-xs font-semibold text-ink-600 ring-1 ring-ink-200">
             <Lock className="h-3 w-3" />
-            Private
+            {t('sites.badge.private')}
           </span>
         )}
         <span className="hidden shrink-0 text-xs text-ink-400 md:inline">
@@ -224,12 +224,12 @@ export function SiteCard({
         </span>
         <button
           type="button"
-          title="Copy link"
+          title={t('sites.copyLink')}
           className="shrink-0 rounded-chip p-1.5 text-ink-300 hover:bg-ink-100 hover:text-tide-700"
           onClick={(e) => {
             e.stopPropagation();
             void copyText(site.url).then((ok) =>
-              ok ? toast('Link copied') : toast('Copy failed', 'err'),
+              ok ? toast(t('sites.toast.linkCopied')) : toast(t('sites.toast.copyFailed'), 'err'),
             );
           }}
         >
@@ -239,7 +239,7 @@ export function SiteCard({
           href={site.url}
           target="_blank"
           rel="noreferrer"
-          title="Open"
+          title={t('sites.open')}
           className="shrink-0 rounded-chip p-1.5 text-ink-300 hover:bg-ink-100 hover:text-tide-700"
           onClick={(e) => e.stopPropagation()}
         >
@@ -251,13 +251,13 @@ export function SiteCard({
         <div className="px-5 pb-5">
           {site.suspended && (
             <div className="mb-3 rounded-panel border border-red-200 bg-red-50 p-3 text-xs">
-              <div className="font-semibold text-red-700">
-                This page has been disabled by an administrator.
-              </div>
+              <div className="font-semibold text-red-700">{t('sites.suspended.title')}</div>
               <div className="mt-0.5 leading-relaxed text-red-600">
-                It returns 451 to all visitors and redeploys won&rsquo;t restore it.
-                {site.suspended_reason ? ` Reason: ${site.suspended_reason}.` : ''} Contact the
-                instance operator to appeal.
+                {t('sites.suspended.body')}
+                {site.suspended_reason
+                  ? t('sites.suspended.reason', { reason: site.suspended_reason })
+                  : ''}
+                {t('sites.suspended.appeal')}
               </div>
             </div>
           )}
@@ -274,11 +274,13 @@ export function SiteCard({
             </a>
             <button
               type="button"
-              title="Copy link"
+              title={t('sites.copyLink')}
               className="rounded-chip p-1 text-ink-400 hover:bg-white hover:text-tide-700"
               onClick={() => {
                 void copyText(site.url).then((ok) =>
-                  ok ? toast('Link copied') : toast('Copy failed', 'err'),
+                  ok
+                    ? toast(t('sites.toast.linkCopied'))
+                    : toast(t('sites.toast.copyFailed'), 'err'),
                 );
               }}
             >
@@ -288,7 +290,7 @@ export function SiteCard({
               href={site.url}
               target="_blank"
               rel="noreferrer"
-              title="Open"
+              title={t('sites.open')}
               className="rounded-chip p-1 text-ink-400 hover:bg-white hover:text-tide-700"
             >
               <ExternalLink className="h-3.5 w-3.5" />
@@ -296,8 +298,8 @@ export function SiteCard({
           </div>
 
           <div className="mt-3 text-xs text-ink-400">
-            {site.file_count} {site.file_count === 1 ? 'file' : 'files'} ·{' '}
-            {formatBytes(site.total_bytes)} · updated {formatRelative(site.updated_at)}
+            {fileCount(site.file_count)} · {formatBytes(site.total_bytes)} ·{' '}
+            {t('sites.updatedAt', { time: formatRelative(site.updated_at) })}
           </div>
 
           {/* 操作行 */}
@@ -309,7 +311,7 @@ export function SiteCard({
               disabled={busy}
             >
               <Globe2 className="h-3.5 w-3.5" />
-              {isPublicLive ? 'Extend / make private' : 'Make public'}
+              {isPublicLive ? t('sites.action.makePrivate') : t('sites.action.makePublic')}
             </button>
             <button
               type="button"
@@ -318,7 +320,7 @@ export function SiteCard({
               disabled={busy}
             >
               <UploadCloud className="h-3.5 w-3.5" />
-              Redeploy
+              {t('sites.action.redeploy')}
             </button>
             <button
               type="button"
@@ -327,7 +329,7 @@ export function SiteCard({
               disabled={busy}
             >
               <History className="h-3.5 w-3.5" />
-              Versions · {site.version_count}
+              {t('sites.action.versions', { count: site.version_count })}
             </button>
             <button
               type="button"
@@ -336,14 +338,14 @@ export function SiteCard({
               disabled={busy}
             >
               <Settings2 className="h-3.5 w-3.5" />
-              Settings
+              {t('sites.action.settings')}
             </button>
             <button
               type="button"
               className="btn-danger-ghost ml-auto !px-2.5 !py-1.5 !text-xs"
               onClick={() => void remove()}
               disabled={busy}
-              title="Delete site"
+              title={t('sites.action.deleteTitle')}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -353,20 +355,18 @@ export function SiteCard({
           {panel === 'share' && (
             <div className="mt-3 rounded-panel border border-ink-200 bg-ink-50 p-3 animate-fade-up">
               <div className="text-xs font-semibold text-ink-500">
-                {isPublicLive
-                  ? 'Extend window (restarts the clock)'
-                  : 'Public for (auto-reverts to private)'}
+                {isPublicLive ? t('sites.share.extend') : t('sites.share.publicFor')}
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {shareOptions.map((o) => (
+                {shareOptions.map((h) => (
                   <button
-                    key={o.hours}
+                    key={h}
                     type="button"
                     className="rounded-field border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 hover:border-tide-300 hover:text-tide-700 disabled:opacity-50"
                     disabled={busy}
-                    onClick={() => makePublic(o.hours)}
+                    onClick={() => makePublic(h)}
                   >
-                    {o.label}
+                    {windowLabel(h)}
                   </button>
                 ))}
               </div>
@@ -377,7 +377,7 @@ export function SiteCard({
                   disabled={busy}
                   onClick={makePrivate}
                 >
-                  Revert to private now
+                  {t('sites.share.revertNow')}
                 </button>
               )}
             </div>
@@ -388,10 +388,11 @@ export function SiteCard({
             <div className="mt-3 space-y-3 rounded-panel border border-ink-200 bg-ink-50 p-3 animate-fade-up">
               <label className="flex cursor-pointer items-start justify-between gap-3">
                 <span>
-                  <span className="block text-xs font-semibold text-ink-700">Page comments</span>
+                  <span className="block text-xs font-semibold text-ink-700">
+                    {t('sites.settings.comments')}
+                  </span>
                   <span className="mt-0.5 block text-xs leading-relaxed text-ink-400">
-                    Signed-in visitors can pin review comments on the page (hidden from anonymous
-                    public visitors).
+                    {t('sites.settings.commentsDesc')}
                   </span>
                 </span>
                 <button
@@ -413,9 +414,11 @@ export function SiteCard({
               </label>
               <label className="flex cursor-pointer items-start justify-between gap-3">
                 <span>
-                  <span className="block text-xs font-semibold text-ink-700">SPA fallback</span>
+                  <span className="block text-xs font-semibold text-ink-700">
+                    {t('sites.settings.spa')}
+                  </span>
                   <span className="mt-0.5 block text-xs leading-relaxed text-ink-400">
-                    Single-page app routing: serve index.html on a 404.
+                    {t('sites.settings.spaDesc')}
                   </span>
                 </span>
                 <button
@@ -443,7 +446,7 @@ export function SiteCard({
             <div className="mt-3 rounded-panel border border-ink-200 bg-ink-50 p-3 animate-fade-up">
               {versionsLoading ? (
                 <div className="flex items-center gap-2 py-2 text-xs text-ink-400">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading versions…
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('sites.versions.loading')}
                 </div>
               ) : versions && versions.versions.length > 0 ? (
                 <ul className="space-y-1.5">
@@ -459,13 +462,12 @@ export function SiteCard({
                             {formatRelative(v.created_at)}
                           </span>
                           <span className="ml-2 text-ink-400">
-                            {v.file_count} {v.file_count === 1 ? 'file' : 'files'} ·{' '}
-                            {formatBytes(v.total_bytes)}
+                            {fileCount(v.file_count)} · {formatBytes(v.total_bytes)}
                           </span>
                         </div>
                         {isCurrent ? (
                           <span className="shrink-0 rounded-full bg-tide-50 px-2 py-0.5 text-[11px] font-semibold text-tide-700 ring-1 ring-tide-200">
-                            Current
+                            {t('sites.versions.current')}
                           </span>
                         ) : (
                           <button
@@ -474,7 +476,7 @@ export function SiteCard({
                             disabled={busy}
                             onClick={() => rollback(v.id)}
                           >
-                            Roll back
+                            {t('sites.versions.rollback')}
                           </button>
                         )}
                       </li>
@@ -482,12 +484,11 @@ export function SiteCard({
                   })}
                 </ul>
               ) : (
-                <div className="py-2 text-xs text-ink-400">No previous versions</div>
+                <div className="py-2 text-xs text-ink-400">{t('sites.versions.empty')}</div>
               )}
               {me && me.limits.keep_versions > 0 && versions && versions.versions.length > 0 && (
                 <p className="mt-2 px-0.5 text-[11px] leading-relaxed text-ink-400">
-                  Keeping the last {me.limits.keep_versions} versions — older ones are removed
-                  automatically (files deleted, not recoverable).
+                  {t('sites.versions.keepNote', { n: me.limits.keep_versions })}
                 </p>
               )}
             </div>

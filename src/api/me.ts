@@ -11,6 +11,7 @@ import { contentBase } from '../config.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { sendVerificationEmail } from '../mail/verify.js';
 import { canPublish } from './deps.js';
+import { jsonError, localeOf } from '../i18n/locale.js';
 import { setLoginCookies } from '../auth/sessions.js';
 import {
   apiTokens,
@@ -87,16 +88,16 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   app.patch('/api/me', mw.cookieMutatingUser, async (c) => {
     const raw = (await c.req.json().catch(() => null)) as unknown;
     if (typeof raw !== 'object' || raw === null || !('display_name' in raw)) {
-      return c.json({ detail: '请求体需包含 display_name 字段' }, 422);
+      return jsonError(c, 422, 'me.body.fieldRequired', { field: 'display_name' });
     }
     const v = (raw as Record<string, unknown>).display_name;
     let displayName: string | null;
     if (v === null) displayName = null;
     else if (typeof v === 'string') {
       const t = v.trim();
-      if (t.length > 64) return c.json({ detail: '显示名最多 64 字' }, 422);
+      if (t.length > 64) return jsonError(c, 422, 'me.displayName.tooLong');
       displayName = t || null;
-    } else return c.json({ detail: 'display_name 必须是字符串或 null' }, 422);
+    } else return jsonError(c, 422, 'me.displayName.invalidType');
     const user = c.get('user');
     await db.update(users).set({ displayName }).where(eq(users.id, user.id));
     return c.json({ display_name: displayName });
@@ -106,21 +107,21 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
    * 仅 Cookie 会话可调(PAT 不能改密);会话是无状态 JWT,改密后旧会话仍有效至 TTL 过期。 */
   app.post('/api/me/password', mw.cookieMutatingUser, async (c) => {
     if (cfg.authMode !== 'password') {
-      return c.json({ detail: '当前实例未启用密码登录，无法改密' }, 400);
+      return jsonError(c, 400, 'me.password.disabled');
     }
     const user = c.get('user');
     if (!user.passwordHash) {
-      return c.json({ detail: '当前账号没有本地密码（OIDC 登录）' }, 400);
+      return jsonError(c, 400, 'me.password.noLocal');
     }
     const raw = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
     const cur = raw?.current_password;
     const next = raw?.new_password;
     if (typeof cur !== 'string' || typeof next !== 'string') {
-      return c.json({ detail: '需 current_password 与 new_password' }, 422);
+      return jsonError(c, 422, 'me.password.fieldsRequired');
     }
-    if (next.length < 8) return c.json({ detail: '新密码至少 8 位' }, 422);
+    if (next.length < 8) return jsonError(c, 422, 'me.password.tooShort');
     if (!(await verifyPassword(cur, user.passwordHash))) {
-      return c.json({ detail: '当前密码不正确' }, 403);
+      return jsonError(c, 403, 'me.password.currentIncorrect');
     }
     const passwordHash = await hashPassword(next);
     await db.update(users).set({ passwordHash }).where(eq(users.id, user.id));
@@ -153,11 +154,12 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     const id = c.req.param('id');
     const rows = await db.select().from(identities).where(eq(identities.userId, user.id));
     const target = rows.find((r) => r.id === id);
-    if (!target) return c.json({ detail: '身份不存在' }, 404);
+    if (!target) return jsonError(c, 404, 'me.identity.notFound');
     // 邮箱密码是账号的主登录方式 / 锚点,不可断开(断了没有重设入口,且 canonicalEmail 挂在它上)。
     // 只允许断开社交方式。
-    if (target.provider === 'password') return c.json({ detail: '邮箱登录方式不可断开' }, 409);
-    if (rows.length <= 1) return c.json({ detail: '不能断开最后一个登录方式' }, 409);
+    if (target.provider === 'password')
+      return jsonError(c, 409, 'me.identity.passwordUndetachable');
+    if (rows.length <= 1) return jsonError(c, 409, 'me.identity.lastOne');
     await db.delete(identities).where(and(eq(identities.id, id), eq(identities.userId, user.id)));
     const newEpoch = user.sessionEpoch + 1; // 使其它会话(旧 epo)失效
     await db.update(users).set({ sessionEpoch: newEpoch }).where(eq(users.id, user.id));
@@ -170,17 +172,17 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   app.post('/api/me/verify-email/resend', mw.cookieMutatingUser, async (c) => {
     const user = c.get('user');
     if (cfg.authMode !== 'password' || !user.passwordHash) {
-      return c.json({ detail: '当前账号无需邮箱验证' }, 400);
+      return jsonError(c, 400, 'me.verifyEmail.notRequired');
     }
     if (user.emailVerified || !deps.mailer || !user.canonicalEmail) {
       return c.json({ ok: true, sent: false });
     }
     try {
-      const sent = await sendVerificationEmail(deps, user);
+      const sent = await sendVerificationEmail(deps, user, localeOf(c));
       return c.json({ ok: true, sent });
     } catch (e) {
       console.error('重发验证邮件失败:', e);
-      return c.json({ detail: '发送失败，请稍后再试' }, 502);
+      return jsonError(c, 502, 'me.verifyEmail.sendFailed');
     }
   });
 
@@ -244,17 +246,14 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
   /** 首登确认 handle。一经确认不可改。须先验证邮箱(handle 是不可变 URL 前缀,不让未验证账号占)。 */
   app.post('/api/me/handle', mw.mutatingUser, mw.requireVerified, async (c) => {
     const raw = await readHandleField(c);
-    if (raw === null) return c.json({ detail: '请求体需包含 handle 字段' }, 422);
+    if (raw === null) return jsonError(c, 422, 'me.body.fieldRequired', { field: 'handle' });
     const user = c.get('user');
-    if (user.handle !== null) return c.json({ detail: 'handle 已设置，不可修改' }, 409);
+    if (user.handle !== null) return jsonError(c, 409, 'me.handle.alreadySet');
     const handle = raw.trim().toLowerCase();
     if (!validHandle(handle)) {
-      return c.json(
-        { detail: 'handle 需 2-32 位小写字母/数字/中划线、字母开头，且不在保留字内' },
-        422,
-      );
+      return jsonError(c, 422, 'me.handle.invalid');
     }
-    if (await handleTaken(handle)) return c.json({ detail: 'handle 已被占用' }, 409);
+    if (await handleTaken(handle)) return jsonError(c, 409, 'me.handle.taken');
     await db.update(users).set({ handle }).where(eq(users.id, user.id));
     // handle 进了会话 JWT —— 旧 Cookie 里 hdl=null,刷新一份
     await setLoginCookies(c, cfg, 'session', user.id, handle, user.sessionEpoch);
@@ -263,11 +262,12 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
 
   app.post('/api/me/handle/check', mw.currentUser, async (c) => {
     const raw = await readHandleField(c);
-    if (raw === null) return c.json({ detail: '请求体需包含 handle 字段' }, 422);
+    if (raw === null) return jsonError(c, 422, 'me.body.fieldRequired', { field: 'handle' });
     const handle = raw.trim().toLowerCase();
-    if (!validHandle(handle)) return c.json({ ok: false, reason: '格式不合法或为保留字' });
+    // reason 返回稳定 code(invalid / taken),由前端按 locale 翻译 —— 不在内部 API 里塞本地化字符串。
+    if (!validHandle(handle)) return c.json({ ok: false, reason: 'invalid' });
     const taken = await handleTaken(handle);
-    return c.json({ ok: !taken, reason: taken ? '已被占用' : null });
+    return c.json({ ok: !taken, reason: taken ? 'taken' : null });
   });
 
   /** 从邮箱/姓名推一个默认 handle 建议(可能为空,前端兜底让用户自己输)。 */

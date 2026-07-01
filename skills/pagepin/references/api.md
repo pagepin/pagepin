@@ -79,6 +79,10 @@ thread you can't judge, relay it to the user rather than resolving it yourself.
   7 days); anything beyond is hard-clamped.
 - `401` invalid or revoked token · `404` site not found · `409` set a handle in
   the console first · `413` size limit exceeded · `422` invalid slug/path.
+- Error bodies are `{ "detail": "<message>", "code": "<stable.key>" }`. Branch on
+  the language-independent `code` (e.g. `auth.unauthenticated`, `site.quota.exceeded`,
+  `comment.text.empty`); `detail` is a human message localized per request. Set the
+  language with `?lang=en|zh`, a `pp_lang` cookie, or an `Accept-Language` header.
 - Deployed sites are **private by default** (viewing requires login) — don't
   assume the link is anonymously reachable; PATCH it public first to share
   externally.

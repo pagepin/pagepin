@@ -14,8 +14,18 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 import { extOf, relHref } from './autoindex.js';
-import { CLOCK_SVG, escapeHtml, FAVICON, FONTS, gateDoc, LOCK_SVG } from './brand-gate.js';
+import {
+  CLOCK_SVG,
+  escapeHtml,
+  FAVICON,
+  FONTS,
+  gateDoc,
+  GLOBE_SVG,
+  LOCK_SVG,
+} from './brand-gate.js';
 import { COMMENTS_JS, FAVICON_ICO_B64, MARKED_JS } from './generated/edge-assets.js';
+import { t, type Locale } from './i18n/index.js';
+import { jsonError, localeOf } from './i18n/locale.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
 import { currentVersion, isPubliclyVisible, sites, users } from './db/index.js';
@@ -65,13 +75,20 @@ function decodeB64(b64: string): Uint8Array<ArrayBuffer> {
 }
 const FAVICON_ICO = decodeB64(FAVICON_ICO_B64);
 
-function injectTag(handle: string, slug: string, rel: string, versionId: string): string {
+function injectTag(
+  handle: string,
+  slug: string,
+  rel: string,
+  versionId: string,
+  locale: Locale,
+): string {
   const attrs = (
     [
       ['handle', handle],
       ['slug', slug],
       ['path', rel],
       ['version', versionId],
+      ['lang', locale],
     ] as const
   )
     .map(([k, v]) => `data-${k}="${escapeHtml(v)}"`)
@@ -109,72 +126,88 @@ const MD_EXTS = new Set(['.md', '.markdown']);
 // ---- 访问门页(登录墙 / 已过期 / 404):品牌壳来自 brand-gate.ts,无评论层 ----
 
 /** 私有页登录墙:命名 slug + 站长 + 「Sign in to view」(→ /auth/login?next=)。 */
-function loginWallHtml(slug: string, ownerName: string, loginHref: string): string {
+function loginWallHtml(slug: string, ownerName: string, loginHref: string, locale: Locale): string {
   const initial = escapeHtml((ownerName.replace(/^@/, '').trim()[0] || 'P').toUpperCase());
+  const slugSpan = `<span class="mono teal">${escapeHtml(slug)}</span>`;
+  // ?lang 语言切换:相对 href 重载当前私有页(仍匿名 → 再次渲染登录墙,但已是另一语言);
+  // 中间件会据 ?lang 回写 pp_lang cookie,后续内容域页面随之切换。
+  const otherLocale: Locale = locale === 'zh' ? 'en' : 'zh';
+  const otherLabel = otherLocale === 'zh' ? '中文' : 'English';
+  const langLink = `<div class="pp-lang"><a href="?lang=${otherLocale}">${GLOBE_SVG} ${otherLabel}</a></div>`;
   return gateDoc(
-    'Private · pagepin',
-    `<div class="chip chip-teal">${LOCK_SVG}</div>
-<h1>This page is private</h1>
-<p class="body">Sign in to view <span class="mono teal">${escapeHtml(slug)}</span>.</p>
-<a class="btn btn-primary" href="${escapeHtml(loginHref)}">Sign in to view</a>
-<div class="row"><span class="avatar">${initial}</span>Shared by ${escapeHtml(ownerName)}</div>
-<div class="foot">Hosted on <span class="mono">pagepin</span></div>`,
+    t(locale, 'html.loginWall.title'),
+    `${langLink}<div class="chip chip-teal">${LOCK_SVG}</div>
+<h1>${t(locale, 'html.loginWall.heading')}</h1>
+<p class="body">${t(locale, 'html.loginWall.body', { slug: slugSpan })}</p>
+<a class="btn btn-primary" href="${escapeHtml(loginHref)}">${t(locale, 'html.loginWall.button')}</a>
+<div class="row"><span class="avatar">${initial}</span>${t(locale, 'html.loginWall.sharedBy', { name: escapeHtml(ownerName) })}</div>
+<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
+    locale,
   );
 }
 
 /** 公开窗口已过期:已回落私有,告诉访客何时关闭 + 站长,可登录(若有权限)。 */
-function linkExpiredHtml(ownerHandle: string, closedAgo: string, loginHref: string): string {
+function linkExpiredHtml(
+  ownerHandle: string,
+  closedAgo: string,
+  loginHref: string,
+  locale: Locale,
+): string {
+  const closedSpan = `<span style="color:#3a424b;font-weight:600">${escapeHtml(closedAgo)}</span>`;
   return gateDoc(
-    'Link expired · pagepin',
+    t(locale, 'html.expired.title'),
     `<div class="chip chip-amber">${CLOCK_SVG}</div>
-<h1>This link has expired</h1>
-<p class="body">This page was public for a limited time and has reverted to private. The share window closed <span style="color:#3a424b;font-weight:600">${escapeHtml(closedAgo)}</span>.</p>
-<a class="btn btn-ghost" href="${escapeHtml(loginHref)}">Sign in</a>
-<div class="row">Owner · <span class="mono" style="color:#8a929b">@${escapeHtml(ownerHandle)}</span></div>
-<div class="foot">Hosted on <span class="mono">pagepin</span></div>`,
+<h1>${t(locale, 'html.expired.heading')}</h1>
+<p class="body">${t(locale, 'html.expired.body', { closedAgo: closedSpan })}</p>
+<a class="btn btn-ghost" href="${escapeHtml(loginHref)}">${t(locale, 'html.expired.button')}</a>
+<div class="row">${t(locale, 'html.expired.owner')} · <span class="mono" style="color:#8a929b">@${escapeHtml(ownerHandle)}</span></div>
+<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
+    locale,
   );
 }
 
 /** 管理员下架(滥用处置):对所有访问者返回 451 Unavailable For Legal Reasons。
  * 中立措辞,不复述被举报内容;站长在控制台看到下架状态与原因。 */
-function takedownHtml(): string {
+function takedownHtml(locale: Locale): string {
   return gateDoc(
-    'Unavailable · pagepin',
+    t(locale, 'html.takedown.title'),
     `<div class="chip chip-amber">${LOCK_SVG}</div>
-<h1>This page has been disabled</h1>
-<p class="body">This page is no longer available. It was disabled by an administrator following a policy or abuse review. If you believe this is a mistake, contact the site owner or the instance operator.</p>
-<div class="foot">Hosted on <span class="mono">pagepin</span></div>`,
+<h1>${t(locale, 'html.takedown.heading')}</h1>
+<p class="body">${t(locale, 'html.takedown.body')}</p>
+<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
+    locale,
   );
 }
 
 /** 404:JetBrains-Mono 数字 + 可选「Go to site root →」。 */
-function notFoundHtml(siteRoot?: string): string {
+function notFoundHtml(locale: Locale, siteRoot?: string): string {
   return gateDoc(
-    '404 · pagepin',
+    t(locale, 'html.notFound.title'),
     `<div style="text-align:center">
 <div class="mono" style="font-size:40px;font-weight:600;letter-spacing:-.02em;color:#11161b">404</div>
-<div style="margin-top:4px;font-size:15px;font-weight:600;color:#3a424b">Page not found</div>
-<p class="body" style="max-width:230px;margin:6px auto 0">We couldn&rsquo;t find that page or file on this site.</p>
-${siteRoot ? `<a href="${escapeHtml(siteRoot)}" style="display:inline-block;margin-top:16px;font-size:13px;font-weight:600;color:#0f7c72;text-decoration:none">Go to site root &rarr;</a>` : ''}
+<div style="margin-top:4px;font-size:15px;font-weight:600;color:#3a424b">${t(locale, 'html.notFound.heading')}</div>
+<p class="body" style="max-width:230px;margin:6px auto 0">${t(locale, 'html.notFound.body')}</p>
+${siteRoot ? `<a href="${escapeHtml(siteRoot)}" style="display:inline-block;margin-top:16px;font-size:13px;font-weight:600;color:#0f7c72;text-decoration:none">${t(locale, 'html.notFound.siteRoot')} &rarr;</a>` : ''}
 </div>`,
+    locale,
   );
 }
 
 /** 过去时间的人话(站点过期判定:Date 在 Node 服务端,非沙箱)。 */
-function fmtAgo(iso: string, now: Date): string {
+function fmtAgo(iso: string, now: Date, locale: Locale): string {
   const diff = now.getTime() - new Date(iso).getTime();
   const min = 60_000,
     hour = 60 * min,
     day = 24 * hour;
   if (diff >= day) {
     const d = Math.floor(diff / day);
-    return `${d} day${d === 1 ? '' : 's'} ago`;
+    return t(locale, d === 1 ? 'html.ago.day.one' : 'html.ago.day.other', { n: d });
   }
   if (diff >= hour) {
     const h = Math.floor(diff / hour);
-    return `${h} hour${h === 1 ? '' : 's'} ago`;
+    return t(locale, h === 1 ? 'html.ago.hour.one' : 'html.ago.hour.other', { n: h });
   }
-  return 'just now';
+  return t(locale, 'html.ago.justNow');
 }
 
 function fmtBytes(n: number): string {
@@ -191,8 +224,9 @@ const mdShell = (
   contentJson: string,
   inject: string,
   sizeBytes: number,
+  locale: Locale,
 ) => `<!doctype html>
-<html lang="en">
+<html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${FAVICON}${FONTS}<title>${fname}</title>
 <style>
@@ -224,10 +258,10 @@ ${inject}</head>
 <body>
 <header class="pp-md-head">
   <span class="pp-md-ic">${FILE_ICON}</span>
-  <span><span class="pp-md-name">${fname}</span><span class="pp-md-sub">Markdown · ${fmtBytes(sizeBytes)}</span></span>
-  <a class="pp-md-raw" href="?raw=1">${CODE_ICON} View raw</a>
+  <span><span class="pp-md-name">${fname}</span><span class="pp-md-sub">${t(locale, 'viewer.md.meta', { size: fmtBytes(sizeBytes) })}</span></span>
+  <a class="pp-md-raw" href="?raw=1">${CODE_ICON} ${t(locale, 'viewer.md.viewRaw')}</a>
 </header>
-<main id="pp-md-content">Rendering…</main>
+<main id="pp-md-content">${t(locale, 'viewer.md.rendering')}</main>
 <script src="/_pagepin/marked.min.js"></script>
 <script>
 document.getElementById('pp-md-content').innerHTML =
@@ -255,20 +289,29 @@ const CHEV_R = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stro
 const X_18 = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
 const EXT_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
 
-const imgShell = (title: string, src: string, inject: string, view: ImgView | null): string => {
+const imgShell = (
+  title: string,
+  src: string,
+  inject: string,
+  view: ImgView | null,
+  locale: Locale,
+): string => {
   const pos = view
-    ? `<span id="pp-img-pos" class="pp-img-pos">${view.i + 1} / ${view.imgs.length}</span>`
+    ? `<span id="pp-img-pos" class="pp-img-pos">${t(locale, 'viewer.img.position', {
+        i: view.i + 1,
+        n: view.imgs.length,
+      })}</span>`
     : '';
   const arrow = (cls: string, id: string, rel: string | null, tip: string, ch: string) =>
     `<a class="pp-img-nav ${cls}" id="${id}" href="${rel ? escapeHtml(view!.base + relHref(rel)) : '#'}"${
       rel ? '' : ' style="visibility:hidden"'
-    } title="${tip}">${ch}</a>`;
+    } title="${escapeHtml(tip)}">${ch}</a>`;
   const arrows = view
     ? arrow(
         'pp-img-prev',
         'pp-prev',
         view.i > 0 ? view.imgs[view.i - 1]! : null,
-        'Previous (←)',
+        t(locale, 'viewer.img.prev'),
         CHEV_L,
       ) +
       '\n' +
@@ -276,10 +319,10 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
         'pp-img-next',
         'pp-next',
         view.i < view.imgs.length - 1 ? view.imgs[view.i + 1]! : null,
-        'Next (→)',
+        t(locale, 'viewer.img.next'),
         CHEV_R,
       ) +
-      `\n<a class="pp-img-nav pp-img-close" id="pp-close" href="${escapeHtml(view.base)}" title="Back to index (Esc)">${X_18}</a>`
+      `\n<a class="pp-img-nav pp-img-close" id="pp-close" href="${escapeHtml(view.base)}" title="${escapeHtml(t(locale, 'viewer.img.close'))}">${X_18}</a>`
     : '';
   // 就地切换(lightbox):换 <img> 节点不跳页 → 零闪烁;pushState 同步 URL(刷新/分享/后退
   // 都落在正确图片);邻图预解码秒切。切换前派发 cancelable 的 pagepin:navigate,评论层
@@ -370,7 +413,7 @@ const imgShell = (title: string, src: string, inject: string, view: ImgView | nu
 </script>`
     : '';
   return `<!doctype html>
-<html lang="en">
+<html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${FAVICON}${FONTS}<title>${title}</title>
 <style>
@@ -402,12 +445,13 @@ ${inject}</head>
 <body>
 <header class="pp-img-head">
   <span id="pp-img-name" class="pp-img-name">${title}</span>
-  <span class="pp-img-right">${pos}<a class="pp-img-orig" href="?raw=1">${EXT_ICON} View original</a></span>
+  <span class="pp-img-right">${pos}<a class="pp-img-orig" href="?raw=1">${EXT_ICON} ${t(locale, 'viewer.img.viewOriginal')}</a></span>
 </header>
 <div class="pp-img-wrap">
 <figure>
   <img id="pp-image" src="${src}" alt="${title}"
-       onerror="this.closest('figure').innerHTML='<div class=&quot;pp-img-err&quot;>Image failed to load</div>'">
+       onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+  <div class="pp-img-err" hidden>${escapeHtml(t(locale, 'viewer.img.loadError'))}</div>
 </figure>
 </div>
 ${arrows}
@@ -473,7 +517,8 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       }),
   );
 
-  const notFound = (c: Context<AppEnv>, siteRoot?: string) => c.html(notFoundHtml(siteRoot), 404);
+  const notFound = (c: Context<AppEnv>, siteRoot?: string) =>
+    c.html(notFoundHtml(localeOf(c), siteRoot), 404);
 
   /** 文件清单懒回填:清单随部署写入,更早的版本没有 → 有 list 能力的驱动(fs)
    * 访问图片时现场补一次写回 DB,本次响应即带导航;S3 等无 list 驱动跳过。
@@ -537,9 +582,10 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     if (!site || site.currentVersionId === null) return notFound(c);
     // 管理员下架:先于任何内容/会话判定,对所有访问者(站长/匿名公开都含)一律 451,且不读存储
     if (site.suspendedAt !== null) {
-      return c.html(takedownHtml(), 451, { 'Cache-Control': 'no-store, private' });
+      return c.html(takedownHtml(localeOf(c)), 451, { 'Cache-Control': 'no-store, private' });
     }
 
+    const locale = localeOf(c);
     const siteRoot = `${prefix}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}/`;
     const now = new Date();
     const pub = isPubliclyVisible(site, now);
@@ -562,14 +608,14 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       const gateHeaders = { 'Cache-Control': 'no-store, private' };
       if (site.visibility === 'public' && site.publicExpiresAt) {
         return c.html(
-          linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now), loginHref),
+          linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now, locale), loginHref, locale),
           200,
           gateHeaders,
         );
       }
       const owner = (await db.select().from(users).where(eq(users.id, site.ownerId)))[0];
       const ownerName = owner?.displayName || `@${handle}`;
-      return c.html(loginWallHtml(slug, ownerName, loginHref), 200, gateHeaders);
+      return c.html(loginWallHtml(slug, ownerName, loginHref, locale), 200, gateHeaders);
     }
     // 评论层只给已登录且未禁用的访问者注入:匿名公开访客(对外客户)看到的是干净页面
     const canInject = site.commentsEnabled && viewerActive;
@@ -577,7 +623,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     // 目录式 URL(空路径或尾斜杠)直接落 index.html
     const raw = !rest || rest.endsWith('/') ? rest + 'index.html' : rest;
     const rel = normalizeSitePath(raw);
-    if (rel === null) return c.json({ detail: 'Invalid path' }, 400);
+    if (rel === null) return jsonError(c, 400, 'site.path.invalid');
 
     const cur = currentVersion(site);
     if (!cur) return notFound(c, siteRoot); // 防御:current_version_id 与 versions 不一致时明确 404 而非 500
@@ -595,7 +641,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     const acceptHtml = (c.req.header('accept') ?? '').includes('text/html');
     const fname = rel.split('/').pop() ?? rel;
     const ext = fname.includes('.') ? '.' + fname.split('.').pop()!.toLowerCase() : '';
-    const injectHtml = canInject ? injectTag(handle, slug, rel, cur.id) : '';
+    const injectHtml = canInject ? injectTag(handle, slug, rel, cur.id, locale) : '';
 
     if (!rawMode && acceptHtml && IMG_EXTS.has(ext)) {
       if (await storage.exists(cur.storage_prefix + rel)) {
@@ -606,6 +652,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
             escapeHtml(c.req.path),
             injectHtml,
             imageView(await ensureFiles(site, cur), rel, siteBase),
+            locale,
           ),
           200,
           baseHeaders,
@@ -633,6 +680,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
               contentJson,
               injectHtml,
               opened.meta.contentLength ?? buf.byteLength,
+              locale,
             ),
             200,
             baseHeaders,
@@ -682,7 +730,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     if (injectableHtml && (meta.contentLength ?? 0) <= INJECT_MAX_BYTES) {
       // ≤5MB:整读 + 字节级注入(跨运行时一致,保非 UTF-8/BOM 原样)
       const buf = new Uint8Array(await new Response(body).arrayBuffer());
-      const out = injectScriptBytes(buf, injectTag(handle, slug, hit, cur.id));
+      const out = injectScriptBytes(buf, injectTag(handle, slug, hit, cur.id, locale));
       return new Response(out, {
         headers: { ...baseHeaders, 'Content-Type': meta.contentType },
       });
@@ -692,7 +740,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       const src = new Response(body, {
         headers: { ...baseHeaders, 'Content-Type': meta.contentType },
       });
-      return injectHtmlStream(src, injectTag(handle, slug, hit, cur.id));
+      return injectHtmlStream(src, injectTag(handle, slug, hit, cur.id, locale));
     }
     // 否则(>5MB 且无流式注入器,如 Node)原样流出,不注入
 

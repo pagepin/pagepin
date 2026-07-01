@@ -5,14 +5,18 @@
  * (form 编码),userinfo 用 Bearer GET。
  * ⚠️ IdP 可能不回 email —— 身份只认 sub;email 仅展示用、可空。
  * 本文件只用 Web API(fetch/AbortSignal),edge-safe;不 import hono ——
- * 错误抛 OidcError,由 routes.ts 转成 { detail } JSON(502)。
+ * 错误抛 OidcError(携带 i18n key + params),由 routes.ts 转成 { detail } JSON(502)。
  */
 
 import type { OidcConfig } from '../config.js';
+import type { TParams } from '../i18n/index.js';
 
 export class OidcError extends Error {
-  constructor(public detail: string) {
-    super(detail);
+  constructor(
+    public key: string,
+    public params?: TParams,
+  ) {
+    super(key);
     this.name = 'OidcError';
   }
 }
@@ -44,12 +48,12 @@ async function fetchDiscovery(issuer: string): Promise<Discovery> {
   try {
     resp = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch {
-    throw new OidcError('OIDC discovery 请求失败');
+    throw new OidcError('auth.oidc.discoveryFailed');
   }
-  if (!resp.ok) throw new OidcError(`OIDC discovery 失败(HTTP ${resp.status})`);
+  if (!resp.ok) throw new OidcError('auth.oidc.discoveryHttp', { status: resp.status });
   const doc = (await resp.json()) as Partial<Discovery>;
   if (!doc.authorization_endpoint || !doc.token_endpoint || !doc.userinfo_endpoint) {
-    throw new OidcError('OIDC discovery 文档缺少必要端点');
+    throw new OidcError('auth.oidc.discoveryMissingEndpoints');
   }
   return doc as Discovery;
 }
@@ -106,13 +110,13 @@ export async function exchangeCode(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
-    throw new OidcError('IdP token 端点请求失败');
+    throw new OidcError('auth.oidc.tokenRequestFailed');
   }
-  if (!tokenResp.ok) throw new OidcError(`IdP token 端点返回 HTTP ${tokenResp.status}`);
+  if (!tokenResp.ok) throw new OidcError('auth.oidc.tokenHttp', { status: tokenResp.status });
   const tok = (await tokenResp.json()) as Record<string, unknown>;
   const accessToken = tok.access_token;
   if (typeof accessToken !== 'string' || !accessToken) {
-    throw new OidcError('IdP 未返回 access_token');
+    throw new OidcError('auth.oidc.noAccessToken');
   }
 
   let userinfoResp: Response;
@@ -122,14 +126,15 @@ export async function exchangeCode(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
-    throw new OidcError('IdP userinfo 端点请求失败');
+    throw new OidcError('auth.oidc.userinfoRequestFailed');
   }
-  if (!userinfoResp.ok) throw new OidcError(`IdP userinfo 端点返回 HTTP ${userinfoResp.status}`);
+  if (!userinfoResp.ok)
+    throw new OidcError('auth.oidc.userinfoHttp', { status: userinfoResp.status });
   const info = (await userinfoResp.json()) as Record<string, unknown>;
 
   const sub = info.sub;
   if (typeof sub !== 'string' && typeof sub !== 'number') {
-    throw new OidcError('IdP userinfo 缺 sub');
+    throw new OidcError('auth.oidc.userinfoMissingSub');
   }
   const name = typeof info.name === 'string' && info.name ? info.name : undefined;
   const preferredUsername =
