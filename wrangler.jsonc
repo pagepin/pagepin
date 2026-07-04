@@ -72,11 +72,13 @@
     //   `wrangler secret put PAGEPIN_RESEND_API_KEY` 放 key,再 cf:deploy;PAGEPIN_MAIL_FROM 须用该域地址。
     "PAGEPIN_MAIL_PROVIDER": "resend",
     "PAGEPIN_MAIL_FROM": "pagepin <notifications@pagepin.ai>",
-    // 匿名试用(官网 drop-zone 的后端):默认关;官方服务开(Turnstile 已配 + CF 边缘限速兜底)。
+    // 匿名试用(官网 drop-zone 的后端)。硬前提:双域(本文件已是)+ Turnstile 两把 key 都配齐,
+    // 否则 loadConfig 抛错、Worker 起不来(见 config.ts 守卫)——单域下匿名 HTML 同源可接管账号。
     "PAGEPIN_TRIAL": "true"
   }
 
   // secrets(wrangler secret put):PAGEPIN_SECRET、PAGEPIN_ADMIN_EMAIL、PAGEPIN_ADMIN_PASSWORD、PAGEPIN_OIDC_CLIENT_SECRET、
-  //   PAGEPIN_OAUTH_GOOGLE_CLIENT_SECRET、PAGEPIN_OAUTH_GITHUB_CLIENT_SECRET
+  //   PAGEPIN_OAUTH_GOOGLE_CLIENT_SECRET、PAGEPIN_OAUTH_GITHUB_CLIENT_SECRET、
+  //   PAGEPIN_TURNSTILE_SITE_KEY、PAGEPIN_TURNSTILE_SECRET_KEY(PAGEPIN_TRIAL=true 时必需)
   // custom domains:pagepin.ai(控制台/API)、pagepin.page(内容)绑同一 Worker(dashboard 或 routes)。
 }
