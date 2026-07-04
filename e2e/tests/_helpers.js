@@ -69,9 +69,11 @@ async function setup(page, opts = {}) {
     html,        // 自定义整页 HTML(默认 fixtureHtml(boxes))
     onCreate,    // 新建线程时回调(拿到 POST body,供断言 rw/rh 等)
     onPatch,     // PATCH 线程时回调(拿到 body,供断言 resolved/kind)
+    onReply,     // POST 回复时回调(拿到 body,供断言 author_name 等)
   } = opts;
 
-  await page.route('**/api/viewer', (route) =>
+  // comments.js 现在带 ?handle=&slug= 探测分享会话访客 —— 通配须吃掉查询串
+  await page.route('**/api/viewer*', (route) =>
     viewerStatus === 200
       ? route.fulfill({ json: viewer })
       : route.fulfill({ status: viewerStatus, json: { detail: '匿名' } }));
@@ -83,6 +85,7 @@ async function setup(page, opts = {}) {
     // 回复
     if (url.includes('/threads/') && url.endsWith('/replies') && method === 'POST') {
       const body = JSON.parse(req.postData() || '{}');
+      if (onReply) onReply(body);
       const c = reply || {
         id: 'reply-1', author_sub: VIEWER.sub, author_name: VIEWER.name,
         text: body.text || '', created_at: NOW,

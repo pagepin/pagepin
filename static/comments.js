@@ -3,6 +3,9 @@
  * 约束：
  *  - 宿主页面不可控：所有类名带 pp-anno 前缀、UI 挂独立容器、用户内容一律 textContent 渲染；
  *  - 身份来自 /api/viewer（pp_view 会话）：401 = 匿名访客，静默退出不留痕迹；
+ *  - 分享会话访客（guest）：/api/viewer 带 ?handle=&slug= 探测，返回 guest:true 进入访客模式 ——
+ *    可建线程/回复/删自己的线程；resolve/reopen/kind 修改控件一律隐藏（服务端对 guest PATCH 401）；
+ *    署名走请求体 author_name（localStorage 'pp-guest-name' 预填，留空由服务端落「访客」）；
  *  - 锚点 = CSS 选择器 + 元素内相对偏移；"@page" = 整页评论（无 pin，仅抽屉卡片）；
  *    选择器失效（页面改版）降级为抽屉里的「锚点丢失」卡片（不丢评论）。
  *
@@ -92,6 +95,8 @@
       'toast.pageRecorded': 'Whole-page note recorded',
       'toast.linkCopied': 'Link copied',
       'toast.loadFailed': 'Failed to load comments: {error}',
+      'badge.guest': 'guest',
+      'placeholder.guestName': 'Your name (optional)',
     },
     zh: {
       'kind.copy': '文案',
@@ -147,6 +152,8 @@
       'toast.pageRecorded': '整页留言已记录',
       'toast.linkCopied': '链接已复制',
       'toast.loadFailed': '加载评论失败：{error}',
+      'badge.guest': '访客',
+      'placeholder.guestName': '你的名字（可选）',
     },
   };
   // 命名为 tr 而非 t：本文件大量用 t 作线程参数（threadCard(t,…)/copyThreadLink(t)/const t = byId 等），
@@ -207,6 +214,20 @@
   }
   let lastBucket = 'wide';
 
+  /* ---------------- 分享会话访客（guest） ----------------
+   * /api/viewer 返回 guest:true 时进入：写操作放行（建线程/回复/删自己的），
+   * resolve/reopen/kind 修改一律隐藏；署名不落账号，随写请求以 author_name 提交。 */
+  const isGuest = () => !!(state.viewer && state.viewer.guest);
+  const isGuestSub = (sub) => typeof sub === 'string' && sub.indexOf('guest:') === 0;
+  const GUEST_NAME_KEY = 'pp-guest-name';
+  function loadGuestName() {
+    try { return localStorage.getItem(GUEST_NAME_KEY) || ''; } catch (e) { return ''; }
+  }
+  function saveGuestName(name) {
+    try { if (name) localStorage.setItem(GUEST_NAME_KEY, name); else localStorage.removeItem(GUEST_NAME_KEY); }
+    catch (e) { /* 忽略 */ }
+  }
+
   /* ---------------- API（逐字保留） ---------------- */
   async function api(path, opts) {
     const res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
@@ -222,7 +243,7 @@
   const base = `/api/comments/${encodeURIComponent(CFG.handle)}/${encodeURIComponent(CFG.slug)}`;
   const fetchThreads = () => api(`${base}?path=${encodeURIComponent(CFG.path)}`);
   const createThread = (body) => api(base, { method: 'POST', body: JSON.stringify(body) });
-  const addReply = (id, text) => api(`/api/comments/threads/${id}/replies`, { method: 'POST', body: JSON.stringify({ text }) });
+  const addReply = (id, body) => api(`/api/comments/threads/${id}/replies`, { method: 'POST', body: JSON.stringify(body) });
   const patchThread = (id, body) => api(`/api/comments/threads/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
   const deleteThread = (id) => api(`/api/comments/threads/${id}`, { method: 'DELETE' });
 
@@ -390,6 +411,9 @@
   .pp-anno-ta-wrap{border:1.5px solid #cdd3d9;border-radius:9px;background:#fafbfb;padding:6px;transition:border-color .15s}
   .pp-anno-ta-wrap:focus-within{border-color:#0f7c72;background:#fff}
   .pp-anno-ta-wrap textarea{width:100%;border:none;background:transparent;resize:none;font:400 12.5px/1.5 'Hanken Grotesk',sans-serif;color:#11161b;outline:none}
+  .pp-anno-nameinput{width:100%;border:none;border-bottom:1px dashed #e1e4e6;background:transparent;font:600 11.5px/1.4 'Hanken Grotesk',sans-serif;color:#11161b;outline:none;padding:2px 2px 5px;margin-bottom:5px}
+  .pp-anno-nameinput::placeholder{color:#b3b9bf;font-weight:400}
+  .pp-anno-guestbadge{flex:none;font:600 9px/1 'Hanken Grotesk',sans-serif;text-transform:uppercase;letter-spacing:.04em;color:#9aa1a9;border:1px solid #e1e4e6;border-radius:4px;padding:1.5px 4px}
   .pp-anno-ta-row{display:flex;align-items:center;gap:8px;margin-top:6px}
   .pp-anno-hint{font-size:10.5px;color:#b3b9bf}
   .pp-anno-send{margin-left:auto;background:#0f7c72;color:#fff;border:none;padding:6px 12px;border-radius:7px;font:600 11.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
@@ -639,7 +663,9 @@
     // hint strip
     const hint = el('div', 'pp-anno-dwhint');
     const kp = (k, label) => { const w = el('span', 'pp-anno-kpair'); w.appendChild(el('kbd', null, k)); w.appendChild(document.createTextNode(label)); return w; };
-    hint.append(kp('j/k', tr('hint.move')), kp('c', tr('hint.comment')), kp('r', tr('hint.resolve')), kp('\\', tr('hint.hide')));
+    hint.append(kp('j/k', tr('hint.move')), kp('c', tr('hint.comment')));
+    if (!isGuest()) hint.append(kp('r', tr('hint.resolve'))); // guest 无 resolve：不提示 r
+    hint.append(kp('\\', tr('hint.hide')));
     drawer.appendChild(hint);
 
     if (state.focusedId) requestAnimationFrame(() => scrollFocusedCardIntoView());
@@ -681,6 +707,25 @@
     return a;
   }
 
+  // guest 作者徽标（author_sub 以 'guest:' 开头时，名字旁的低调小标）
+  function guestBadge() {
+    const b = el('span', 'pp-anno-guestbadge', tr('badge.guest'));
+    b.dataset.ppRole = 'guest-badge';
+    return b;
+  }
+
+  // 访客署名输入（composer 顶部一行；localStorage 预填，发送时存回）
+  function guestNameInput() {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'pp-anno-nameinput';
+    inp.dataset.ppRole = 'guest-name';
+    inp.placeholder = tr('placeholder.guestName');
+    inp.maxLength = 40;
+    inp.value = loadGuestName();
+    return inp;
+  }
+
   function threadCard(t, a) {
     const focused = state.focusedId === t.id;
     const col = kindColor(t);
@@ -716,6 +761,7 @@
     const idn = el('div'); idn.style.minWidth = '0'; idn.style.flex = '1';
     const line1 = el('div'); line1.style.display = 'flex'; line1.style.alignItems = 'center'; line1.style.gap = '6px';
     line1.appendChild(el('span', 'pp-anno-who', t.comments[0].author_name));
+    if (isGuestSub(t.comments[0].author_sub)) line1.appendChild(guestBadge());
     if (focused) line1.appendChild(el('span', 'pp-anno-when', '· ' + fmtTime(t.comments[0].created_at)));
     const line2 = el('div'); line2.style.display = 'flex'; line2.style.alignItems = 'center'; line2.style.gap = '6px';
     if (stale) {
@@ -738,21 +784,24 @@
       cardActs.appendChild(linkBtn);
       const mine = state.viewer && t.comments[0].author_sub === state.viewer.sub;
       if (mine) cardActs.appendChild(deleteBtn(t));
-      if (t.resolved) {
-        const reopen = el('button', 'pp-anno-ghost'); reopen.dataset.ppRole = 'reopen';
-        reopen.style.padding = '4px 9px'; reopen.appendChild(document.createTextNode(tr('btn.reopen')));
-        reopen.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
-        cardActs.appendChild(reopen);
-      } else {
-        const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = tr('action.resolveNext');
-        rb.appendChild(svg(ICON.check, 14));
-        rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
-        cardActs.appendChild(rb);
+      // guest 无 resolve/reopen 权限（服务端 PATCH 401）：控件整体不渲染
+      if (!isGuest()) {
+        if (t.resolved) {
+          const reopen = el('button', 'pp-anno-ghost'); reopen.dataset.ppRole = 'reopen';
+          reopen.style.padding = '4px 9px'; reopen.appendChild(document.createTextNode(tr('btn.reopen')));
+          reopen.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
+          cardActs.appendChild(reopen);
+        } else {
+          const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = tr('action.resolveNext');
+          rb.appendChild(svg(ICON.check, 14));
+          rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
+          cardActs.appendChild(rb);
+        }
       }
     } else if (t.resolved) {
       const done = el('span', 'pp-anno-donechip'); done.appendChild(svg(ICON.check, 10)); done.appendChild(document.createTextNode(tr('chip.done')));
       cardActs.appendChild(done);
-    } else {
+    } else if (!isGuest()) {
       const rb = el('button', 'pp-anno-resolvebtn'); rb.dataset.ppRole = 'resolve'; rb.title = tr('action.resolve');
       rb.appendChild(svg(ICON.check, 14));
       rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
@@ -817,15 +866,17 @@
       m.appendChild(avatar(c.author_name, 22));
       const right = el('div');
       const line = el('div', 'pp-anno-msg-line');
-      line.append(el('span', 'pp-anno-who', c.author_name), el('span', 'pp-anno-when', fmtTime(c.created_at)));
+      line.appendChild(el('span', 'pp-anno-who', c.author_name));
+      if (isGuestSub(c.author_sub)) line.appendChild(guestBadge());
+      line.appendChild(el('span', 'pp-anno-when', fmtTime(c.created_at)));
       right.append(line, el('div', 'pp-anno-txt', c.text));
       m.appendChild(right);
       msgs.appendChild(m);
     });
     wrap.appendChild(msgs);
 
-    // kind chips（未解决才显示；点选即 PATCH）
-    if (!t.resolved) wrap.appendChild(kindChipsFor(t));
+    // kind chips（未解决才显示；点选即 PATCH —— guest 无权改，整块不渲染）
+    if (!t.resolved && !isGuest()) wrap.appendChild(kindChipsFor(t));
 
     // 回复区
     wrap.appendChild(replyArea(t));
@@ -872,6 +923,8 @@
   function replyArea(t) {
     const wrap = el('div', 'pp-anno-replyarea');
     const taWrap = el('div', 'pp-anno-ta-wrap');
+    const nameInp = isGuest() ? guestNameInput() : null;
+    if (nameInp) taWrap.appendChild(nameInp);
     const ta = document.createElement('textarea');
     ta.rows = 2;
     ta.dataset.ppRole = 'reply';
@@ -881,6 +934,7 @@
     ta.oninput = () => { if (ta.value.trim()) state.replyStash.set(t.id, ta.value); else state.replyStash.delete(t.id); syncFlags(); };
     ta.onfocus = syncFlags;
     ta.onblur = syncFlags;
+    if (nameInp) nameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); ta.focus(); } };
     const row = el('div', 'pp-anno-ta-row');
     row.appendChild(el('span', 'pp-anno-hint', tr('hint.enterReply')));
     const send = el('button', 'pp-anno-send');
@@ -896,7 +950,9 @@
       if (!txt) { ta.focus(); return; }
       send.disabled = true;
       try {
-        const reply = await addReply(t.id, txt);
+        const body = { text: txt };
+        if (nameInp) { const nm = nameInp.value.trim(); saveGuestName(nm); body.author_name = nm || null; }
+        const reply = await addReply(t.id, body);
         t.comments.push(reply);
         state.replyStash.delete(t.id);
         renderDrawer();
@@ -951,6 +1007,7 @@
 
   let resolveInFlight = false;
   async function doResolve(id) {
+    if (isGuest()) return; // 访客无 resolve 权限（控件已隐藏；这里兜住 r 快捷键）
     if (resolveInFlight) return;
     const t = byId(id);
     if (!t) return;
@@ -1033,17 +1090,20 @@
     const rail = el('span', 'pp-anno-card-rail'); rail.style.background = accent; card.appendChild(rail);
     const bd = el('div', 'pp-anno-card-bd');
     const hd = el('div', 'pp-anno-card-hd');
-    hd.appendChild(avatar(state.viewer ? state.viewer.name : '?', 20));
+    hd.appendChild(avatar(state.viewer ? (state.viewer.name || loadGuestName() || '?') : '?', 20)); // guest 的 name=null：回落本地署名
     hd.appendChild(el('span', 'pp-anno-who', d.selector === PAGE_SELECTOR ? tr('action.notePage') : tr('draft.newComment')));
     if (d.selector !== PAGE_SELECTOR) hd.appendChild(el('span', 'pp-anno-seltag', d.selector));
     bd.appendChild(hd);
 
     const taWrap = el('div', 'pp-anno-ta-wrap'); taWrap.style.marginTop = '8px';
+    const nameInp = isGuest() ? guestNameInput() : null;
+    if (nameInp) taWrap.appendChild(nameInp);
     const ta = document.createElement('textarea');
     ta.rows = 2;
     ta.placeholder = d.selector === PAGE_SELECTOR ? tr('placeholder.pageNote') : tr('placeholder.elementNote');
     ta.value = d.text;
     ta.oninput = () => { d.text = ta.value; syncFlags(); };
+    if (nameInp) nameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); ta.focus(); } };
     taWrap.appendChild(ta);
     bd.appendChild(taWrap);
 
@@ -1085,10 +1145,12 @@
         let node = null;
         if (d.selector !== PAGE_SELECTOR) { try { node = document.querySelector(d.selector); } catch (e) { node = null; } }
         const anchor_text = node ? (fingerprint(node) || null) : null;
-        const created = await createThread({
+        const payload = {
           path: CFG.path, selector: d.selector, rx: d.rx, ry: d.ry,
           rw: d.box ? d.box.rw : null, rh: d.box ? d.box.rh : null, kind: d.kind, anchor_text, text,
-        });
+        };
+        if (nameInp) { const nm = nameInp.value.trim(); saveGuestName(nm); payload.author_name = nm || null; }
+        const created = await createThread(payload);
         state.threads.push(created);
         if (state.draft && state.draft._cleanup) state.draft._cleanup();
         state.draft = null;
@@ -1347,7 +1409,8 @@
   /* ---------------- 启动（保留身份门控） ---------------- */
   async function boot() {
     loadRail();
-    try { state.viewer = await api('/api/viewer'); }
+    // 带 ?handle=&slug=：登录缺席时服务端据此判该站点的分享会话访客（guest）
+    try { state.viewer = await api(`/api/viewer?handle=${encodeURIComponent(CFG.handle)}&slug=${encodeURIComponent(CFG.slug)}`); }
     catch (e) { return; } // 匿名访客：不渲染任何 UI
     buildUI();
     try {

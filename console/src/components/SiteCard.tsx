@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Globe2,
   History,
+  Link2,
   Loader2,
   Lock,
   MessageSquare,
@@ -17,6 +18,7 @@ import {
 import { api } from '../api';
 import { useT } from '../i18n';
 import { confirmDanger } from './ConfirmDialog';
+import { ShareLinkDialog } from './ShareLinkDialog';
 import { copyText, formatBytes, formatRelative, formatRemaining } from '../lib/format';
 import { useStore } from '../store';
 import type { SiteOut, VersionsOut } from '../types';
@@ -49,6 +51,7 @@ export function SiteCard({
   const windowLabel = (hours: number) => t(`sites.window.${hours}h`);
 
   const [panel, setPanel] = useState<Panel>(null);
+  const [shareLinkOpen, setShareLinkOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [versions, setVersions] = useState<VersionsOut | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(false);
@@ -316,6 +319,15 @@ export function SiteCard({
             <button
               type="button"
               className="btn-ghost !px-2.5 !py-1.5 !text-xs"
+              onClick={() => setShareLinkOpen(true)}
+              disabled={busy}
+            >
+              <Link2 className="h-3.5 w-3.5" />
+              {t('sites.action.shareLink')}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost !px-2.5 !py-1.5 !text-xs"
               onClick={() => setDeployTarget(site.slug)}
               disabled={busy}
             >
@@ -495,6 +507,8 @@ export function SiteCard({
           )}
         </div>
       )}
+
+      {shareLinkOpen && <ShareLinkDialog site={site} onClose={() => setShareLinkOpen(false)} />}
     </div>
   );
 }

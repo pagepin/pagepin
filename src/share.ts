@@ -54,14 +54,21 @@ export async function mintShareKey(
   const now = Math.floor(Date.now() / 1000);
   const exp = now + hours * 3600;
   const claims: ShareKeyClaims = { pln: 'share', sid: siteId, skv: keyVersion, iat: now, exp };
-  return { token: await sign(claims, cfg.secret, 'HS256'), expiresAt: new Date(exp * 1000).toISOString() };
+  return {
+    token: await sign(claims, cfg.secret, 'HS256'),
+    expiresAt: new Date(exp * 1000).toISOString(),
+  };
 }
 
 /** 签名/过期/plane 任一不对 → null(撤销版本比对留给调用方,它有 site 行)。 */
 export async function verifyShareKey(cfg: Config, token: string): Promise<ShareKeyClaims | null> {
   try {
     const claims = (await jwtVerify(token, cfg.secret, 'HS256')) as ShareKeyClaims;
-    if (claims.pln !== 'share' || typeof claims.sid !== 'string' || typeof claims.skv !== 'number') {
+    if (
+      claims.pln !== 'share' ||
+      typeof claims.sid !== 'string' ||
+      typeof claims.skv !== 'number'
+    ) {
       return null;
     }
     return claims;

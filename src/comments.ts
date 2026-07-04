@@ -175,14 +175,14 @@ function parseThreadCreate(raw: unknown): ThreadCreateIn {
   };
 }
 
-/** 访客署名清洗:去控制符、并空白、裁 40 码点;空/缺省回落本地化「访客」。 */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/g;
+
+/** 访客署名清洗:控制符替换为空格(换行分隔的名字不粘连)、并空白、裁 40 码点;
+ *  空/缺省回落本地化「访客」。 */
 function guestName(raw: string | null, locale: Locale): string {
   if (raw === null) return t(locale, 'comment.guestAuthor');
-  // eslint-disable-next-line no-control-regex
-  const name = raw
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const name = raw.replace(CONTROL_CHARS_RE, ' ').replace(/\s+/g, ' ').trim();
   if (!name) return t(locale, 'comment.guestAuthor');
   return [...name].slice(0, 40).join('');
 }

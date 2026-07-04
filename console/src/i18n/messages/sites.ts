@@ -53,6 +53,7 @@ export const sites: Record<Locale, Record<string, string>> = {
     // —— 站点卡片:操作 ——
     'sites.action.makePrivate': 'Extend / make private',
     'sites.action.makePublic': 'Make public',
+    'sites.action.shareLink': 'Share link',
     'sites.action.redeploy': 'Redeploy',
     'sites.action.versions': 'Versions · {count}',
     'sites.action.settings': 'Settings',
@@ -67,6 +68,31 @@ export const sites: Record<Locale, Record<string, string>> = {
     'sites.window.24h': '24 hours',
     'sites.window.72h': '3 days',
     'sites.window.168h': '7 days',
+
+    // —— 分享链接弹窗(ShareLinkDialog) ——
+    'sites.shareLink.title': 'Share “{slug}”',
+    'sites.shareLink.desc':
+      'Anyone with the link can view this page while it lasts — no account needed. Links are signed, not stored: once you close this dialog you can’t retrieve the same link again, but you can always create a new one (older links keep working). “Revoke all links” invalidates every link ever issued, including guest sessions already in progress.',
+    'sites.shareLink.expiresIn': 'Link valid for',
+    'sites.shareLink.h24': '24 hours',
+    'sites.shareLink.h72': '3 days',
+    'sites.shareLink.h168': '7 days',
+    'sites.shareLink.h720': '30 days',
+    'sites.shareLink.create': 'Create link',
+    'sites.shareLink.createAnother': 'Create another link',
+    'sites.shareLink.createFailed': 'Failed to create share link',
+    'sites.shareLink.expiresAt': 'Expires {time}',
+    'sites.shareLink.oneTime': 'Shown once — copy it now. If you lose it, just create a new one.',
+    'sites.shareLink.guestComments': 'Allow guests to comment',
+    'sites.shareLink.guestCommentsDesc':
+      'Visitors arriving via a share link can pin review comments on the page, no account needed.',
+    'sites.shareLink.revokeDesc':
+      'Revoking invalidates every share link ever issued for this site, including guest sessions already in progress.',
+    'sites.shareLink.revokeAll': 'Revoke all links',
+    'sites.shareLink.revokeTitle': 'Revoke all share links for “{slug}”?',
+    'sites.shareLink.revokeBody':
+      'Every share link ever created for this site stops working immediately, including guest sessions already in progress. This cannot be undone — you can create new links afterwards.',
+    'sites.shareLink.revokeConfirm': 'Revoke all',
 
     // —— 站点卡片:设置面板 ——
     'sites.settings.comments': 'Page comments',
@@ -91,6 +117,10 @@ export const sites: Record<Locale, Record<string, string>> = {
     'sites.toast.spaOff': 'SPA fallback disabled',
     'sites.toast.commentsOn': 'Page comments enabled',
     'sites.toast.commentsOff': 'Page comments disabled',
+    'sites.toast.shareLinkCreated': 'Share link created',
+    'sites.toast.shareLinksRevoked': 'All share links revoked',
+    'sites.toast.guestCommentsOn': 'Guest comments enabled',
+    'sites.toast.guestCommentsOff': 'Guest comments disabled',
     'sites.toast.rolledBack': 'Rolled back to the selected version',
     'sites.toast.deleted': 'Site deleted',
     'sites.delete.title': 'Delete site “{slug}”?',
@@ -145,6 +175,7 @@ export const sites: Record<Locale, Record<string, string>> = {
     // —— 站点卡片:操作 ——
     'sites.action.makePrivate': '延长 / 设为私有',
     'sites.action.makePublic': '设为公开',
+    'sites.action.shareLink': '分享链接',
     'sites.action.redeploy': '重新部署',
     'sites.action.versions': '版本 · {count}',
     'sites.action.settings': '设置',
@@ -159,6 +190,29 @@ export const sites: Record<Locale, Record<string, string>> = {
     'sites.window.24h': '24 小时',
     'sites.window.72h': '3 天',
     'sites.window.168h': '7 天',
+
+    // —— 分享链接弹窗(ShareLinkDialog) ——
+    'sites.shareLink.title': '分享“{slug}”',
+    'sites.shareLink.desc':
+      '拿到链接的人在有效期内无需账号即可查看此页面。链接是签名生成的，不会存储：关闭此对话框后就无法再取回同一条，但随时可以再生成新的（旧链接仍然有效）。「撤销所有链接」会让已发出的全部链接失效，包括已进入的访客会话。',
+    'sites.shareLink.expiresIn': '链接有效期',
+    'sites.shareLink.h24': '24 小时',
+    'sites.shareLink.h72': '3 天',
+    'sites.shareLink.h168': '7 天',
+    'sites.shareLink.h720': '30 天',
+    'sites.shareLink.create': '生成链接',
+    'sites.shareLink.createAnother': '再生成一条',
+    'sites.shareLink.createFailed': '生成分享链接失败',
+    'sites.shareLink.expiresAt': '{time} 过期',
+    'sites.shareLink.oneTime': '仅展示这一次——请立即复制。丢了就再生成一条新的。',
+    'sites.shareLink.guestComments': '允许访客评论',
+    'sites.shareLink.guestCommentsDesc': '凭分享链接进来的访客无需账号即可在页面上钉选评审评论。',
+    'sites.shareLink.revokeDesc': '撤销会让该站点已发出的全部分享链接失效，包括已进入的访客会话。',
+    'sites.shareLink.revokeAll': '撤销所有链接',
+    'sites.shareLink.revokeTitle': '撤销“{slug}”的所有分享链接？',
+    'sites.shareLink.revokeBody':
+      '该站点已发出的全部分享链接会立即失效，包括已进入的访客会话。此操作无法撤销——之后可以再生成新链接。',
+    'sites.shareLink.revokeConfirm': '全部撤销',
 
     // —— 站点卡片:设置面板 ——
     'sites.settings.comments': '页面评论',
@@ -182,6 +236,10 @@ export const sites: Record<Locale, Record<string, string>> = {
     'sites.toast.spaOff': '已禁用 SPA 回退',
     'sites.toast.commentsOn': '已启用页面评论',
     'sites.toast.commentsOff': '已禁用页面评论',
+    'sites.toast.shareLinkCreated': '分享链接已生成',
+    'sites.toast.shareLinksRevoked': '所有分享链接已撤销',
+    'sites.toast.guestCommentsOn': '已允许访客评论',
+    'sites.toast.guestCommentsOff': '已关闭访客评论',
     'sites.toast.rolledBack': '已回滚到所选版本',
     'sites.toast.deleted': '站点已删除',
     'sites.delete.title': '删除站点“{slug}”？',

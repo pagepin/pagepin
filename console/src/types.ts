@@ -75,6 +75,10 @@ export interface SiteOut {
   public_expires_at: string | null;
   spa_fallback: boolean;
   comments_enabled: boolean;
+  /** 分享链接访客(凭 ?key= 链接进来的人)是否可评论 */
+  guest_comments: boolean;
+  /** 非空 = 试用站硬 TTL 到期时间 */
+  expires_at: string | null;
   /** 当前未解决的评论线程数 */
   unresolved_comments: number;
   /** 被管理员下架(serving 返回 451);站长只能看不能自行解除 */
@@ -87,6 +91,14 @@ export interface SiteOut {
   pruned_versions?: number;
   created_at: string;
   updated_at: string;
+}
+
+/** POST /api/sites/{slug}/share-link 的返回。url 无状态、后端不存 —— 关掉对话框就拿不回同一条。 */
+export interface ShareLinkOut {
+  url: string;
+  expires_at: string;
+  hours: number;
+  guest_comments: boolean;
 }
 
 export interface VersionItem {
