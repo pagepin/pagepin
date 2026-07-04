@@ -100,6 +100,12 @@ export const sites = sqliteTable(
     title: text('title'),
     visibility: text('visibility').notNull().default('private'), // private | public
     publicExpiresAt: text('public_expires_at'), // 仅 public 有值;请求时判定过期
+    // 签名分享链接的撤销版本号:?key= 内嵌 skv,与此值不等即拒(撤销 = 自增,旧链接全部失效)
+    shareKeyVersion: integer('share_key_version').notNull().default(1),
+    // 允许持分享链接进来的访客(guest 会话)在本站点评论;访客只可能经站长签发的 key 链接进入
+    guestComments: integer('guest_comments', { mode: 'boolean' }).notNull().default(true),
+    // 站点硬 TTL(匿名试用站):非空 = 到期由清理任务连存储一起硬删;null = 常规站点
+    expiresAt: text('expires_at'),
     spaFallback: integer('spa_fallback', { mode: 'boolean' }).notNull().default(false),
     commentsEnabled: integer('comments_enabled', { mode: 'boolean' }).notNull().default(true),
     currentVersionId: text('current_version_id'),
@@ -117,6 +123,7 @@ export const sites = sqliteTable(
     // 墓碑行不再占用 (owner_handle, slug),故无需 WHERE deleted_at IS NULL → 跨 SQLite/PG/MySQL 通用。
     uniqueIndex('sites_handle_slug_uq').on(t.ownerHandle, t.slug),
     index('sites_owner_idx').on(t.ownerId),
+    index('sites_expires_idx').on(t.expiresAt), // 试用站 TTL 清理扫描
   ],
 );
 

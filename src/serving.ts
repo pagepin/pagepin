@@ -28,6 +28,12 @@ import { t, type Locale } from './i18n/index.js';
 import { jsonError, localeOf } from './i18n/locale.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
+import {
+  mintShareSession,
+  readShareSession,
+  setShareCookie,
+  verifyShareKey,
+} from './share.js';
 import { currentVersion, isPubliclyVisible, sites, users } from './db/index.js';
 import type { SiteRow, SiteVersion } from './db/index.js';
 import { NotFoundError, NotModifiedError } from './storage/index.js';
@@ -161,6 +167,19 @@ function linkExpiredHtml(
 <p class="body">${t(locale, 'html.expired.body', { closedAgo: closedSpan })}</p>
 <a class="btn btn-ghost" href="${escapeHtml(loginHref)}">${t(locale, 'html.expired.button')}</a>
 <div class="row">${t(locale, 'html.expired.owner')} · <span class="mono" style="color:#8a929b">@${escapeHtml(ownerHandle)}</span></div>
+<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
+    locale,
+  );
+}
+
+/** 分享链接失效(过期或被站长撤销):提示找分享人要新链接;有账号可登录兜底。 */
+function shareExpiredHtml(loginHref: string, locale: Locale): string {
+  return gateDoc(
+    t(locale, 'html.shareExpired.title'),
+    `<div class="chip chip-amber">${CLOCK_SVG}</div>
+<h1>${t(locale, 'html.shareExpired.heading')}</h1>
+<p class="body">${t(locale, 'html.shareExpired.body')}</p>
+<a class="btn btn-ghost" href="${escapeHtml(loginHref)}">${t(locale, 'html.shareExpired.button')}</a>
 <div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
     locale,
   );
@@ -566,8 +585,8 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
   const siteRootNoSlash = (c: Context<AppEnv>) => {
     const { handle, slug } = splitSitePath(c);
     if (RESERVED_SEGMENTS.has(handle)) return notFound(c); // /api/* 等保留段:本平面没有这些路由
-    // 必须带尾斜杠,站点内相对资源路径才解析得对
-    return c.redirect(`${prefix}/${handle}/${slug}/`, 308);
+    // 必须带尾斜杠,站点内相对资源路径才解析得对;查询串(?key= / ?lang=)原样带过去
+    return c.redirect(`${prefix}/${handle}/${slug}/${new URL(c.req.url).search}`, 308);
   };
 
   const serve = async (c: Context<AppEnv>): Promise<Response> => {
@@ -588,7 +607,28 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     const locale = localeOf(c);
     const siteRoot = `${prefix}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}/`;
     const now = new Date();
+    // 试用站硬 TTL:请求时判定,过期即 404(清理任务随后连存储回收;判定不依赖清理节奏)
+    if (site.expiresAt !== null && site.expiresAt <= now.toISOString()) {
+      return notFound(c);
+    }
     const pub = isPubliclyVisible(site, now);
+
+    // ---- 签名分享链接:?key= 验签后种「本浏览器」的分享会话 Cookie,再 303 去掉 key ----
+    // (会话内嵌 per-浏览器 guest 身份,key 本身是群发的;撤销 = share_key_version 已自增 → 拒)
+    const keyParam = c.req.query('key');
+    let staleKey = false;
+    if (keyParam !== undefined) {
+      const k = await verifyShareKey(cfg, keyParam);
+      if (k && k.sid === site.id && k.skv === site.shareKeyVersion) {
+        setShareCookie(c, cfg, site.id, await mintShareSession(cfg, site.id, k.skv, k.exp), k.exp);
+        const url = new URL(c.req.url);
+        url.searchParams.delete('key');
+        return c.redirect(url.pathname + url.search, 303);
+      }
+      staleKey = true; // 签名不对/过期/已撤销:若无其他授权,走专属门页
+    }
+    const shareViewer = (await readShareSession(c, cfg, site)) !== null;
+
     const claims = await readSession(c, cfg, plane);
     // 查库判活:会话用户须存在且未被禁用,否则按未登录处理(私有页不放行、不注入评论层)
     let viewerActive = false;
@@ -601,11 +641,14 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       )[0];
       viewerActive = u !== undefined && !u.disabled && (claims.epo ?? 0) === u.sessionEpoch;
     }
-    if (!pub && !viewerActive) {
-      // 品牌门页(不再裸 302):曾公开但窗口已关 → 过期页;否则私有 → 登录墙。
-      // 「Sign in」回 /auth/login?next=,登录后落回本页。
+    if (!pub && !viewerActive && !shareViewer) {
+      // 品牌门页(不再裸 302):失效分享链接 → 专属门页;曾公开但窗口已关 → 过期页;
+      // 否则私有 → 登录墙。「Sign in」回 /auth/login?next=,登录后落回本页。
       const loginHref = `/auth/login?next=${encodeURIComponent(c.req.path)}`;
       const gateHeaders = { 'Cache-Control': 'no-store, private' };
+      if (staleKey) {
+        return c.html(shareExpiredHtml(loginHref, locale), 200, gateHeaders);
+      }
       if (site.visibility === 'public' && site.publicExpiresAt) {
         return c.html(
           linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now, locale), loginHref, locale),
@@ -617,8 +660,10 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       const ownerName = owner?.displayName || `@${handle}`;
       return c.html(loginWallHtml(slug, ownerName, loginHref, locale), 200, gateHeaders);
     }
-    // 评论层只给已登录且未禁用的访问者注入:匿名公开访客(对外客户)看到的是干净页面
-    const canInject = site.commentsEnabled && viewerActive;
+    // 评论层注入:登录访问者一律注入;分享会话访客仅当站点开了 guest 评论才注入
+    // (匿名公开访客[对外客户]看到的仍是干净页面)
+    const canInject =
+      site.commentsEnabled && (viewerActive || (shareViewer && site.guestComments));
 
     // 目录式 URL(空路径或尾斜杠)直接落 index.html
     const raw = !rest || rest.endsWith('/') ? rest + 'index.html' : rest;

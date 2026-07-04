@@ -70,6 +70,9 @@ export function buildSchema(kit: ColumnKit) {
       title: longStr('title'),
       visibility: str('visibility', 16).notNull().default('private'),
       publicExpiresAt: str('public_expires_at', 40),
+      shareKeyVersion: int('share_key_version').notNull().default(1),
+      guestComments: bool('guest_comments').notNull().default(true),
+      expiresAt: str('expires_at', 40),
       spaFallback: bool('spa_fallback').notNull().default(false),
       commentsEnabled: bool('comments_enabled').notNull().default(true),
       currentVersionId: str('current_version_id', 64),
@@ -83,6 +86,7 @@ export function buildSchema(kit: ColumnKit) {
     (t: any) => [
       unique('sites_handle_slug_uq').on(t.ownerHandle, t.slug),
       index('sites_owner_idx').on(t.ownerId),
+      index('sites_expires_idx').on(t.expiresAt),
     ],
   );
 

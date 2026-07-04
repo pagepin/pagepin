@@ -88,6 +88,8 @@ export interface Config {
   /** 分批上传草稿会话的有效期(小时);超期未 commit 的草稿在后续 begin 时被回收。 */
   deployTtlH: number;
   publicMaxHours: number;
+  /** 签名分享链接(?key=)时效上限(小时);链接是定向、可撤销的,上限可比 public 宽。 */
+  shareMaxHours: number;
   /** 设备授权(/api/device)铸出的 token 的有效期(天);0 = 不过期。普通 PAT 不受此限。 */
   deviceTokenTtlDays: number;
   secureCookies: boolean;
@@ -289,6 +291,7 @@ export function loadConfig(env: Env): Config {
     keepVersions: num(env, 'PAGEPIN_KEEP_VERSIONS', 3),
     deployTtlH: num(env, 'PAGEPIN_DEPLOY_TTL_H', 2),
     publicMaxHours: num(env, 'PAGEPIN_PUBLIC_MAX_HOURS', 168),
+    shareMaxHours: num(env, 'PAGEPIN_SHARE_MAX_HOURS', 720),
     deviceTokenTtlDays: num(env, 'PAGEPIN_DEVICE_TOKEN_TTL_DAYS', 90),
     secureCookies: mode === 'dual' ? externalScheme === 'https' : baseUrl.startsWith('https://'),
     defaultLocale,

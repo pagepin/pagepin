@@ -2,9 +2,15 @@
  *
  * 边界:
  *   - 只动 comment_threads 表,绝不触碰 sites/users/tokens 的写路径;
- *   - 全部端点要求 viewer 会话(匿名公开访客拿不到注入脚本,直连 API 也是 401);
+ *   - 端点要求 viewer 会话或「分享会话访客」(见下);裸匿名(公开站的路人)一律 401;
  *   - 双域模式用 pp_view(无 CSRF claim:SameSite=Lax 下跨站 POST 不带 Cookie);
  *     单域模式 viewer 复用控制台 pp_session 会话。
+ *
+ * 分享会话访客(guest):持站长签发的 ?key= 链接进来的评审者(share.ts),无账号。
+ *   - 仅当站点 guest_comments 开着才可读写评论;身份 = 会话里的 'guest:<id>'(per-浏览器);
+ *   - 名字不落账号体系:创建/回复时随请求体带 author_name,服务端清洗后快照进评论;
+ *   - 可建线程/回复/删自己的线程,不可 resolve/改 kind(留给登录成员与站长);
+ *   - 写操作过 rateLimiter(per 访客 + per IP),防持链接者灌水。
  */
 
 import { and, asc, eq, isNull } from 'drizzle-orm';
@@ -14,6 +20,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Plane, SessionClaims } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
+import { readShareSession } from './share.js';
 import { commentThreads, sites } from './db/index.js';
 import type { CommentThreadRow, SiteRow, ThreadComment, UserRow } from './db/index.js';
 import { users } from './db/index.js';
@@ -110,6 +117,7 @@ interface ThreadCreateIn {
   kind: string | null;
   anchor_text: string | null;
   text: string;
+  author_name: string | null; // 仅分享会话访客生效(登录用户一律用账号显示名)
 }
 
 /** 对齐 Python ThreadCreateIn 的 pydantic 校验(请求体形状错误一律 422)。 */
@@ -149,6 +157,10 @@ function parseThreadCreate(raw: unknown): ThreadCreateIn {
   if (anchor !== null && cpLen(anchor) > 200)
     throw new ApiError(422, 'comment.anchorText.tooLong', { max: 200 });
   if (typeof b.text !== 'string') throw new ApiError(422, 'comment.text.notString');
+  const authorName = b.author_name === undefined || b.author_name === null ? null : b.author_name;
+  if (authorName !== null && typeof authorName !== 'string') {
+    throw new ApiError(422, 'comment.authorName.notString');
+  }
   return {
     path: b.path,
     selector: b.selector,
@@ -159,7 +171,37 @@ function parseThreadCreate(raw: unknown): ThreadCreateIn {
     kind,
     anchor_text: anchor,
     text: b.text,
+    author_name: authorName,
   };
+}
+
+/** 访客署名清洗:去控制符、并空白、裁 40 码点;空/缺省回落本地化「访客」。 */
+function guestName(raw: string | null, locale: Locale): string {
+  if (raw === null) return t(locale, 'comment.guestAuthor');
+  // eslint-disable-next-line no-control-regex
+  const name = raw
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!name) return t(locale, 'comment.guestAuthor');
+  return [...name].slice(0, 40).join('');
+}
+
+/** 评论者:登录用户或分享会话访客,写路径统一走这一个身份。 */
+interface Commenter {
+  sub: string; // users.id 或 'guest:<id>'
+  name: string | null; // 登录用户 = 账号显示名;访客 = null(署名随请求体,见 guestName)
+  guest: boolean;
+}
+
+/** 客户端 IP(访客写限频用):CF 必带 cf-connecting-ip;反代取 x-forwarded-for 首跳。 */
+function clientIp(c: Context<AppEnv>): string {
+  return (
+    c.req.header('cf-connecting-ip') ||
+    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+    c.req.header('x-real-ip') ||
+    '-'
+  );
 }
 
 export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
@@ -184,22 +226,6 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     return (await activeViewer(c)).claims;
   }
 
-  async function viewerUser(c: Context<AppEnv>): Promise<UserRow> {
-    return (await activeViewer(c)).user;
-  }
-
-  async function commentableSite(handle: string, slug: string): Promise<SiteRow> {
-    const site = (
-      await db
-        .select()
-        .from(sites)
-        .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
-    )[0];
-    if (!site) throw new ApiError(404, 'site.notFound');
-    if (!site.commentsEnabled) throw new ApiError(403, 'comment.site.disabled');
-    return site;
-  }
-
   async function getThread(threadId: string): Promise<CommentThreadRow> {
     const thread = (
       await db.select().from(commentThreads).where(eq(commentThreads.id, threadId))
@@ -208,16 +234,120 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     return thread;
   }
 
-  /** 当前访问者身份(注入脚本启动时调用;401 = 匿名,脚本静默退出)。 */
+  /** 有登录会话 → Commenter + 账号行;没有 → null;有会话但账号异常 → 抛(与 activeViewer 同口径)。 */
+  async function sessionCommenter(
+    c: Context<AppEnv>,
+  ): Promise<{ who: Commenter; user: UserRow } | null> {
+    const claims = await readSession(c, cfg, plane);
+    if (claims === null) return null;
+    const user = (await db.select().from(users).where(eq(users.id, claims.sub)))[0];
+    if (!user) throw new ApiError(401, 'auth.userNotFound');
+    if (user.disabled) throw new ApiError(403, 'auth.account.disabled');
+    return { who: { sub: user.id, name: authorName(user, localeOf(c)), guest: false }, user };
+  }
+
+  async function loadSite(handle: string, slug: string): Promise<SiteRow | null> {
+    return (
+      (
+        await db
+          .select()
+          .from(sites)
+          .where(and(eq(sites.ownerHandle, handle), eq(sites.slug, slug), isNull(sites.deletedAt)))
+      )[0] ?? null
+    );
+  }
+
+  /** 站点上分享会话访客成立的前提:两个开关都开着 + 会话与 (sid, skv) 匹配。 */
+  async function guestOn(c: Context<AppEnv>, site: SiteRow): Promise<Commenter | null> {
+    if (!site.guestComments || !site.commentsEnabled) return null;
+    const sess = await readShareSession(c, cfg, site);
+    if (!sess) return null;
+    return { sub: sess.gst, name: null, guest: true };
+  }
+
+  /** (handle, slug) 路由的评论者解析。时序保持与旧版一致:
+   *  登录用户 → 站点 404/评论关闭 403;裸匿名(含无效访客会话)一律 401,不泄露站点存在性。 */
+  async function resolveCommenter(
+    c: Context<AppEnv>,
+    handle: string,
+    slug: string,
+  ): Promise<{ who: Commenter; site: SiteRow }> {
+    const s = await sessionCommenter(c);
+    if (s) {
+      const site = await loadSite(handle, slug);
+      if (!site) throw new ApiError(404, 'site.notFound');
+      if (!site.commentsEnabled) throw new ApiError(403, 'comment.site.disabled');
+      return { who: s.who, site };
+    }
+    const site = await loadSite(handle, slug);
+    if (site) {
+      const guest = await guestOn(c, site);
+      if (guest) return { who: guest, site };
+    }
+    throw new ApiError(401, 'auth.unauthenticated');
+  }
+
+  /** thread 路由(无 handle/slug)的评论者解析:访客要经 thread → site 反查再校验会话。 */
+  async function resolveThreadCommenter(
+    c: Context<AppEnv>,
+    threadId: string,
+  ): Promise<{ who: Commenter; thread: CommentThreadRow; site: SiteRow | null }> {
+    const s = await sessionCommenter(c);
+    if (s) {
+      const thread = await getThread(threadId);
+      return { who: s.who, thread, site: null };
+    }
+    // 匿名:thread 不存在也回 401(不泄露 thread id 空间)
+    let thread: CommentThreadRow;
+    try {
+      thread = await getThread(threadId);
+    } catch {
+      throw new ApiError(401, 'auth.unauthenticated');
+    }
+    const site = (await db.select().from(sites).where(eq(sites.id, thread.siteId)))[0] ?? null;
+    if (site && site.deletedAt === null) {
+      const guest = await guestOn(c, site);
+      if (guest) return { who: guest, thread, site };
+    }
+    throw new ApiError(401, 'auth.unauthenticated');
+  }
+
+  /** 访客写限频(per 访客身份 + per IP);未注入 rateLimiter 时不限。 */
+  async function guestWriteLimit(c: Context<AppEnv>, siteId: string, sub: string): Promise<void> {
+    const rl = deps.rateLimiter;
+    if (!rl) return;
+    const okGuest = await rl.check(`gc:${siteId}:${sub}`, 20, 600);
+    const okIp = await rl.check(`gcip:${clientIp(c)}`, 60, 600);
+    if (!okGuest || !okIp) throw new ApiError(429, 'comment.rateLimited');
+  }
+
+  /** 当前访问者身份(注入脚本启动时调用;401 = 匿名,脚本静默退出)。
+   *  带 ?handle=&slug= 时额外尝试分享会话访客:登录缺席但该站点的 guest 会话有效
+   *  → 返回 guest 身份(name=null,由前端收集署名)。 */
   app.get(
     '/api/viewer',
     wrap(async (c) => {
-      const user = await viewerUser(c);
-      return c.json({
-        sub: user.id,
-        name: authorName(user, localeOf(c)),
-        handle: user.handle,
-      });
+      const s = await sessionCommenter(c);
+      if (s) {
+        return c.json({
+          sub: s.user.id,
+          name: authorName(s.user, localeOf(c)),
+          handle: s.user.handle,
+          guest: false,
+        });
+      }
+      const handle = c.req.query('handle');
+      const slug = c.req.query('slug');
+      if (handle && slug) {
+        const site = await loadSite(handle, slug);
+        if (site) {
+          const guest = await guestOn(c, site);
+          if (guest) {
+            return c.json({ sub: guest.sub, name: null, handle: null, guest: true });
+          }
+        }
+      }
+      throw new ApiError(401, 'auth.unauthenticated');
     }),
   );
 
@@ -227,10 +357,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       // path 是必填查询参数:缺失时先于鉴权 422(对齐 FastAPI 参数校验时序)
       const rawPath = c.req.query('path');
       if (rawPath === undefined) throw new ApiError(422, 'comment.path.missing');
-      await viewer(c);
       const handle = c.req.param('handle') ?? '';
       const slug = c.req.param('slug') ?? '';
-      await commentableSite(handle, slug);
+      await resolveCommenter(c, handle, slug);
       const rel = normalizeSitePath(rawPath);
       if (rel === null) throw new ApiError(422, 'site.path.invalid');
       const threads = await db
@@ -254,10 +383,10 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     wrap(async (c) => {
       // 对齐 FastAPI:请求体校验先于鉴权(pydantic 在 handler 前跑)
       const body = parseThreadCreate(await readJson(c));
-      const user = await viewerUser(c);
       const handle = c.req.param('handle') ?? '';
       const slug = c.req.param('slug') ?? '';
-      const site = await commentableSite(handle, slug);
+      const { who, site } = await resolveCommenter(c, handle, slug);
+      if (who.guest) await guestWriteLimit(c, site.id, who.sub);
       const rel = normalizeSitePath(body.path);
       if (rel === null) throw new ApiError(422, 'site.path.invalid');
       if (body.kind !== null && !KINDS.has(body.kind)) {
@@ -266,8 +395,8 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       const now = nowIso();
       const first: ThreadComment = {
         id: shortId(),
-        author_sub: user.id,
-        author_name: authorName(user, localeOf(c)),
+        author_sub: who.sub,
+        author_name: who.guest ? guestName(body.author_name, localeOf(c)) : who.name!,
         text: cleanText(body.text),
         created_at: now,
       };
@@ -307,13 +436,15 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       ) {
         throw new ApiError(422, 'comment.text.notString');
       }
-      const user = await viewerUser(c);
-      const thread = await getThread(c.req.param('tid') ?? '');
+      const body = raw as { text: string; author_name?: unknown };
+      const { who, thread } = await resolveThreadCommenter(c, c.req.param('tid') ?? '');
+      if (who.guest) await guestWriteLimit(c, thread.siteId, who.sub);
+      const rawName = typeof body.author_name === 'string' ? body.author_name : null;
       const reply: ThreadComment = {
         id: shortId(),
-        author_sub: user.id,
-        author_name: authorName(user, localeOf(c)),
-        text: cleanText((raw as { text: string }).text),
+        author_sub: who.sub,
+        author_name: who.guest ? guestName(rawName, localeOf(c)) : who.name!,
+        text: cleanText(body.text),
         created_at: nowIso(),
       };
       await db
@@ -365,11 +496,10 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   app.delete(
     '/api/comments/threads/:tid',
     wrap(async (c) => {
-      const user = await viewerUser(c);
-      const thread = await getThread(c.req.param('tid') ?? '');
+      const { who, thread } = await resolveThreadCommenter(c, c.req.param('tid') ?? '');
       const site = (await db.select().from(sites).where(eq(sites.id, thread.siteId)))[0];
-      const isAuthor = thread.comments[0]?.author_sub === user.id;
-      const isSiteOwner = site !== undefined && site.ownerId === user.id;
+      const isAuthor = thread.comments[0]?.author_sub === who.sub;
+      const isSiteOwner = !who.guest && site !== undefined && site.ownerId === who.sub;
       if (!isAuthor && !isSiteOwner) {
         throw new ApiError(403, 'comment.delete.forbidden');
       }

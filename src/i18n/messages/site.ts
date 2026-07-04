@@ -39,6 +39,11 @@ export const site: Record<Locale, Record<string, string>> = {
     'site.title.notString': 'title must be a string',
     'site.spaFallback.notBool': 'spa_fallback must be a boolean',
     'site.commentsEnabled.notBool': 'comments_enabled must be a boolean',
+    'site.guestComments.notBool': 'guest_comments must be a boolean',
+
+    // —— 分享链接 ——
+    'site.shareHours.notInteger': 'hours must be an integer',
+    'site.shareHours.tooSmall': 'Share link duration must be at least 1 hour',
 
     // —— 回复 ——
     'site.reply.empty': 'Reply cannot be empty',
@@ -79,6 +84,11 @@ export const site: Record<Locale, Record<string, string>> = {
     'site.title.notString': 'title 必须是字符串',
     'site.spaFallback.notBool': 'spa_fallback 必须是布尔值',
     'site.commentsEnabled.notBool': 'comments_enabled 必须是布尔值',
+    'site.guestComments.notBool': 'guest_comments 必须是布尔值',
+
+    // —— 分享链接 ——
+    'site.shareHours.notInteger': 'hours 必须是整数',
+    'site.shareHours.tooSmall': '分享链接时长至少 1 小时',
 
     // —— 回复 ——
     'site.reply.empty': '回复内容不能为空',

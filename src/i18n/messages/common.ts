@@ -54,6 +54,9 @@ export const common: Record<Locale, Record<string, string>> = {
     'comment.notFound': 'Comment not found',
     'comment.site.disabled': 'Comments are not enabled for this site',
     'comment.anonymousAuthor': 'Member',
+    'comment.guestAuthor': 'Guest',
+    'comment.authorName.notString': 'author_name must be a string',
+    'comment.rateLimited': 'Too many comments, please slow down and try again later',
 
     // —— 站点(comments.ts + sites.ts 共用) ——
     'site.notFound': 'Site not found',
@@ -99,6 +102,9 @@ export const common: Record<Locale, Record<string, string>> = {
     'comment.notFound': '评论不存在',
     'comment.site.disabled': '该站点未开启评论',
     'comment.anonymousAuthor': '成员',
+    'comment.guestAuthor': '访客',
+    'comment.authorName.notString': 'author_name 必须是字符串',
+    'comment.rateLimited': '评论太频繁，请稍后再试',
 
     // —— 站点(comments.ts + sites.ts 共用) ——
     'site.notFound': '站点不存在',

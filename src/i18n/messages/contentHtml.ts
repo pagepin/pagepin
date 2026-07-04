@@ -28,6 +28,13 @@ export const contentHtml: Record<Locale, Record<string, string>> = {
     'html.expired.button': 'Sign in',
     'html.expired.owner': 'Owner',
 
+    // —— 品牌门页:分享链接失效(serving.shareExpiredHtml) ——
+    'html.shareExpired.title': 'Share link expired · pagepin',
+    'html.shareExpired.heading': 'This share link is no longer valid',
+    'html.shareExpired.body':
+      'The link has expired or was revoked by the site owner. Ask the person who shared it with you for a fresh link.',
+    'html.shareExpired.button': 'Sign in instead',
+
     // —— 品牌门页:管理员下架 451(serving.takedownHtml) ——
     'html.takedown.title': 'Unavailable · pagepin',
     'html.takedown.heading': 'This page has been disabled',
@@ -82,6 +89,12 @@ export const contentHtml: Record<Locale, Record<string, string>> = {
       '此页面曾在限定时间内公开，现已恢复为私有。分享窗口已于 {closedAgo} 关闭。',
     'html.expired.button': '登录',
     'html.expired.owner': '所有者',
+
+    // —— 品牌门页:分享链接失效 ——
+    'html.shareExpired.title': '分享链接已失效 · pagepin',
+    'html.shareExpired.heading': '此分享链接已失效',
+    'html.shareExpired.body': '链接已过期，或已被站点所有者撤销。请向分享给你的人索取新链接。',
+    'html.shareExpired.button': '改用登录',
 
     // —— 品牌门页:管理员下架 451 ——
     'html.takedown.title': '不可用 · pagepin',

@@ -29,6 +29,7 @@ import {
 import { writtenCount } from '../db/ops.js';
 import { t, type Locale } from '../i18n/index.js';
 import { jsonError, localeOf } from '../i18n/locale.js';
+import { mintShareKey } from '../share.js';
 import { purgeSiteStorage, type Storage } from '../storage/index.js';
 import { guessContentType } from '../storage/mime.js';
 import type { AppDeps, AppEnv } from '../types.js';
@@ -45,6 +46,8 @@ function siteOut(deps: AppDeps, site: SiteRow, unresolved: number) {
     public_expires_at: site.publicExpiresAt,
     spa_fallback: site.spaFallback,
     comments_enabled: site.commentsEnabled,
+    guest_comments: site.guestComments,
+    expires_at: site.expiresAt, // 非空 = 试用站硬 TTL
     unresolved_comments: unresolved,
     // 管理员下架状态(站长在控制台看到「Suspended」徽标 + 原因,理解为何 451)
     suspended: site.suspendedAt !== null,
@@ -229,6 +232,9 @@ async function getOrCreateSite(
     title,
     visibility: 'private',
     publicExpiresAt: null,
+    shareKeyVersion: 1,
+    guestComments: true,
+    expiresAt: null,
     spaFallback: false,
     commentsEnabled: true,
     currentVersionId: null,
@@ -398,6 +404,7 @@ interface SitePatchBody {
   title?: string | null;
   spa_fallback?: boolean | null;
   comments_enabled?: boolean | null;
+  guest_comments?: boolean | null;
 }
 
 export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> {
@@ -675,12 +682,52 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       if (b === null) return jsonError(c, 422, 'site.commentsEnabled.notBool');
       set.commentsEnabled = b;
     }
+    if (body.guest_comments != null) {
+      const b = parseLaxBool(body.guest_comments);
+      if (b === null) return jsonError(c, 422, 'site.guestComments.notBool');
+      set.guestComments = b;
+    }
     set.updatedAt = nowIso();
     await db.update(sites).set(set).where(eq(sites.id, site.id));
 
     const updated = await ownedSite(db, user.id, slug);
     if (!updated) return jsonError(c, 404, 'site.notFound');
     return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
+  });
+
+  // ---- 签名分享链接:无账号者凭链接可看(guest_comments 开着还可评论) ----
+  // 无状态 HS256 key,绑定 (site_id, share_key_version);默认 72h,上限 cfg.shareMaxHours。
+  r.post('/:slug/share-link', mw.mutatingUser, async (c) => {
+    const user = c.get('user');
+    const body = (await readJson<{ hours?: unknown }>(c)) ?? {};
+    const raw = body.hours;
+    if (raw != null && (typeof raw !== 'number' || !Number.isInteger(raw))) {
+      return jsonError(c, 422, 'site.shareHours.notInteger');
+    }
+    const hours0 = (raw as number | null | undefined) || 72;
+    if (hours0 < 1) return jsonError(c, 422, 'site.shareHours.tooSmall');
+    const hours = Math.min(hours0, cfg.shareMaxHours);
+    const site = await ownedSite(db, user.id, c.req.param('slug'));
+    if (!site) return jsonError(c, 404, 'site.notFound');
+    const { token, expiresAt } = await mintShareKey(cfg, site.id, site.shareKeyVersion, hours);
+    return c.json({
+      url: `${siteUrl(cfg, site.ownerHandle, site.slug)}?key=${token}`,
+      expires_at: expiresAt,
+      hours,
+      guest_comments: site.guestComments,
+    });
+  });
+
+  // ---- 撤销全部分享链接(share_key_version 自增,旧 key 与旧访客会话同时失效) ----
+  r.delete('/:slug/share-link', mw.mutatingUser, async (c) => {
+    const user = c.get('user');
+    const site = await ownedSite(db, user.id, c.req.param('slug'));
+    if (!site) return jsonError(c, 404, 'site.notFound');
+    await db
+      .update(sites)
+      .set({ shareKeyVersion: site.shareKeyVersion + 1, updatedAt: nowIso() })
+      .where(eq(sites.id, site.id));
+    return c.json({ ok: true });
   });
 
   // ---- 软删(同名 slug 可复用) ----
