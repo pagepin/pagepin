@@ -77,18 +77,21 @@ export async function verifyShareKey(cfg: Config, token: string): Promise<ShareK
   }
 }
 
-/** 会话继承 key 的到期时刻(链接失效,进来的人同刻失效)。 */
+/** 会话继承 key 的到期时刻(链接失效,进来的人同刻失效)。
+ *  gst 可选:重复兑换同一有效 key 时传入既有 gst 以保持「本浏览器稳定访客身份」不变
+ *  (否则每次点链接都换新身份,旧评论作者权/限频桶全丢)。不传则新铸一个。 */
 export async function mintShareSession(
   cfg: Config,
   siteId: string,
   keyVersion: number,
   exp: number,
+  gst?: string,
 ): Promise<string> {
   const claims: ShareSessionClaims = {
     pln: 'shares',
     sid: siteId,
     skv: keyVersion,
-    gst: `guest:${shortId(10)}`,
+    gst: gst ?? `guest:${shortId(10)}`,
     iat: Math.floor(Date.now() / 1000),
     exp,
   };

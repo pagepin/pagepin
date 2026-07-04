@@ -257,9 +257,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     );
   }
 
-  /** 站点上分享会话访客成立的前提:两个开关都开着 + 会话与 (sid, skv) 匹配。 */
+  /** 站点上分享会话访客成立的前提:未被下架 + 两个开关都开着 + 会话与 (sid, skv) 匹配。 */
   async function guestOn(c: Context<AppEnv>, site: SiteRow): Promise<Commenter | null> {
-    if (!site.guestComments || !site.commentsEnabled) return null;
+    if (site.suspendedAt !== null || !site.guestComments || !site.commentsEnabled) return null;
     const sess = await readShareSession(c, cfg, site);
     if (!sess) return null;
     return { sub: sess.gst, name: null, guest: true };
@@ -276,7 +276,10 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     if (s) {
       const site = await loadSite(handle, slug);
       if (!site) throw new ApiError(404, 'site.notFound');
-      if (!site.commentsEnabled) throw new ApiError(403, 'comment.site.disabled');
+      // 下架站点整站 451(见 serving);评论平面同口径,不给任何人(含站长)读写
+      if (site.suspendedAt !== null || !site.commentsEnabled) {
+        throw new ApiError(403, 'comment.site.disabled');
+      }
       return { who: s.who, site };
     }
     const site = await loadSite(handle, slug);

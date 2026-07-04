@@ -24,6 +24,7 @@ import type { Config } from './config.js';
 import { verifyTurnstile } from './auth/turnstile.js';
 import { commentThreads, sites } from './db/index.js';
 import type { Db, SiteRow } from './db/index.js';
+import { writtenCount } from './db/ops.js';
 import { jsonError, localeOf } from './i18n/locale.js';
 import { mintShareKey, verifyShareKey } from './share.js';
 import type { Storage } from './storage/index.js';
@@ -96,6 +97,11 @@ export function makeTrialRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const ip = clientIp(c);
     if (deps.rateLimiter && !(await deps.rateLimiter.check(`try:${ip}`, 5, 3600))) {
       return jsonError(c, 429, 'trial.rateLimited');
+    }
+    // Content-Length 早拒:multipart 有编码开销,给 2× 余量;不把超大 body 读进内存再判
+    const clen = Number(c.req.header('content-length') ?? '0');
+    if (Number.isFinite(clen) && clen > MAX_TRIAL_BYTES * 2) {
+      return jsonError(c, 413, 'trial.file.tooLarge', { mb: MAX_TRIAL_BYTES / 1024 / 1024 });
     }
     let form: FormData;
     try {
@@ -200,7 +206,6 @@ export function makeTrialRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     if (!site || site.expiresAt === null || site.expiresAt <= nowIso()) {
       return jsonError(c, 404, 'trial.notFound');
     }
-    const { verifyShareKey } = await import('./share.js');
     const k = key === undefined ? null : await verifyShareKey(cfg, key);
     if (!k || k.sid !== site.id || k.skv !== site.shareKeyVersion) {
       return jsonError(c, 401, 'auth.unauthenticated');
@@ -275,17 +280,24 @@ export function makeTrialRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const now = nowIso();
     // 注:存储对象留在原 sites/trial/<旧slug>/ 前缀下(version.storage_prefix 是真相源,
     // serving 不受影响);删除路径会按 version 前缀逐个回收(见 sites.ts)。
-    await db
-      .update(sites)
-      .set({
-        ownerId: user.id,
-        ownerHandle: user.handle,
-        slug,
-        expiresAt: null,
-        shareKeyVersion: site.shareKeyVersion + 1, // 试用期的分享链接/访客会话全部作废
-        updatedAt: now,
-      })
-      .where(eq(sites.id, site.id));
+    // 条件 UPDATE:守 (ownerId='trial' + expiresAt 非空) —— 与清理任务竞态时,若行已被
+    // sweep 删除或已被认领,0 命中 → 返回 404 而非谎报成功。
+    const wrote = await writtenCount(
+      db
+        .update(sites)
+        .set({
+          ownerId: user.id,
+          ownerHandle: user.handle,
+          slug,
+          expiresAt: null,
+          shareKeyVersion: site.shareKeyVersion + 1, // 试用期的分享链接/访客会话全部作废
+          updatedAt: now,
+        })
+        .where(
+          and(eq(sites.id, site.id), eq(sites.ownerId, TRIAL_OWNER), isNotNull(sites.expiresAt)),
+        ),
+    );
+    if (wrote === 0) return jsonError(c, 404, 'trial.notFound');
     // 线程行的反范式 (ownerHandle, slug) 同步跟走
     await db
       .update(commentThreads)
@@ -298,20 +310,38 @@ export function makeTrialRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
   return r;
 }
 
-/** 到期试用站清理:线程硬删 → 各版本存储前缀回收 → 站点行硬删。返回清理数。
- *  只清 ownerId='trial' 的行(claim 会把 expiresAt 清空,正常不会出现非 trial 的过期行,
- *  但清理是破坏性操作,再加一道保险)。 */
+/** 到期试用站清理:站点行「条件硬删」→ 命中才删线程 + 回收存储。返回清理数。
+ *  先删行、且删除条件与筛选条件同口径(ownerId='trial' + expiresAt 过期):
+ *  与 claim 存在 TOCTOU —— claim 会把 expiresAt 清空并改 ownerId,那一刻起本删除不再命中,
+ *  绝不会误删刚认领的真实站点(宁可漏清一轮,不可删真数据)。
+ *  存储回收放在行删之后、尽力而为:失败仅 warn(残留对象≤2MB,成本可接受),不因此保留行。 */
 export async function sweepExpiredTrialSites(db: Db, storage: Storage): Promise<number> {
   const now = nowIso();
   const expired = await db
-    .select()
+    .select({ id: sites.id, versions: sites.versions })
     .from(sites)
     .where(
       and(isNotNull(sites.expiresAt), lt(sites.expiresAt, now), eq(sites.ownerId, TRIAL_OWNER)),
     )
     .limit(50);
+  let removed = 0;
   for (const site of expired) {
     try {
+      // 条件删除:与 claim 竞态时,claim 已改行 → 0 命中 → 本轮跳过,不动线程/存储
+      const wrote = await writtenCount(
+        db
+          .delete(sites)
+          .where(
+            and(
+              eq(sites.id, site.id),
+              eq(sites.ownerId, TRIAL_OWNER),
+              isNotNull(sites.expiresAt),
+              lt(sites.expiresAt, now),
+            ),
+          ),
+      );
+      if (wrote === 0) continue; // 竞态:期间被 claim/改动,保留数据
+      removed++;
       await db.delete(commentThreads).where(eq(commentThreads.siteId, site.id));
       if (storage.deletePrefix) {
         for (const v of site.versions) {
@@ -322,11 +352,10 @@ export async function sweepExpiredTrialSites(db: Db, storage: Storage): Promise<
           }
         }
       }
-      await db.delete(sites).where(eq(sites.id, site.id));
     } catch (e) {
       console.warn(`试用站清理失败 ${site.id}:`, e);
     }
   }
-  if (expired.length > 0) console.log(`trial sweep: removed ${expired.length} expired site(s)`);
-  return expired.length;
+  if (removed > 0) console.log(`trial sweep: removed ${removed} expired site(s)`);
+  return removed;
 }

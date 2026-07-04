@@ -264,6 +264,26 @@ export function loadConfig(env: Env): Config {
     throw new Error('缺少 PAGEPIN_SECRET(会话签名密钥)');
   }
 
+  // 匿名试用是「完全匿名的任意 HTML 托管」,两条硬前提缺一即拒(避免半配置暴露高危面):
+  //   1) 必须双域 —— 单域下试用页与控制台同 origin,匿名者上传的 <script> 能读 JS 可见的
+  //      pp_csrf、借已登录访问者的 pp_session 冒充其调 /api/*(账号/控制台接管)。
+  //   2) 必须配 Turnstile —— 否则匿名写接口仅剩「可伪造的 IP 限频」,机器人可无限灌。
+  const trialEnabled = bool(env, 'PAGEPIN_TRIAL', false);
+  if (trialEnabled) {
+    if (mode !== 'dual') {
+      throw new Error(
+        'PAGEPIN_TRIAL 需双域模式(设 PAGEPIN_CONSOLE_HOST + PAGEPIN_CONTENT_HOST):' +
+          '单域下匿名上传的 HTML 与控制台同 origin,可冒充已登录用户接管账号。',
+      );
+    }
+    if (!turnstile) {
+      throw new Error(
+        'PAGEPIN_TRIAL 需同时配 Turnstile(PAGEPIN_TURNSTILE_SITE_KEY + _SECRET_KEY):' +
+          '匿名写接口没有人机校验只剩可伪造的 IP 限频。',
+      );
+    }
+  }
+
   return {
     port: num(env, 'PAGEPIN_PORT', 8000),
     dataDir: str(env, 'PAGEPIN_DATA_DIR', './data'),
@@ -297,7 +317,7 @@ export function loadConfig(env: Env): Config {
     deployTtlH: num(env, 'PAGEPIN_DEPLOY_TTL_H', 2),
     publicMaxHours: num(env, 'PAGEPIN_PUBLIC_MAX_HOURS', 168),
     shareMaxHours: num(env, 'PAGEPIN_SHARE_MAX_HOURS', 720),
-    trialEnabled: bool(env, 'PAGEPIN_TRIAL', false),
+    trialEnabled,
     trialTtlMinutes: num(env, 'PAGEPIN_TRIAL_TTL_MIN', 60),
     deviceTokenTtlDays: num(env, 'PAGEPIN_DEVICE_TOKEN_TTL_DAYS', 90),
     secureCookies: mode === 'dual' ? externalScheme === 'https' : baseUrl.startsWith('https://'),

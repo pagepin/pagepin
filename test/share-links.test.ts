@@ -307,6 +307,41 @@ test('anonymous gets login wall; valid ?key= 303-redirects with share cookie; co
   assert.ok((await page.text()).includes('Hello Secret'));
 });
 
+// ───────────── A2b. 重复兑换同一有效 key:保持 guest 身份稳定(不换 gst)─────────────
+
+test('re-redeeming a still-valid key keeps the same guest identity', async () => {
+  const { app, deps, ownerCookie } = await setup();
+  const key = await mintKey(app, ownerCookie, 'demo');
+
+  const first = await getPage(app, `/p/alice/demo/?key=${key}`);
+  const cookie1 = shareCookieOf(first);
+  const sub1 = (await (
+    await app.fetch(
+      new Request('http://localhost/api/viewer?handle=alice&slug=demo', {
+        headers: { cookie: cookie1 },
+      }),
+    )
+  ).json()) as { sub: string };
+
+  // 带着已有会话 Cookie 再点同一链接:仍 303,但 gst 不变
+  const second = await app.fetch(
+    new Request(`http://localhost/p/alice/demo/?key=${key}`, {
+      headers: { accept: 'text/html', cookie: cookie1 },
+    }),
+  );
+  assert.equal(second.status, 303);
+  const cookie2 = shareCookieOf(second);
+  const sub2 = (await (
+    await app.fetch(
+      new Request('http://localhost/api/viewer?handle=alice&slug=demo', {
+        headers: { cookie: cookie2 },
+      }),
+    )
+  ).json()) as { sub: string };
+  assert.equal(sub2.sub, sub1.sub, 'guest identity is stable across re-redemption');
+  void deps;
+});
+
 // ───────────────────────── A3. key 绑定站点 ─────────────────────────
 
 test('a share key minted for site A does not open site B', async () => {

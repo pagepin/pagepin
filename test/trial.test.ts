@@ -73,11 +73,13 @@ class MemStorage implements Storage {
 }
 
 async function setup(opts: { trial?: boolean; rateLimiter?: boolean } = {}) {
-  const cfg = loadConfig({
-    PAGEPIN_SECRET: 'test-secret',
-    PAGEPIN_BASE_URL: 'http://localhost:8000',
-    PAGEPIN_TRIAL: opts.trial === false ? '' : 'true',
-  });
+  // 直接覆盖 trialEnabled 而非走 PAGEPIN_TRIAL env:loadConfig 现在强制 trial 只能
+  // 双域 + 配 Turnstile(见 config.ts 守卫);这里用单域 serving 路径('/p/…')测路由逻辑,
+  // config 守卫本身另有 'loadConfig 守卫' 用例覆盖。
+  const cfg = {
+    ...loadConfig({ PAGEPIN_SECRET: 'test-secret', PAGEPIN_BASE_URL: 'http://localhost:8000' }),
+    trialEnabled: opts.trial !== false,
+  };
   const db = await makeTestDb();
   const storage = new MemStorage();
   await db.insert(users).values({
@@ -131,6 +133,28 @@ async function redeem(app: Hono<AppEnv>, path: string, key: string): Promise<str
   assert.ok(m, 'share cookie set');
   return `${m![1]}=${m![2]}`;
 }
+
+test('loadConfig 守卫:trial 需双域 + Turnstile', () => {
+  const base = { PAGEPIN_SECRET: 's', PAGEPIN_BASE_URL: 'https://x.example' };
+  const dual = {
+    ...base,
+    PAGEPIN_CONSOLE_HOST: 'app.example',
+    PAGEPIN_CONTENT_HOST: 'pages.example',
+  };
+  const ts = {
+    PAGEPIN_TURNSTILE_SITE_KEY: '0xsite',
+    PAGEPIN_TURNSTILE_SECRET_KEY: '0xsecret',
+  };
+  // 单域 + trial → 抛(同源接管风险)
+  assert.throws(() => loadConfig({ ...base, PAGEPIN_TRIAL: 'true' }), /双域/);
+  // 双域但无 Turnstile → 抛
+  assert.throws(() => loadConfig({ ...dual, PAGEPIN_TRIAL: 'true' }), /Turnstile/);
+  // 双域 + Turnstile → 通过,trialEnabled=true
+  const ok = loadConfig({ ...dual, ...ts, PAGEPIN_TRIAL: 'true' });
+  assert.equal(ok.trialEnabled, true);
+  // 默认关:不设 PAGEPIN_TRIAL,单域也不抛
+  assert.equal(loadConfig(base).trialEnabled, false);
+});
 
 test('试用开关默认关:POST /api/try → 404 trial.disabled', async () => {
   const { app } = await setup({ trial: false });

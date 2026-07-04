@@ -19,6 +19,8 @@ import { makeSiteRoutes } from '../src/api/sites.js';
 import { mint } from '../src/auth/sessions.js';
 import { makeCommentRoutes } from '../src/comments.js';
 import { loadConfig } from '../src/config.js';
+import { eq } from 'drizzle-orm';
+
 import { sites, users, type Db } from '../src/db/index.js';
 import { MemoryRateLimiter } from '../src/ratelimit.js';
 import { makeServingRoutes } from '../src/serving.js';
@@ -380,6 +382,27 @@ test('disabling guest_comments closes the API but keeps the page viewable (no ov
   const offHtml = await off.text();
   assert.ok(offHtml.includes('Hello Secret'), 'guest can still view the page');
   assert.ok(!offHtml.includes('/_pagepin/comments.js'), 'overlay not injected when off');
+});
+
+test('admin takedown (suspended) closes the guest comment plane', async () => {
+  const { app, db, ownerCookie } = await setup();
+  const guest = await guestSession(app, ownerCookie);
+  // 访客先能建线程
+  assert.equal(
+    (await api(app, 'POST', '/api/comments/alice/demo', { body: threadBody(), cookie: guest }))
+      .status,
+    200,
+  );
+  // 管理员下架
+  await db.update(sites).set({ suspendedAt: nowIso() }).where(eq(sites.slug, 'demo'));
+  // 访客读写/身份全部 401(与 serving 451 同口径,评论平面不放行)
+  for (const [m, p, b] of [
+    ['GET', '/api/comments/alice/demo?path=index.html', undefined],
+    ['POST', '/api/comments/alice/demo', threadBody()],
+    ['GET', '/api/viewer?handle=alice&slug=demo', undefined],
+  ] as const) {
+    assert.equal((await api(app, m, p, { body: b, cookie: guest })).status, 401, `${m} ${p}`);
+  }
 });
 
 // ─────────────── B5. 限频:第 21 条线程 429 ───────────────

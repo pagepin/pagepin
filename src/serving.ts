@@ -642,7 +642,11 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     if (keyParam !== undefined) {
       const k = await verifyShareKey(cfg, keyParam);
       if (k && k.sid === site.id && k.skv === site.shareKeyVersion) {
-        setShareCookie(c, cfg, site.id, await mintShareSession(cfg, site.id, k.skv, k.exp), k.exp);
+        // 重复兑换同一有效 key(从聊天/书签再点):保持既有 guest 身份不变,只续期,
+        // 否则每次都换新 'guest:<id>' → 旧线程作者权、'我的评论'标记、限频桶全部失效。
+        const existing = await readShareSession(c, cfg, site);
+        const token = await mintShareSession(cfg, site.id, k.skv, k.exp, existing?.gst);
+        setShareCookie(c, cfg, site.id, token, k.exp);
         const url = new URL(c.req.url);
         url.searchParams.delete('key');
         return c.redirect(url.pathname + url.search, 303);
