@@ -20,6 +20,24 @@ Authoritative quotas always come from `GET /api/me`.
 | `GET /api/sites/{slug}/comments` | Page comments (unresolved by default; `?all=true` includes resolved) |
 | `POST /api/sites/{slug}/comments/{thread_id}/replies` | `{"text":"…"}` — reply to a thread |
 | `PATCH /api/sites/{slug}/comments/{thread_id}` | `{"resolved":true}` / `{"resolved":false}` |
+| `POST /api/sites/{slug}/share-link` | `{"hours":72}` (optional; default 72) → `{url, expires_at}` — signed guest link, see below |
+| `DELETE /api/sites/{slug}/share-link` | Revoke **all** outstanding share links (and their guest sessions) for the site |
+
+## Share links (review without accounts)
+
+`POST /api/sites/{slug}/share-link` mints a stateless signed URL
+(`…/{slug}/?key=<token>`). Anyone opening it can **view the private site and pin
+comments as a guest** — no account needed. This is the preferred way to collect
+review feedback from people outside the instance:
+
+- Deploy → create a share link → hand the `url` to reviewers (chat/IM/email).
+- Guests appear in `GET /api/sites/{slug}/comments` with their self-given name;
+  their `author_sub` starts with `guest:`. They can comment and reply but never
+  resolve — resolving stays with you (the token owner) and logged-in members.
+- Links expire (`hours`, server-capped, default cap 720h) and are revocable in
+  one call; revoking also invalidates guests who already entered.
+- Guest commenting can be turned off per site: `PATCH /api/sites/{slug}`
+  `{"guest_comments":false}` (the link then grants view-only access).
 
 ## Deploy details
 
@@ -79,6 +97,14 @@ thread you can't judge, relay it to the user rather than resolving it yourself.
   7 days); anything beyond is hard-clamped.
 - `401` invalid or revoked token · `404` site not found · `409` set a handle in
   the console first · `413` size limit exceeded · `422` invalid slug/path.
+- **Recovering from first-run 4xx** (fresh accounts hit these; don't give up):
+  - `409` `site.handle.required` — the account has no handle yet. Fix it via the
+    API: `GET /api/me/handle/suggest` for a free suggestion, then
+    `POST /api/me/handle` `{"handle":"…"}` (works with the PAT), and retry the
+    deploy. If that returns `403 auth.emailUnverified`, fall through to the next
+    point.
+  - `403` `auth.emailUnverified` — the user must click the verification email
+    (or sign in with Google/GitHub once). Tell the user, wait, retry.
 - Error bodies are `{ "detail": "<message>", "code": "<stable.key>" }`. Branch on
   the language-independent `code` (e.g. `auth.unauthenticated`, `site.quota.exceeded`,
   `comment.text.empty`); `detail` is a human message localized per request. Set the

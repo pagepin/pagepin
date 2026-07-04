@@ -122,6 +122,19 @@ curl -fsS -X PATCH "$PAGEPIN_BASE/api/sites/my-demo/comments/$TID" \
 For a `question`-type thread you can't judge, **relay it to the user** instead
 of resolving it yourself.
 
+**Inviting reviewers without accounts**: mint a signed share link and hand that
+out instead of the plain URL — anyone opening it can view the private page and
+pin comments as a guest (their feedback shows up in the same comments export):
+
+```bash
+curl -fsS -X POST "$PAGEPIN_BASE/api/sites/my-demo/share-link" \
+  -H "Authorization: Bearer $PP_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"hours":72}'          # → {"url":"…?key=…","expires_at":"…"}
+```
+
+`DELETE` the same path to revoke every outstanding link at once. Details (guest
+permissions, per-site guest toggle) in `references/api.md`.
+
 ## More
 
 Full endpoint list, large-site (>~90MB) batched upload, version/rollback/delete,

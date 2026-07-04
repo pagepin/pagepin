@@ -8,6 +8,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Signed share links — review without accounts.** `POST /api/sites/{slug}/share-link`
+  mints a stateless, expiring `?key=` URL (default 72h, capped by the new
+  `PAGEPIN_SHARE_MAX_HOURS`, default 720h). Anyone opening it gets a per-browser
+  guest session cookie and can view the private site; `DELETE` the same path
+  revokes every outstanding link **and** the guest sessions that already entered
+  (`sites.share_key_version` bump). Invalid/expired keys get a dedicated branded
+  gate page. The console gains a per-site **Share** dialog (duration picker,
+  one-time link display, revoke-all).
+- **Guest comments.** Share-link guests can pin comments, reply, and delete
+  their own threads — never resolve or re-label. Guests self-identify with a
+  display name (sanitized, 40 chars) stored per comment; their `author_sub` is
+  `guest:`-prefixed in every export so agents and the overlay can tell them
+  apart (the overlay shows a `guest` badge and hides resolve controls). Per-site
+  `guest_comments` toggle (default on; guests only ever arrive through an
+  owner-minted link); per-guest and per-IP write rate limits.
+- **Anonymous drop trial (opt-in, `PAGEPIN_TRIAL`).** `POST /api/try` accepts a
+  single HTML file (≤2MB) with no account — behind Turnstile (when configured)
+  and per-IP limits — and returns a signed share URL that lives for
+  `PAGEPIN_TRIAL_TTL_MIN` (default 60 minutes), plus a key-authenticated
+  comments export (`GET /api/try/{id}/comments?key=…`) and a claim token.
+  `POST /api/try/{id}/claim` adopts the page into an account (pick a slug, TTL
+  cleared, trial links revoked). Trial pages render a countdown ribbon, are
+  `noindex`, 404 at expiry, and are hard-deleted (threads + storage + row) by a
+  sweeper (Node interval / Workers cron). Trial sites live under the reserved
+  `try` handle.
 - **Internationalization (English / 中文).** Every user-facing surface is now
   localized: the React console (with a one-click language switcher), server-rendered
   HTML (login wall, markdown/image viewer shells, directory index, 404/expired/takedown
