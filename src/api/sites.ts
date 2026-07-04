@@ -704,7 +704,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     if (raw != null && (typeof raw !== 'number' || !Number.isInteger(raw))) {
       return jsonError(c, 422, 'site.shareHours.notInteger');
     }
-    const hours0 = (raw as number | null | undefined) || 72;
+    // ?? 而非 ||:hours=0 应 422 tooSmall,不能静默落到默认值
+    const hours0 = (raw as number | null | undefined) ?? 72;
     if (hours0 < 1) return jsonError(c, 422, 'site.shareHours.tooSmall');
     const hours = Math.min(hours0, cfg.shareMaxHours);
     const site = await ownedSite(db, user.id, c.req.param('slug'));
@@ -741,7 +742,18 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       .update(sites)
       .set({ deletedAt: now, updatedAt: now, slug: tombstoneSlug(site.slug, site.id) })
       .where(eq(sites.id, site.id));
-    // 软删后回收存储(尽力而为;同名 slug 复用是新建,不与已删行的 storage 冲突)
+    // 软删后回收存储(尽力而为;同名 slug 复用是新建,不与已删行的 storage 冲突)。
+    // 版本前缀是真相源,逐个回收 —— 从试用站 claim 来的站点,对象仍留在原 sites/trial/ 前缀下,
+    // 只按 (ownerId, slug) 推算会漏删;canonical 前缀再兜一次底(pruned 版本残留等)。
+    if (storage.deletePrefix) {
+      for (const v of site.versions) {
+        try {
+          await storage.deletePrefix(v.storage_prefix);
+        } catch (e) {
+          console.warn(`存储回收失败 ${v.storage_prefix}:`, e);
+        }
+      }
+    }
     await purgeSiteStorage(storage, site.ownerId, site.slug);
     return c.json({ ok: true });
   });

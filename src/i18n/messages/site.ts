@@ -26,6 +26,7 @@ export const site: Record<Locale, Record<string, string>> = {
 
     // —— slug / handle ——
     'site.handle.required': 'Please set a handle first',
+    'site.slug.taken': 'You already have a site with this name',
     'site.slug.invalid':
       'Site name must be lowercase letters, digits, or hyphens, and ≤64 characters',
 
@@ -72,6 +73,7 @@ export const site: Record<Locale, Record<string, string>> = {
 
     // —— slug / handle ——
     'site.handle.required': '请先设置 handle',
+    'site.slug.taken': '你已有同名站点',
     'site.slug.invalid': '站点名需小写字母/数字/中划线，≤64 位',
 
     // —— 分批部署会话 ——

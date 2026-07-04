@@ -14,6 +14,7 @@ import { SKILL_MD, API_MD } from './generated/edge-assets.js';
 import { htmlRewriterInject } from './serving-inject.js';
 import { R2Storage } from './storage/r2.js';
 import { MemoryRateLimiter } from './ratelimit.js';
+import { sweepExpiredTrialSites } from './trial.js';
 import type { AppDeps } from './types.js';
 
 export interface Env {
@@ -77,5 +78,13 @@ export default {
   async fetch(req: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const app = await getApp(env);
     return app.fetch(req) as Promise<Response>;
+  },
+  /** cron(wrangler.jsonc triggers):到期试用站清理(线程 + 存储 + 站点行硬删)。 */
+  async scheduled(_event: unknown, env: Env, _ctx: ExecutionContext): Promise<void> {
+    try {
+      await sweepExpiredTrialSites(createD1Db(env.DB), new R2Storage(env.BUCKET));
+    } catch (e) {
+      console.error('trial sweep 失败:', e);
+    }
   },
 };

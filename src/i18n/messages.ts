@@ -13,6 +13,7 @@ import { authHtml } from './messages/authHtml.js';
 import { common } from './messages/common.js';
 import { contentHtml } from './messages/contentHtml.js';
 import { site } from './messages/site.js';
+import { trial } from './messages/trial.js';
 
 /** 所有域目录;合并顺序无关紧要(无碰撞由测试保证)。 */
 const PARTS: ReadonlyArray<Record<Locale, Record<string, string>>> = [
@@ -23,6 +24,7 @@ const PARTS: ReadonlyArray<Record<Locale, Record<string, string>>> = [
   authflow,
   contentHtml,
   authHtml,
+  trial,
 ];
 
 function build(): Record<Locale, Record<string, string>> {

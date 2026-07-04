@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 import { extOf, relHref } from './autoindex.js';
+import { consoleBase } from './config.js';
 import {
   CLOCK_SVG,
   escapeHtml,
@@ -28,12 +29,7 @@ import { t, type Locale } from './i18n/index.js';
 import { jsonError, localeOf } from './i18n/locale.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
-import {
-  mintShareSession,
-  readShareSession,
-  setShareCookie,
-  verifyShareKey,
-} from './share.js';
+import { mintShareSession, readShareSession, setShareCookie, verifyShareKey } from './share.js';
 import { currentVersion, isPubliclyVisible, sites, users } from './db/index.js';
 import type { SiteRow, SiteVersion } from './db/index.js';
 import { NotFoundError, NotModifiedError } from './storage/index.js';
@@ -169,6 +165,32 @@ function linkExpiredHtml(
 <div class="row">${t(locale, 'html.expired.owner')} · <span class="mono" style="color:#8a929b">@${escapeHtml(ownerHandle)}</span></div>
 <div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
     locale,
+  );
+}
+
+/** 试用站缎带(右下角 pill):到期倒计时 + 「保留此页」引导注册。
+ *  做成内联脚本而非裸 <div>——注入点可能落在 </head> 前,div 进 head 依赖解析器搬运,
+ *  脚本则合法且自会等 body。样式全内联,零外部依赖。 */
+function trialRibbonHtml(locale: Locale, expiresAt: string, keepHref: string, now: Date): string {
+  const mins = Math.max(1, Math.round((new Date(expiresAt).getTime() - now.getTime()) / 60000));
+  const left =
+    mins < 90
+      ? t(locale, 'html.trial.minutes', { n: mins })
+      : t(locale, 'html.trial.hours', { n: Math.round(mins / 60) });
+  const payload = JSON.stringify({
+    label: t(locale, 'html.trial.ribbon', { left }),
+    keep: t(locale, 'html.trial.keep'),
+    href: keepHref,
+  }).replaceAll('</', '<\\/');
+  return (
+    `<script>(function(){var d=${payload};function a(){var e=document.createElement('div');` +
+    `e.id='pp-trial-ribbon';e.style.cssText='position:fixed;bottom:14px;right:14px;z-index:2147480000;` +
+    `font:12.5px/1.4 -apple-system,system-ui,sans-serif;background:#0c1113;color:#e7ebec;border-radius:999px;` +
+    `padding:8px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 4px 14px rgba(17,22,27,.25)';` +
+    `var s=document.createElement('span');s.textContent=d.label;var l=document.createElement('a');` +
+    `l.href=d.href;l.textContent=d.keep;l.style.cssText='color:#2bb3a3;font-weight:600;text-decoration:none';` +
+    `e.appendChild(s);e.appendChild(l);document.body.appendChild(e);}` +
+    `if(document.body)a();else addEventListener('DOMContentLoaded',a);})();</script>`
   );
 }
 
@@ -662,8 +684,9 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     }
     // 评论层注入:登录访问者一律注入;分享会话访客仅当站点开了 guest 评论才注入
     // (匿名公开访客[对外客户]看到的仍是干净页面)
-    const canInject =
-      site.commentsEnabled && (viewerActive || (shareViewer && site.guestComments));
+    const canInject = site.commentsEnabled && (viewerActive || (shareViewer && site.guestComments));
+    // 试用站(匿名 drop):HTML 一律注入右下角缎带(到期倒计时 + 引导注册保留)
+    const isTrial = site.expiresAt !== null;
 
     // 目录式 URL(空路径或尾斜杠)直接落 index.html
     const raw = !rest || rest.endsWith('/') ? rest + 'index.html' : rest;
@@ -747,9 +770,10 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     let body: ReadableStream<Uint8Array> | null = null;
     let hit = '';
     for (const cand of candidates) {
-      // 注入候选(HTML 且开评论)不带条件请求:响应体会被改写,存储层的 ETag 对不上号
+      // 注入候选(HTML 且开评论/试用缎带)不带条件请求:响应体会被改写,存储层的 ETag 对不上号
       const candLower = cand.toLowerCase();
-      const injectThis = canInject && (candLower.endsWith('.html') || candLower.endsWith('.htm'));
+      const injectThis =
+        (canInject || isTrial) && (candLower.endsWith('.html') || candLower.endsWith('.htm'));
       try {
         const o = await storage.open(cur.storage_prefix + cand, {
           ifNoneMatch: injectThis ? undefined : c.req.header('if-none-match'),
@@ -766,26 +790,31 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     }
     if (meta === null || body === null) return notFound(c, siteRoot);
 
-    // 评论层注入:HTML 改写后字节/长度变,存储层的 ETag/Last-Modified/Content-Length 都不再一致,一律不带
+    // 注入(评论层 + 试用缎带):HTML 改写后字节/长度变,
+    // 存储层的 ETag/Last-Modified/Content-Length 都不再一致,一律不带
     const hitLower = hit.toLowerCase();
-    const injectableHtml =
-      canInject &&
+    const htmlHit =
       (hitLower.endsWith('.html') || hitLower.endsWith('.htm')) &&
       meta.contentType.includes('html');
-    if (injectableHtml && (meta.contentLength ?? 0) <= INJECT_MAX_BYTES) {
+    let tag = '';
+    if (htmlHit && isTrial) {
+      tag += trialRibbonHtml(locale, site.expiresAt!, `${consoleBase(cfg)}/signup`, now);
+    }
+    if (htmlHit && canInject) tag += injectTag(handle, slug, hit, cur.id, locale);
+    if (tag && (meta.contentLength ?? 0) <= INJECT_MAX_BYTES) {
       // ≤5MB:整读 + 字节级注入(跨运行时一致,保非 UTF-8/BOM 原样)
       const buf = new Uint8Array(await new Response(body).arrayBuffer());
-      const out = injectScriptBytes(buf, injectTag(handle, slug, hit, cur.id, locale));
+      const out = injectScriptBytes(buf, tag);
       return new Response(out, {
         headers: { ...baseHeaders, 'Content-Type': meta.contentType },
       });
     }
-    if (injectableHtml && injectHtmlStream) {
+    if (tag && injectHtmlStream) {
       // >5MB:HTMLRewriter 流式注入(Workers;去整读上限,不占内存)
       const src = new Response(body, {
         headers: { ...baseHeaders, 'Content-Type': meta.contentType },
       });
-      return injectHtmlStream(src, injectTag(handle, slug, hit, cur.id, locale));
+      return injectHtmlStream(src, tag);
     }
     // 否则(>5MB 且无流式注入器,如 Node)原样流出,不注入
 

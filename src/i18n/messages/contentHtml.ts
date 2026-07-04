@@ -35,6 +35,12 @@ export const contentHtml: Record<Locale, Record<string, string>> = {
       'The link has expired or was revoked by the site owner. Ask the person who shared it with you for a fresh link.',
     'html.shareExpired.button': 'Sign in instead',
 
+    // —— 试用站缎带(serving.trialRibbonHtml) ——
+    'html.trial.ribbon': 'Trial page · expires in {left}',
+    'html.trial.keep': 'Keep this page',
+    'html.trial.minutes': '{n} min',
+    'html.trial.hours': '{n} h',
+
     // —— 品牌门页:管理员下架 451(serving.takedownHtml) ——
     'html.takedown.title': 'Unavailable · pagepin',
     'html.takedown.heading': 'This page has been disabled',
@@ -95,6 +101,12 @@ export const contentHtml: Record<Locale, Record<string, string>> = {
     'html.shareExpired.heading': '此分享链接已失效',
     'html.shareExpired.body': '链接已过期，或已被站点所有者撤销。请向分享给你的人索取新链接。',
     'html.shareExpired.button': '改用登录',
+
+    // —— 试用站缎带 ——
+    'html.trial.ribbon': '试用页 · {left} 后过期',
+    'html.trial.keep': '保留此页',
+    'html.trial.minutes': '{n} 分钟',
+    'html.trial.hours': '{n} 小时',
 
     // —— 品牌门页:管理员下架 451 ——
     'html.takedown.title': '不可用 · pagepin',

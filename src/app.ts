@@ -24,6 +24,7 @@ import { makeSiteRoutes } from './api/sites.js';
 import { makeTokenRoutes } from './api/tokens.js';
 import { makeAuthRoutes } from './auth/routes.js';
 import { makeCommentRoutes } from './comments.js';
+import { makeTrialRoutes } from './trial.js';
 import { errorBody } from './i18n/index.js';
 import { localeOf, makeLocaleMiddleware } from './i18n/locale.js';
 import { makeServingRoutes } from './serving.js';
@@ -123,6 +124,7 @@ async function mountConsolePlane(
   app.route('/', makeSiteRoutes(deps, mw));
   app.route('/', makeTokenRoutes(deps, mw));
   app.route('/', makeDeviceRoutes(deps, mw)); // OAuth2 设备授权(/api/device/*):AI/CLI 经浏览器登录换 token
+  app.route('/', makeTrialRoutes(deps, mw)); // 匿名试用(/api/try*,默认关;官网 drop-zone 的后端)
   app.route('/', makeAdminRoutes(deps, mw));
   if (opts.skillMd) mountSkillDocs(app, opts.skillMd, opts.apiMd);
 }

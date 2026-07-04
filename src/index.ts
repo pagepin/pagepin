@@ -21,6 +21,7 @@ import { createLibsqlDb } from './db/libsql.js';
 import { createMailer } from './mail/factory.js';
 import { resumeSweep } from './auth/reconcile.js';
 import { createStorage } from './storage/factory.js';
+import { sweepExpiredTrialSites } from './trial.js';
 
 async function main(): Promise<void> {
   // secret:env 优先;否则持久化在 {dataDir}/secret(首启生成,0600)——
@@ -92,6 +93,12 @@ async function main(): Promise<void> {
     },
     { consoleDist, skillMd, apiMd, mountConsole: mountConsoleStatic },
   );
+
+  // 到期试用站清理:启动即扫一次,此后每 10 分钟(serving 侧另有请求时判定,节奏无关正确性)
+  const trialSweep = () =>
+    sweepExpiredTrialSites(db, storage).catch((e) => console.warn('trial sweep 失败:', e));
+  void trialSweep();
+  setInterval(trialSweep, 10 * 60 * 1000).unref();
 
   serve({ fetch: app.fetch, port: cfg.port }, (info) => {
     console.log(

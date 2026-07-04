@@ -24,8 +24,13 @@ export const RESERVED_SEGMENTS = new Set([
 const HANDLE_RE = /^[a-z][a-z0-9-]{1,31}$/;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
+/** handle 保留名 = URL 保留段 + 系统命名空间。
+ *  'try' 是匿名试用站的 handle(trial.ts),必须能在数据平面被伺服,
+ *  故只进这里、不进 RESERVED_SEGMENTS(后者会让 serving 直接 404)。 */
+export const RESERVED_HANDLES = new Set([...RESERVED_SEGMENTS, 'try']);
+
 export function validHandle(handle: string): boolean {
-  return HANDLE_RE.test(handle) && !RESERVED_SEGMENTS.has(handle);
+  return HANDLE_RE.test(handle) && !RESERVED_HANDLES.has(handle);
 }
 
 export function validSlug(slug: string): boolean {

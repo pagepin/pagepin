@@ -90,6 +90,11 @@ export interface Config {
   publicMaxHours: number;
   /** 签名分享链接(?key=)时效上限(小时);链接是定向、可撤销的,上限可比 public 宽。 */
   shareMaxHours: number;
+  /** 匿名试用(无账号 drop 单个 HTML → 限时链接):默认关,官方服务显式开启。
+   *  开着 = 公开互联网可匿名上传,务必同时配 Turnstile 与边缘限速。 */
+  trialEnabled: boolean;
+  /** 试用站 TTL(分钟);到期请求即 404,清理任务随后连存储硬删。 */
+  trialTtlMinutes: number;
   /** 设备授权(/api/device)铸出的 token 的有效期(天);0 = 不过期。普通 PAT 不受此限。 */
   deviceTokenTtlDays: number;
   secureCookies: boolean;
@@ -292,6 +297,8 @@ export function loadConfig(env: Env): Config {
     deployTtlH: num(env, 'PAGEPIN_DEPLOY_TTL_H', 2),
     publicMaxHours: num(env, 'PAGEPIN_PUBLIC_MAX_HOURS', 168),
     shareMaxHours: num(env, 'PAGEPIN_SHARE_MAX_HOURS', 720),
+    trialEnabled: bool(env, 'PAGEPIN_TRIAL', false),
+    trialTtlMinutes: num(env, 'PAGEPIN_TRIAL_TTL_MIN', 60),
     deviceTokenTtlDays: num(env, 'PAGEPIN_DEVICE_TOKEN_TTL_DAYS', 90),
     secureCookies: mode === 'dual' ? externalScheme === 'https' : baseUrl.startsWith('https://'),
     defaultLocale,

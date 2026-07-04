@@ -41,6 +41,9 @@
 
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "pagepin" }],
 
+  // 到期试用站清理(worker.ts scheduled;serving 侧另有请求时判定,cron 只管回收)。
+  "triggers": { "crons": ["*/15 * * * *"] },
+
   // 双域 custom domains 绑同一 Worker(zone 须在本账号);custom_domain=true 自动建 DNS + 边缘证书。
   // 按 Host 分流:app.pagepin.ai→控制台/API,pagepin.page→内容(见 app.ts 外层 host 路由)。
   // 注:营销官网 pagepin.ai 是独立的 Cloudflare Pages 站(仓库 pagepin-site),不在本 Worker。
@@ -68,7 +71,9 @@
     // 启用:把 PAGEPIN_MAIL_PROVIDER 改 "resend",在 Resend 验证 pagepin.ai 发件域后
     //   `wrangler secret put PAGEPIN_RESEND_API_KEY` 放 key,再 cf:deploy;PAGEPIN_MAIL_FROM 须用该域地址。
     "PAGEPIN_MAIL_PROVIDER": "resend",
-    "PAGEPIN_MAIL_FROM": "pagepin <notifications@pagepin.ai>"
+    "PAGEPIN_MAIL_FROM": "pagepin <notifications@pagepin.ai>",
+    // 匿名试用(官网 drop-zone 的后端):默认关;官方服务开(Turnstile 已配 + CF 边缘限速兜底)。
+    "PAGEPIN_TRIAL": "true"
   }
 
   // secrets(wrangler secret put):PAGEPIN_SECRET、PAGEPIN_ADMIN_EMAIL、PAGEPIN_ADMIN_PASSWORD、PAGEPIN_OIDC_CLIENT_SECRET、
