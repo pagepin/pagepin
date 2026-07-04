@@ -8,7 +8,7 @@
  *     访问一律走签名分享链接(share.ts):部署响应直接返回带 ?key= 的 URL。
  *   - 三个无状态令牌复用同一 HS256 秘钥:share key(看+guest 评)、claim token
  *     (注册后认领,pln='claim')。全部到期即失效,不落库。
- *   - 防滥用:Turnstile(配置了才强制)+ per-IP 限频 + 单文件 ≤2MB 仅 .html +
+ *   - 防滥用:Turnstile(配置了才强制)+ per-IP 限频 + 单文件 ≤2MB 仅 .html/.md +
  *     serving 全局 noindex + 页面右下角试用缎带(serving.ts 注入)。
  *   - 清理:sweepExpiredTrialSites 由 Node setInterval / Workers cron 调用;
  *     serving 侧另有请求时到期判定,正确性不依赖清理节奏。
@@ -119,12 +119,15 @@ export function makeTrialRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     const file = form.get('file');
     if (!(file instanceof File)) return jsonError(c, 422, 'trial.file.missing');
     const lower = (file.name || '').toLowerCase();
-    if (!lower.endsWith('.html') && !lower.endsWith('.htm')) {
+    // Markdown 存成 index.md,serving 的查看器壳渲染;目录 URL 缺 index.html 时也会回退到它
+    const isMd = lower.endsWith('.md') || lower.endsWith('.markdown');
+    if (!isMd && !lower.endsWith('.html') && !lower.endsWith('.htm')) {
       return jsonError(c, 422, 'trial.file.notHtml');
     }
     if (file.size > MAX_TRIAL_BYTES) {
       return jsonError(c, 413, 'trial.file.tooLarge', { mb: MAX_TRIAL_BYTES / 1024 / 1024 });
     }
+    const indexName = isMd ? 'index.md' : 'index.html';
 
     const created = nowIso();
     const expiresAt = new Date(Date.now() + cfg.trialTtlMinutes * 60 * 1000).toISOString();
@@ -155,7 +158,7 @@ export function makeTrialRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
             total_bytes: file.size,
             uploaded_by: TRIAL_OWNER,
             created_at: created,
-            files: ['index.html'],
+            files: [indexName],
           },
         ],
         createdAt: created,
@@ -174,9 +177,9 @@ export function makeTrialRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     if (!site) return jsonError(c, 500, 'server.internalError');
 
     await storage.put(
-      site.versions[0]!.storage_prefix + 'index.html',
+      site.versions[0]!.storage_prefix + indexName,
       file.stream(),
-      'text/html; charset=utf-8',
+      isMd ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8',
     );
 
     const { token } = await mintShareKey(cfg, site.id, 1, cfg.trialTtlMinutes / 60);
@@ -185,7 +188,8 @@ export function makeTrialRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv>
     console.log(`trial deploy slug=${site.slug} bytes=${file.size} ip=${ip}`);
     return c.json({
       site_id: site.id,
-      url: `${siteUrl(cfg, TRIAL_HANDLE, site.slug)}?key=${token}`,
+      // md 直指文件路径(目录 URL 另有 index.md 回退,但链接不吃这跳 302)
+      url: `${siteUrl(cfg, TRIAL_HANDLE, site.slug)}${isMd ? 'index.md' : ''}?key=${token}`,
       expires_at: expiresAt,
       claim_token: claimToken,
       comments_api: `${consoleBase(cfg)}/api/try/${site.id}/comments?key=${token}`,

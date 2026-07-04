@@ -24,7 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `guest_comments` toggle (default on; guests only ever arrive through an
   owner-minted link); per-guest and per-IP write rate limits.
 - **Anonymous drop trial (opt-in, `PAGEPIN_TRIAL`).** `POST /api/try` accepts a
-  single HTML file (≤2MB) with no account — behind Turnstile (when configured)
+  single HTML or Markdown file (≤2MB) with no account — behind Turnstile (when configured)
   and per-IP limits — and returns a signed share URL that lives for
   `PAGEPIN_TRIAL_TTL_MIN` (default 60 minutes), plus a key-authenticated
   comments export (`GET /api/try/{id}/comments?key=…`) and a claim token.
@@ -32,7 +32,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cleared, trial links revoked). Trial pages render a countdown ribbon, are
   `noindex`, 404 at expiry, and are hard-deleted (threads + storage + row) by a
   sweeper (Node interval / Workers cron). Trial sites live under the reserved
-  `try` handle.
+  `try` handle. Markdown drops render in the branded viewer shell (ribbon
+  included), and directory URLs without an `index.html` now fall back to
+  `index.md` (302) for every site.
 - **Internationalization (English / 中文).** Every user-facing surface is now
   localized: the React console (with a one-click language switcher), server-rendered
   HTML (login wall, markdown/image viewer shells, directory index, 404/expired/takedown

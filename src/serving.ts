@@ -714,6 +714,10 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     const fname = rel.split('/').pop() ?? rel;
     const ext = fname.includes('.') ? '.' + fname.split('.').pop()!.toLowerCase() : '';
     const injectHtml = canInject ? injectTag(handle, slug, rel, cur.id, locale) : '';
+    // 查看器壳(md/图片)同样带试用缎带:试用 drop 的 .md 页也要倒计时 + 引导注册
+    const shellInject = isTrial
+      ? trialRibbonHtml(locale, site.expiresAt!, `${consoleBase(cfg)}/signup`, now) + injectHtml
+      : injectHtml;
 
     if (!rawMode && acceptHtml && IMG_EXTS.has(ext)) {
       if (await storage.exists(cur.storage_prefix + rel)) {
@@ -722,7 +726,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
           imgShell(
             escapeHtml(fname),
             escapeHtml(c.req.path),
-            injectHtml,
+            shellInject,
             imageView(await ensureFiles(site, cur), rel, siteBase),
             locale,
           ),
@@ -750,7 +754,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
             mdShell(
               escapeHtml(fname),
               contentJson,
-              injectHtml,
+              shellInject,
               opened.meta.contentLength ?? buf.byteLength,
               locale,
             ),
@@ -792,7 +796,18 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
         throw e;
       }
     }
-    if (meta === null || body === null) return notFound(c, siteRoot);
+    if (meta === null || body === null) {
+      // 目录式 URL 且无 index.html:纯 Markdown 部署(试用 drop .md / 文档站)回退 index.md,
+      // 302 重进上面的查看器壳分支(版本内容可变,不给 308 永久缓存)
+      if (!rest || rest.endsWith('/')) {
+        const mdIndex = rel.slice(0, -'index.html'.length) + 'index.md';
+        if (await storage.exists(cur.storage_prefix + mdIndex)) {
+          const encoded = mdIndex.split('/').map(encodeURIComponent).join('/');
+          return c.redirect(`${siteRoot}${encoded}${new URL(c.req.url).search}`, 302);
+        }
+      }
+      return notFound(c, siteRoot);
+    }
 
     // 注入(评论层 + 试用缎带):HTML 改写后字节/长度变,
     // 存储层的 ETag/Last-Modified/Content-Length 都不再一致,一律不带

@@ -191,13 +191,44 @@ test('匿名 drop → 限时链接 → 缎带 + 评论层;文件校验', async (
   assert.equal(r1.status, 422);
   assert.equal(((await r1.json()) as { code: string }).code, 'trial.file.missing');
 
-  const r2 = await drop(app, dropForm('notes.md'));
+  const r2 = await drop(app, dropForm('notes.txt'));
   assert.equal(r2.status, 422);
   assert.equal(((await r2.json()) as { code: string }).code, 'trial.file.notHtml');
 
   const r3 = await drop(app, dropForm('big.html', 'x'.repeat(2 * 1024 * 1024 + 1)));
   assert.equal(r3.status, 413);
   assert.equal(((await r3.json()) as { code: string }).code, 'trial.file.tooLarge');
+});
+
+test('markdown drop:链接直指 index.md;查看器壳带缎带 + 评论层;目录 URL 回退', async () => {
+  const { app } = await setup();
+  const r = await drop(app, dropForm('notes.md', '# Trial Notes\n\nhello **md**'));
+  assert.equal(r.status, 200);
+  const out = (await r.json()) as TryOut;
+  const u = new URL(out.url);
+  assert.ok(u.pathname.endsWith('/index.md'), 'URL 直指 index.md');
+  const slug = u.pathname.split('/')[3]!;
+  const key = u.searchParams.get('key')!;
+  const cookie = await redeem(app, u.pathname, key);
+
+  // 浏览器导航(Accept: text/html)→ markdown 查看器壳:原文 + 缎带 + guest 评论层
+  const page = await app.fetch(
+    new Request(`http://localhost${u.pathname}`, { headers: { cookie, accept: 'text/html' } }),
+  );
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  assert.ok(html.includes('Trial Notes'), 'md 原文进壳');
+  assert.ok(html.includes('pp-trial-ribbon'), '试用缎带注入查看器壳');
+  assert.ok(html.includes('/_pagepin/comments.js'), 'guest 评论层已注入');
+
+  // 目录式 URL 无 index.html → 302 回退 index.md(裁掉 index.md 的裸链接也可用)
+  const root = await app.fetch(
+    new Request(`http://localhost/p/${TRIAL_HANDLE}/${slug}/`, {
+      headers: { cookie, accept: 'text/html' },
+    }),
+  );
+  assert.equal(root.status, 302);
+  assert.ok((root.headers.get('location') ?? '').endsWith('/index.md'), '回退到 index.md');
 });
 
 test('per-IP 限频:同源第 6 次上传 429', async () => {
