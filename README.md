@@ -11,6 +11,8 @@ Self-hosted static page hosting with pin-point review comments and an AI feedbac
 
 Deploy any HTML report or static site with one `curl`, share the link, and let reviewers pin comments directly onto page elements. Every comment is stored with a CSS selector, a kind (`copy` / `style` / `question` / `bug`) and a resolved flag — so your coding agent can pull the open feedback as structured JSON, fix the page, and redeploy. Review loop closed, no screenshots-in-chat required.
 
+> **Try it without installing** — drop an HTML or Markdown file on [pagepin.ai](https://pagepin.ai) for an instant 1-hour trial link (no account), or [start free on the managed Beta](https://app.pagepin.ai/signup). Export and self-host anytime.
+
 ## Features
 
 - **One-command deploys** — multipart `POST /api/sites/{slug}/deploy`; redeploying the same slug publishes a new atomic version.

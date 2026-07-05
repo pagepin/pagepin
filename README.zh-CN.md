@@ -11,6 +11,8 @@
 
 用一条 `curl` 部署任意 HTML 报告或静态站点，分享链接，评审者即可直接在页面元素上打点评论。每条评论都带有 CSS selector、类型（`copy` / `style` / `question` / `bug`）和已解决标记 —— 你的编码 agent 因此能以结构化 JSON 拉取未解决的反馈，修改页面后再发布。评审闭环就此闭合，无需再往聊天里贴截图。
 
+> **免安装先试** —— 在 [pagepin.ai](https://pagepin.ai) 直接拖入（或粘贴）一个 HTML / Markdown 文件，立刻得到 1 小时有效的试用链接（无需账号）；或[在官方 Beta 实例免费注册](https://app.pagepin.ai/signup)长期保留页面。随时可导出并自托管。
+
 ## 功能特性
 
 - **一条命令部署** —— multipart `POST /api/sites/{slug}/deploy`；对同一 slug 重新部署即发布一个新的原子版本。

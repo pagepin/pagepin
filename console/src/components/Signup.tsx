@@ -3,6 +3,7 @@ import { Loader2, Lock, UserPlus } from 'lucide-react';
 import { fetchAuthConfig, signup } from '../api';
 import { useT } from '../i18n';
 import { EMAIL_RE, type AuthConfig } from '../types';
+import { OrDivider, SocialButtons } from './SocialButtons';
 import { Turnstile } from './Turnstile';
 
 /** Open 模式自助注册屏（/signup，无 invite 参数）。仅 registration_mode==='open' 放行;
@@ -37,6 +38,7 @@ export function Signup() {
   }
 
   const open = config.mode === 'password' && config.registration_mode === 'open';
+  const social = config.social_providers ?? [];
 
   if (!open) {
     return (
@@ -93,7 +95,14 @@ export function Signup() {
         </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-ink-500">{t('auth.signupSubtitle')}</p>
 
-        <div className="mt-5 space-y-2.5">
+        {social.length > 0 && (
+          <div className="mt-5">
+            <SocialButtons providers={social} next="/" />
+            <OrDivider />
+          </div>
+        )}
+
+        <div className={social.length ? 'space-y-2.5' : 'mt-5 space-y-2.5'}>
           <input
             className="input"
             type="email"
