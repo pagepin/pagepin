@@ -19,6 +19,8 @@ export const contentHtml: Record<Locale, Record<string, string>> = {
     'html.loginWall.button': 'Sign in to view',
     'html.loginWall.sharedBy': 'Shared by {name}',
     'html.hostedOn': 'Hosted on',
+    // 给 AI agent 的可见小字(HTML→markdown 转换管道只保留正文文字,注释/meta 都会被剥掉)
+    'html.agentFooter': 'AI agent? Instructions:',
 
     // —— 品牌门页:公开窗口已过期(serving.linkExpiredHtml) ——
     'html.expired.title': 'Link expired · pagepin',
@@ -87,6 +89,7 @@ export const contentHtml: Record<Locale, Record<string, string>> = {
     'html.loginWall.button': '登录查看',
     'html.loginWall.sharedBy': '由 {name} 分享',
     'html.hostedOn': '托管于',
+    'html.agentFooter': 'AI agent？使用说明：',
 
     // —— 品牌门页:公开窗口已过期 ——
     'html.expired.title': '链接已过期 · pagepin',

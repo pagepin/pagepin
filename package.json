@@ -34,7 +34,7 @@
     "test:e2e": "pnpm -C e2e test",
     "test:pg": "node --import tsx --test --test-force-exit test/pg-integration.test.ts",
     "test:mysql": "node --import tsx --test --test-force-exit test/mysql-integration.test.ts",
-    "test:routes": "PAGEPIN_DB_URL=${PAGEPIN_TEST_DB_URL:-} node --import tsx --test --test-concurrency=1 --test-force-exit test/deploy-chunked.test.ts test/device-flow.test.ts test/account-identity.test.ts test/site-takedown.test.ts test/slug-reuse.test.ts"
+    "test:routes": "PAGEPIN_DB_URL=${PAGEPIN_TEST_DB_URL:-} node --import tsx --test --test-concurrency=1 --test-force-exit test/deploy-chunked.test.ts test/device-flow.test.ts test/account-identity.test.ts test/site-takedown.test.ts test/slug-reuse.test.ts test/handoff.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

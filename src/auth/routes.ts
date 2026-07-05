@@ -13,11 +13,11 @@
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { sign, verify as jwtVerify } from 'hono/jwt';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, lt, sql } from 'drizzle-orm';
 
 import { escapeHtml, gateDoc, GLOBE_SVG, LOCK_SVG } from '../brand-gate.js';
-import { consoleBase, type Config } from '../config.js';
-import { identities, invites, users, type UserRow } from '../db/index.js';
+import { consoleBase, contentBase, type Config } from '../config.js';
+import { handoffCodes, identities, invites, users, type UserRow } from '../db/index.js';
 import { writtenCount } from '../db/ops.js';
 import { effectiveRegistrationMode } from '../instance-settings.js';
 import { t, type Locale } from '../i18n/index.js';
@@ -40,6 +40,7 @@ import {
 } from './sessions.js';
 
 const STATE_TTL = 600; // OIDC state 有效期 10 分钟
+const HANDOFF_TTL_MS = 60_000; // 跨域登录接力 code 有效期(一次性,浏览器两跳 302 内用完)
 
 async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
@@ -714,6 +715,68 @@ export function makeAuthRoutes(deps: AppDeps, plane: Plane): Hono<AppEnv> {
     await setLoginCookies(c, cfg, plane, user.id, user.handle, user.sessionEpoch);
     return c.redirect(back, 302);
   });
+
+  // ---- 跨域登录接力(仅 dual 模式)—— console 会话换内容域 pp_view,免二次 OAuth ----
+  // AWS SigninToken 思路的内部化,但更严:code 一次性(先删后用,并发重放必败)+ 60s TTL。
+  // next 两端都走 safeNext(仅站内相对路径),内容域基地址来自配置,无 open redirect 面。
+  if (cfg.mode === 'dual' && plane === 'session') {
+    // console 侧:有 pp_session 即铸一次性 code 302 去内容域;没有先走 console 登录再回本路由。
+    app.get('/auth/handoff', async (c) => {
+      const next = safeNext(c.req.query('next')); // 内容域上的回落路径
+      // 防 login CSRF 的接力 nonce:登录墙渲染时种在内容域 cookie 并写进链接,这里只做
+      // 不透明透传(cookie 在内容域,console 侧无从比对),/auth/accept 兑换前比对。
+      const nonRaw = c.req.query('non') ?? '';
+      const non = /^[0-9a-f]{1,64}$/.test(nonRaw) ? nonRaw : '';
+      const sess = await readSession(c, cfg, 'session');
+      let user: UserRow | undefined;
+      if (sess) {
+        user = (await deps.db.select().from(users).where(eq(users.id, sess.sub)))[0];
+        if (user && (user.disabled || (sess.epo ?? 0) !== user.sessionEpoch)) user = undefined;
+      }
+      if (!user) {
+        const self = `/auth/handoff?next=${encodeURIComponent(next)}${non ? `&non=${non}` : ''}`;
+        return c.redirect(`/auth/login?next=${encodeURIComponent(self)}`, 302);
+      }
+      await deps.db.delete(handoffCodes).where(lt(handoffCodes.expiresAt, nowIso())); // 顺手清过期
+      const code = [...crypto.getRandomValues(new Uint8Array(16))]
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+      await deps.db.insert(handoffCodes).values({
+        id: uuid(),
+        code,
+        userId: user.id,
+        createdAt: nowIso(),
+        expiresAt: new Date(Date.now() + HANDOFF_TTL_MS).toISOString(),
+      });
+      return c.redirect(
+        `${contentBase(cfg)}/auth/accept?code=${code}&next=${encodeURIComponent(next)}${non ? `&non=${non}` : ''}`,
+        302,
+      );
+    });
+  }
+  if (cfg.mode === 'dual' && plane === 'view') {
+    // 内容域侧:兑换 code 种 pp_view。任何一步失败都回落内容域自己的登录页(旧流程仍在)。
+    app.get('/auth/accept', async (c) => {
+      const next = safeNext(c.req.query('next'));
+      const fallback = () => c.redirect(`/auth/login?next=${encodeURIComponent(next)}`, 302);
+      // 防 login CSRF:URL 里的 non 必须与本浏览器在登录墙种下的 cookie 一致 ——
+      // 攻击者转发自己铸的 accept URL,受害者浏览器没有对应 nonce,必拒(不烧 code,直接回落)。
+      if (!consumeOauthNonce(c, c.req.query('non'))) return fallback();
+      const code = c.req.query('code') ?? '';
+      if (!code) return fallback();
+      const rec = (await deps.db.select().from(handoffCodes).where(eq(handoffCodes.code, code)))[0];
+      if (!rec) return fallback();
+      // 一次性:先删、按命中行数判赢,并发重放只有一个请求成功
+      const won = await writtenCount(
+        deps.db.delete(handoffCodes).where(eq(handoffCodes.id, rec.id)),
+      );
+      if (won !== 1 || Date.parse(rec.expiresAt) <= Date.now()) return fallback();
+      const user = (await deps.db.select().from(users).where(eq(users.id, rec.userId)))[0];
+      if (!user || user.disabled) return fallback();
+      await setLoginCookies(c, cfg, 'view', user.id, user.handle, user.sessionEpoch);
+      return c.redirect(next, 302);
+    });
+  }
 
   app.post('/auth/logout', (c) => {
     clearLoginCookies(c, plane);

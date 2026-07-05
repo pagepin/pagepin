@@ -29,12 +29,18 @@ export const CLOCK_SVG = `<svg width="22" height="22" viewBox="0 0 24 24" fill="
 /** 语言切换链接用的小地球图标(内容域门页 ?lang 切换)。 */
 export const GLOBE_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
 
-/** 居中卡片 + 点阵底纹的品牌门页外壳。含表单控件样式,供内容域登录表单复用同一品牌。 */
-export function gateDoc(title: string, inner: string, locale: Locale = 'en'): string {
+/** 居中卡片 + 点阵底纹的品牌门页外壳。含表单控件样式,供内容域登录表单复用同一品牌。
+ *  headExtra:附加 <head> 标签(agent 发现用的 meta/link 等),调用方自行保证转义。 */
+export function gateDoc(
+  title: string,
+  inner: string,
+  locale: Locale = 'en',
+  headExtra = '',
+): string {
   return `<!doctype html>
 <html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${FAVICON}${FONTS}<title>${title}</title>
+${FAVICON}${FONTS}<title>${title}</title>${headExtra}
 <style>
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;

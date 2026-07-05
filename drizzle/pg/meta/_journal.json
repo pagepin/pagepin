@@ -15,6 +15,13 @@
       "when": 1783122713280,
       "tag": "0001_breezy_sir_ram",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783241956113,
+      "tag": "0002_flowery_lester",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@ export const {
   invites,
   instanceSettings,
   deviceAuths,
+  handoffCodes,
   deploySessions,
   accountMerges,
 } = buildSchema(pgKit);

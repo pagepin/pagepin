@@ -111,6 +111,11 @@ export const auth: Record<Locale, Record<string, string>> = {
     'auth.deny': 'Deny',
     'auth.deviceTokenNote':
       'The token is delivered straight to the tool that started this — it is never shown here or pasted into a chat.',
+    'auth.deviceHandleGateTitle': 'Approved — one more step',
+    'auth.deviceHandleGateBody':
+      'The token was delivered, but deploys will fail with “handle required” until you claim your handle below.',
+    'auth.deviceAgentTip':
+      'Tip: tell your AI to save this guide as a skill or long-term memory, so future sessions can deploy and read review comments right away:',
   },
   zh: {
     // —— Login.tsx ——
@@ -210,5 +215,10 @@ export const auth: Record<Locale, Record<string, string>> = {
     'auth.deny': '拒绝',
     'auth.deviceTokenNote':
       'token 会直接交付给发起此次请求的工具 —— 永远不会在此处显示或粘贴到聊天中。',
+    'auth.deviceHandleGateTitle': '已批准 —— 还差一步',
+    'auth.deviceHandleGateBody':
+      'token 已交付，但在下方设置好 handle 之前，agent 的部署会报「需要 handle」。',
+    'auth.deviceAgentTip':
+      '小提示：让你的 AI 把这份指南保存为技能或长期记忆，之后的新会话就能直接部署、读取页面评论：',
   },
 };

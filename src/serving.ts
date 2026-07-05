@@ -28,7 +28,7 @@ import { COMMENTS_JS, FAVICON_ICO_B64, MARKED_JS } from './generated/edge-assets
 import { t, type Locale } from './i18n/index.js';
 import { jsonError, localeOf } from './i18n/locale.js';
 import type { Plane } from './auth/sessions.js';
-import { readSession } from './auth/sessions.js';
+import { readSession, setOauthNonce } from './auth/sessions.js';
 import { mintShareSession, readShareSession, setShareCookie, verifyShareKey } from './share.js';
 import { currentVersion, isPubliclyVisible, sites, users } from './db/index.js';
 import type { SiteRow, SiteVersion } from './db/index.js';
@@ -127,8 +127,62 @@ const MD_EXTS = new Set(['.md', '.markdown']);
 
 // ---- 访问门页(登录墙 / 已过期 / 404):品牌壳来自 brand-gate.ts,无评论层 ----
 
+// ---- AI agent 发现线索 ----
+// 评论从不在页面字节里;拿到页面 URL 裸抓源码的 agent(尤其新会话)需要被指到评论 API 与 skill.md。
+// 三种形态覆盖三种抓取方式,缺一不可:
+//   comment —— HTML 注释,置于 doctype 前(合法、截断式抓取也能看到),载完整英文指令;
+//   head    —— meta/link 结构化指针,给程序化解析方;
+//   foot    —— 可见弱化小字:HTML→markdown 转换管道(WebFetch/reader 类)会剥掉注释与 head,
+//              只有正文文字幸存 —— 这行才是真正的保险。
+// 只加在 pagepin 自己渲染的门页上;用户部署的页面字节仍原样不动(byte-preservation),
+// 那一侧的线索走响应头(X-Pagepin-*,见 serve())。
+interface AgentHint {
+  comment: string;
+  head: string;
+  foot: string;
+}
+
+function agentHint(slug: string, consoleUrl: string, locale: Locale): AgentHint {
+  const commentsApi = `${consoleUrl}/api/sites/${encodeURIComponent(slug)}/comments`;
+  const skill = `${consoleUrl}/skill.md`;
+  // slug 已按 validSlug 校验(小写字母/数字/连字符),不可能含 "-->",注释体安全
+  const comment = `<!--
+pagepin: this is a pagepin-hosted page (site slug "${slug}").
+NOTE FOR AI AGENTS: review comments on this page are NOT embedded in the HTML.
+Read them via the API:  GET ${commentsApi}
+  with header "Authorization: Bearer <PAT>" (the token is usually saved at ~/.config/pagepin/token).
+Full agent guide (deploy, share links, resolve comments): ${skill}
+-->
+`;
+  const head =
+    `<link rel="alternate" type="application/json" href="${escapeHtml(commentsApi)}" title="pagepin review comments (PAT required)">` +
+    `<meta name="pagepin:slug" content="${escapeHtml(slug)}">` +
+    `<meta name="pagepin:agent-guide" content="${escapeHtml(skill)}">`;
+  const foot = `<div class="foot">${t(locale, 'html.agentFooter')} <a class="mono" style="color:#9aa1a9" href="${escapeHtml(skill)}">${escapeHtml(skill)}</a></div>`;
+  return { comment, head, foot };
+}
+
+/** /llms.txt —— agent 发现约定:内容域与 console 域都答,一行指到 skill.md。 */
+export function llmsTxt(consoleUrl: string): string {
+  return `# pagepin
+
+> Self-hosted static-page host with pin-point review comments and an AI feedback loop.
+> Hosted pages look like …/<handle>/<slug>/; their review comments are NOT in the page HTML — read them via the API.
+
+- Agent guide (deploy, share links, read/resolve review comments): ${consoleUrl}/skill.md
+- Full API reference: ${consoleUrl}/references/api.md
+- Comments for a page: GET ${consoleUrl}/api/sites/<slug>/comments (Authorization: Bearer <PAT>)
+`;
+}
+
 /** 私有页登录墙:命名 slug + 站长 + 「Sign in to view」(→ /auth/login?next=)。 */
-function loginWallHtml(slug: string, ownerName: string, loginHref: string, locale: Locale): string {
+function loginWallHtml(
+  slug: string,
+  ownerName: string,
+  loginHref: string,
+  locale: Locale,
+  hint: AgentHint,
+): string {
   const initial = escapeHtml((ownerName.replace(/^@/, '').trim()[0] || 'P').toUpperCase());
   const slugSpan = `<span class="mono teal">${escapeHtml(slug)}</span>`;
   // ?lang 语言切换:相对 href 重载当前私有页(仍匿名 → 再次渲染登录墙,但已是另一语言);
@@ -136,15 +190,20 @@ function loginWallHtml(slug: string, ownerName: string, loginHref: string, local
   const otherLocale: Locale = locale === 'zh' ? 'en' : 'zh';
   const otherLabel = otherLocale === 'zh' ? '中文' : 'English';
   const langLink = `<div class="pp-lang"><a href="?lang=${otherLocale}">${GLOBE_SVG} ${otherLabel}</a></div>`;
-  return gateDoc(
-    t(locale, 'html.loginWall.title'),
-    `${langLink}<div class="chip chip-teal">${LOCK_SVG}</div>
+  return (
+    hint.comment +
+    gateDoc(
+      t(locale, 'html.loginWall.title'),
+      `${langLink}<div class="chip chip-teal">${LOCK_SVG}</div>
 <h1>${t(locale, 'html.loginWall.heading')}</h1>
 <p class="body">${t(locale, 'html.loginWall.body', { slug: slugSpan })}</p>
 <a class="btn btn-primary" href="${escapeHtml(loginHref)}">${t(locale, 'html.loginWall.button')}</a>
 <div class="row"><span class="avatar">${initial}</span>${t(locale, 'html.loginWall.sharedBy', { name: escapeHtml(ownerName) })}</div>
-<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
-    locale,
+<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>
+${hint.foot}`,
+      locale,
+      hint.head,
+    )
   );
 }
 
@@ -154,17 +213,23 @@ function linkExpiredHtml(
   closedAgo: string,
   loginHref: string,
   locale: Locale,
+  hint: AgentHint,
 ): string {
   const closedSpan = `<span style="color:#3a424b;font-weight:600">${escapeHtml(closedAgo)}</span>`;
-  return gateDoc(
-    t(locale, 'html.expired.title'),
-    `<div class="chip chip-amber">${CLOCK_SVG}</div>
+  return (
+    hint.comment +
+    gateDoc(
+      t(locale, 'html.expired.title'),
+      `<div class="chip chip-amber">${CLOCK_SVG}</div>
 <h1>${t(locale, 'html.expired.heading')}</h1>
 <p class="body">${t(locale, 'html.expired.body', { closedAgo: closedSpan })}</p>
 <a class="btn btn-ghost" href="${escapeHtml(loginHref)}">${t(locale, 'html.expired.button')}</a>
 <div class="row">${t(locale, 'html.expired.owner')} · <span class="mono" style="color:#8a929b">@${escapeHtml(ownerHandle)}</span></div>
-<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
-    locale,
+<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>
+${hint.foot}`,
+      locale,
+      hint.head,
+    )
   );
 }
 
@@ -195,15 +260,20 @@ function trialRibbonHtml(locale: Locale, expiresAt: string, keepHref: string, no
 }
 
 /** 分享链接失效(过期或被站长撤销):提示找分享人要新链接;有账号可登录兜底。 */
-function shareExpiredHtml(loginHref: string, locale: Locale): string {
-  return gateDoc(
-    t(locale, 'html.shareExpired.title'),
-    `<div class="chip chip-amber">${CLOCK_SVG}</div>
+function shareExpiredHtml(loginHref: string, locale: Locale, hint: AgentHint): string {
+  return (
+    hint.comment +
+    gateDoc(
+      t(locale, 'html.shareExpired.title'),
+      `<div class="chip chip-amber">${CLOCK_SVG}</div>
 <h1>${t(locale, 'html.shareExpired.heading')}</h1>
 <p class="body">${t(locale, 'html.shareExpired.body')}</p>
 <a class="btn btn-ghost" href="${escapeHtml(loginHref)}">${t(locale, 'html.shareExpired.button')}</a>
-<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>`,
-    locale,
+<div class="foot">${t(locale, 'html.hostedOn')} <span class="mono">pagepin</span></div>
+${hint.foot}`,
+      locale,
+      hint.head,
+    )
   );
 }
 
@@ -547,6 +617,13 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
   app.get('/_pagepin/marked.min.js', (c) =>
     staticJs(c, MARKED_ASSET.data, MARKED_ASSET.etag, 'public, max-age=86400'),
   );
+  // AI agent 发现约定:双域时内容域也答 /llms.txt(agent 手里往往只有页面 URL),
+  // 指到 console 的 skill.md;单域由 console 平面注册(app.ts mountSkillDocs),不重复挂。
+  if (!single) {
+    app.get('/llms.txt', (c) =>
+      c.text(llmsTxt(consoleBase(cfg)), 200, { 'Cache-Control': 'public, max-age=3600' }),
+    );
+  }
   // 内容域根 favicon 兜底:托管页没声明自己的 <link rel=icon> 时,浏览器请求 host/favicon.ico
   // 回落到 pagepin 标。不改任何用户 HTML;页面自带 favicon 的浏览器优先级更高,不受影响。
   // 须先于站点通配路由('favicon.ico' 已在 RESERVED_SEGMENTS,handle 不会撞)。
@@ -667,24 +744,44 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       )[0];
       viewerActive = u !== undefined && !u.disabled && (claims.epo ?? 0) === u.sessionEpoch;
     }
+    // AI agent 发现:X-Pagepin-* 响应头。用户部署的页面字节原样不动(byte-preservation),
+    // 响应头是那一侧唯一无侵入的线索通道;门页(pagepin 自己的 HTML)另有页内线索(agentHint)。
+    const agentHeaders = {
+      'X-Pagepin-Site': `${handle}/${slug}`,
+      'X-Pagepin-Comments': `${consoleBase(cfg)}/api/sites/${encodeURIComponent(slug)}/comments`,
+      'X-Pagepin-Agent-Guide': `${consoleBase(cfg)}/skill.md`,
+    };
+
     if (!pub && !viewerActive && !shareViewer) {
       // 品牌门页(不再裸 302):失效分享链接 → 专属门页;曾公开但窗口已关 → 过期页;
-      // 否则私有 → 登录墙。「Sign in」回 /auth/login?next=,登录后落回本页。
-      const loginHref = `/auth/login?next=${encodeURIComponent(c.req.path)}`;
-      const gateHeaders = { 'Cache-Control': 'no-store, private' };
+      // 否则私有 → 登录墙。「Sign in」:单域回本域 /auth/login?next=;
+      // 双域经 console /auth/handoff 接力(console 已登录则免二次 OAuth,见 auth/routes.ts)。
+      // non = 防 login CSRF 的接力 nonce:渲染墙时种在内容域 cookie,经 handoff 原样带回
+      // /auth/accept 比对 —— 攻击者转发自己的 accept URL,受害者浏览器没有对应 cookie,必拒。
+      const loginHref = single
+        ? `/auth/login?next=${encodeURIComponent(c.req.path)}`
+        : `${consoleBase(cfg)}/auth/handoff?next=${encodeURIComponent(c.req.path)}&non=${setOauthNonce(c, cfg)}`;
+      const gateHeaders = { 'Cache-Control': 'no-store, private', ...agentHeaders };
+      const hint = agentHint(slug, consoleBase(cfg), locale);
       if (staleKey) {
-        return c.html(shareExpiredHtml(loginHref, locale), 200, gateHeaders);
+        return c.html(shareExpiredHtml(loginHref, locale, hint), 200, gateHeaders);
       }
       if (site.visibility === 'public' && site.publicExpiresAt) {
         return c.html(
-          linkExpiredHtml(handle, fmtAgo(site.publicExpiresAt, now, locale), loginHref, locale),
+          linkExpiredHtml(
+            handle,
+            fmtAgo(site.publicExpiresAt, now, locale),
+            loginHref,
+            locale,
+            hint,
+          ),
           200,
           gateHeaders,
         );
       }
       const owner = (await db.select().from(users).where(eq(users.id, site.ownerId)))[0];
       const ownerName = owner?.displayName || `@${handle}`;
-      return c.html(loginWallHtml(slug, ownerName, loginHref, locale), 200, gateHeaders);
+      return c.html(loginWallHtml(slug, ownerName, loginHref, locale, hint), 200, gateHeaders);
     }
     // 评论层注入:登录访问者一律注入;分享会话访客仅当站点开了 guest 评论才注入
     // (匿名公开访客[对外客户]看到的仍是干净页面)
@@ -706,6 +803,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       'X-Robots-Tag': 'noindex, nofollow',
       // 私有 no-store;公开 no-cache(每次 revalidate,保证过期及时生效)
       'Cache-Control': pub ? 'no-cache' : 'no-store, private',
+      ...agentHeaders,
     };
 
     // ---- 查看器壳:浏览器直接导航访问 .md / 图片 ----

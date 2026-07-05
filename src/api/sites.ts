@@ -27,7 +27,7 @@ import {
   type UserRow,
 } from '../db/index.js';
 import { writtenCount } from '../db/ops.js';
-import { t, type Locale } from '../i18n/index.js';
+import { errorBody, t, type Locale } from '../i18n/index.js';
 import { jsonError, localeOf } from '../i18n/locale.js';
 import { mintShareKey } from '../share.js';
 import { purgeSiteStorage, type Storage } from '../storage/index.js';
@@ -35,6 +35,21 @@ import { guessContentType } from '../storage/mime.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { normalizeSitePath, nowIso, tombstoneSlug, uuid, validSlug } from '../util.js';
 import type { AuthMiddleware } from './deps.js';
+
+/** 409 handle 未设置:错误体附机器可读 hint(英文,面向 agent 非人)。
+ *  agent 靠错误体自愈比靠文档可靠 —— 它手里的 skill.md 可能是旧缓存。 */
+function handleRequiredError(c: Context<AppEnv>) {
+  return c.json(
+    {
+      ...errorBody(localeOf(c), 'site.handle.required'),
+      hint:
+        'The account has no handle (the user segment of page URLs). Fix with the same Bearer token: ' +
+        'POST /api/me/handle/suggest for a free suggestion, then POST /api/me/handle {"handle":"..."} ' +
+        '(permanent — confirm with the user first), then retry this request.',
+    },
+    409,
+  );
+}
 
 function siteOut(deps: AppDeps, site: SiteRow, unresolved: number) {
   const cur = currentVersion(site);
@@ -445,7 +460,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.post('/:slug/deploy', mw.mutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const slug = c.req.param('slug');
-    if (user.handle == null) return jsonError(c, 409, 'site.handle.required');
+    if (user.handle == null) return handleRequiredError(c);
     const handle = user.handle;
     if (!validSlug(slug)) {
       return jsonError(c, 422, 'site.slug.invalid');
@@ -503,7 +518,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   r.post('/:slug/deploys', mw.mutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
     const slug = c.req.param('slug');
-    if (user.handle == null) return jsonError(c, 409, 'site.handle.required');
+    if (user.handle == null) return handleRequiredError(c);
     const handle = user.handle;
     if (!validSlug(slug)) {
       return jsonError(c, 422, 'site.slug.invalid');

@@ -24,10 +24,11 @@ import { makeSiteRoutes } from './api/sites.js';
 import { makeTokenRoutes } from './api/tokens.js';
 import { makeAuthRoutes } from './auth/routes.js';
 import { makeCommentRoutes } from './comments.js';
+import { consoleBase } from './config.js';
 import { makeTrialRoutes } from './trial.js';
 import { errorBody } from './i18n/index.js';
 import { localeOf, makeLocaleMiddleware } from './i18n/locale.js';
-import { makeServingRoutes } from './serving.js';
+import { llmsTxt, makeServingRoutes } from './serving.js';
 import type { AppDeps, AppEnv } from './types.js';
 
 export interface CreateAppOptions {
@@ -70,7 +71,7 @@ function stripPort(host: string): string {
  * 故不做占位符替换 —— 只去掉 YAML frontmatter(HTTP 取用无意义)。
  * api.md 按 SKILL.md 里的相对链接 `references/api.md` 同源伺服:本地安装走文件,HTTP 取用
  * 把相对链接解析到 `https://HOST/references/api.md` —— 两种形态同一链接都能拿到完整参考。 */
-function mountSkillDocs(app: Hono<AppEnv>, skillMd: string, apiMd?: string): void {
+function mountSkillDocs(app: Hono<AppEnv>, deps: AppDeps, skillMd: string, apiMd?: string): void {
   const rendered = skillMd.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
   app.get('/skill.md', (c) => {
     c.header('Content-Type', 'text/markdown; charset=utf-8');
@@ -82,6 +83,10 @@ function mountSkillDocs(app: Hono<AppEnv>, skillMd: string, apiMd?: string): voi
       return c.body(apiMd);
     });
   }
+  // AI agent 发现约定:/llms.txt 一行指到 skill.md(双域时内容域另有一份,见 serving.ts)
+  app.get('/llms.txt', (c) =>
+    c.text(llmsTxt(consoleBase(deps.config)), 200, { 'Cache-Control': 'public, max-age=3600' }),
+  );
 }
 
 /** 未捕获异常统一为 JSON 500(API 消费方拿到的错误体保持 { detail, code } 形状,detail 随 locale)。 */
@@ -126,7 +131,7 @@ async function mountConsolePlane(
   app.route('/', makeDeviceRoutes(deps, mw)); // OAuth2 设备授权(/api/device/*):AI/CLI 经浏览器登录换 token
   app.route('/', makeTrialRoutes(deps, mw)); // 匿名试用(/api/try*,默认关;官网 drop-zone 的后端)
   app.route('/', makeAdminRoutes(deps, mw));
-  if (opts.skillMd) mountSkillDocs(app, opts.skillMd, opts.apiMd);
+  if (opts.skillMd) mountSkillDocs(app, deps, opts.skillMd, opts.apiMd);
 }
 
 /** 单域模式:一个 app 全挂;评论 API 必须先于 serving 的通配路由注册。 */

@@ -3,10 +3,13 @@ import { AlertTriangle, Check, KeyRound, Loader2 } from 'lucide-react';
 import { api } from '../api';
 import { useT } from '../i18n';
 import { useStore } from '../store';
+import { HandleSetup } from './HandleSetup';
 
 /** 设备授权确认屏(/activate?user_code=XXXX-XXXX)。
  * 由 App.tsx 在登录态确立后渲染 —— 未登录会先被 api 层重定向到 /login?next=/activate…,登录后回到这里。
- * 批准只调 /api/device/approve;明文 token 经发起方轮询交付,本页永远不展示 token。 */
+ * 批准只调 /api/device/approve;明文 token 经发起方轮询交付,本页永远不展示 token。
+ * 批准成功后若账号还没 handle,就地内嵌 HandleSetup —— 这是 device flow 里用户唯一必经的
+ * 浏览器界面,不拦在这里,用户关掉窗口后 agent 部署就会 409。 */
 export function Activate() {
   const t = useT();
   const me = useStore((s) => s.me);
@@ -41,6 +44,25 @@ export function Activate() {
   }
 
   if (phase === 'approved') {
+    // 还没 handle:token 已交付,但 deploy 会 409 —— 别让用户带着半成品账号关窗口
+    if (me?.needs_handle) {
+      return (
+        <div className="pb-10">
+          <div className="mx-auto mt-10 flex w-full max-w-md items-start gap-2.5 rounded-card border border-tide-200 bg-tide-50 px-4 py-3 text-left">
+            <Check className="mt-0.5 h-4 w-4 shrink-0 text-tide-600" />
+            <div>
+              <div className="text-sm font-semibold text-tide-800">
+                {t('auth.deviceHandleGateTitle')}
+              </div>
+              <div className="mt-0.5 text-xs leading-relaxed text-tide-700">
+                {t('auth.deviceHandleGateBody')}
+              </div>
+            </div>
+          </div>
+          <HandleSetup />
+        </div>
+      );
+    }
     return card(
       <>
         <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-panel bg-tide-50 text-tide-600">
@@ -52,6 +74,12 @@ export function Activate() {
         <p className="mt-1.5 text-sm leading-relaxed text-ink-500">
           {t('auth.deviceApprovedBody')}
         </p>
+        <div className="mt-5 rounded-panel border border-ink-200 bg-ink-50 px-4 py-3 text-left">
+          <p className="text-xs leading-relaxed text-ink-500">{t('auth.deviceAgentTip')}</p>
+          <code className="mt-1.5 block break-all font-mono text-[11px] text-ink-700">
+            {`${location.origin}/skill.md`}
+          </code>
+        </div>
       </>,
     );
   }

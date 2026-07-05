@@ -99,7 +99,7 @@ thread you can't judge, relay it to the user rather than resolving it yourself.
   the console first · `413` size limit exceeded · `422` invalid slug/path.
 - **Recovering from first-run 4xx** (fresh accounts hit these; don't give up):
   - `409` `site.handle.required` — the account has no handle yet. Fix it via the
-    API: `GET /api/me/handle/suggest` for a free suggestion, then
+    API: `POST /api/me/handle/suggest` (empty body) for a free suggestion, then
     `POST /api/me/handle` `{"handle":"…"}` (works with the PAT), and retry the
     deploy. If that returns `403 auth.emailUnverified`, fall through to the next
     point.

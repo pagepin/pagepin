@@ -14,6 +14,7 @@ import {
   commentThreads,
   deploySessions,
   deviceAuths,
+  handoffCodes,
   identities,
   instanceSettings,
   invites,
@@ -46,6 +47,7 @@ async function resetDb(db: Db): Promise<void> {
   await db.delete(commentThreads);
   await db.delete(deploySessions);
   await db.delete(deviceAuths);
+  await db.delete(handoffCodes);
   await db.delete(apiTokens);
   await db.delete(invites);
   await db.delete(accountMerges);

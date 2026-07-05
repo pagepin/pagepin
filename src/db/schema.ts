@@ -221,6 +221,24 @@ export const deviceAuths = sqliteTable(
   ],
 );
 
+/** 跨域登录接力(dual 模式)—— console 会话换内容域 pp_view 的一次性短时凭证。
+ *
+ * 流程:内容域登录墙「Sign in」→ console /auth/handoff(有 pp_session 即铸 code,无则先登录)
+ *   → 302 内容域 /auth/accept?code= → 兑换(取走即删,60s TTL)→ 种 pp_view 落回原页。
+ * 效果:GitHub/OIDC 只在 console 登录一次,内容域不再二次 OAuth。
+ * code 走 URL 但一次性 + 短时,重放必失败;过期行在铸新 code 时顺手清理。 */
+export const handoffCodes = sqliteTable(
+  'handoff_codes',
+  {
+    id: text('id').primaryKey(),
+    code: text('code').notNull(), // 高熵一次性凭证(32 hex)
+    userId: text('user_id').notNull(),
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at').notNull(), // ISO;过期即拒
+  },
+  (t) => [uniqueIndex('handoff_code_uq').on(t.code)],
+);
+
 /** 分批上传草稿会话 —— 大站点拆成多请求时,文件先按版本 id 落到唯一前缀,commit 才 flip current。
  *
  * 半成品永不外露:草稿版本在 commit 前不被 current_version_id 指向(原子性与单请求部署一致)。
@@ -271,6 +289,7 @@ export type CommentThreadRow = typeof commentThreads.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
 export type DeviceAuthRow = typeof deviceAuths.$inferSelect;
+export type HandoffCodeRow = typeof handoffCodes.$inferSelect;
 export type DeploySessionRow = typeof deploySessions.$inferSelect;
 
 /** site.versions 里找当前版本(对应 Site.current_version())。 */

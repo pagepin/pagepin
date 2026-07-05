@@ -18,6 +18,7 @@ export type {
   CommentThreadRow,
   DeploySessionRow,
   DeviceAuthRow,
+  HandoffCodeRow,
   IdentityRow,
   InviteRow,
   PendingFile,
@@ -54,5 +55,6 @@ export const apiTokens = t.apiTokens as typeof sqliteSchema.apiTokens;
 export const invites = t.invites as typeof sqliteSchema.invites;
 export const instanceSettings = t.instanceSettings as typeof sqliteSchema.instanceSettings;
 export const deviceAuths = t.deviceAuths as typeof sqliteSchema.deviceAuths;
+export const handoffCodes = t.handoffCodes as typeof sqliteSchema.handoffCodes;
 export const deploySessions = t.deploySessions as typeof sqliteSchema.deploySessions;
 export const accountMerges = t.accountMerges as typeof sqliteSchema.accountMerges;

@@ -176,6 +176,18 @@ export function buildSchema(kit: ColumnKit) {
     ],
   );
 
+  const handoffCodes = table(
+    'handoff_codes',
+    {
+      id: str('id', 64).primaryKey(),
+      code: str('code', 64).notNull(),
+      userId: str('user_id', 64).notNull(),
+      createdAt: str('created_at', 40).notNull(),
+      expiresAt: str('expires_at', 40).notNull(),
+    },
+    (t: any) => [unique('handoff_code_uq').on(t.code)],
+  );
+
   const deploySessions = table(
     'deploy_sessions',
     {
@@ -219,6 +231,7 @@ export function buildSchema(kit: ColumnKit) {
     invites,
     instanceSettings,
     deviceAuths,
+    handoffCodes,
     deploySessions,
     accountMerges,
   };

@@ -270,8 +270,9 @@ export function makeMeRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
     return c.json({ ok: !taken, reason: taken ? 'taken' : null });
   });
 
-  /** 从邮箱/姓名推一个默认 handle 建议(可能为空,前端兜底让用户自己输)。 */
-  app.post('/api/me/handle/suggest', mw.currentUser, async (c) => {
+  /** 从邮箱/姓名推一个默认 handle 建议(可能为空,前端兜底让用户自己输)。
+   *  GET/POST 双收:纯读操作,且早期文档写过 GET —— 已缓存旧文档的 agent 也能自愈。 */
+  app.on(['GET', 'POST'], '/api/me/handle/suggest', mw.currentUser, async (c) => {
     const user = c.get('user');
     const cands: string[] = [];
     if (user.email && user.email.includes('@')) cands.push(user.email.split('@')[0]!);
