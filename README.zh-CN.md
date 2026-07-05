@@ -9,6 +9,8 @@
 
 自托管的静态页面托管服务，支持元素级打点评论与 AI 反馈闭环 —— **让 agent 真正能拉取到的反馈**。
 
+![演示：评审者在托管页面上打点标记 bug，agent 以 JSON 拉取评论、修复文件并重新发布，线程随之解决](docs/assets/pagepin-loop.webp)
+
 用一条 `curl` 部署任意 HTML 报告或静态站点，分享链接，评审者即可直接在页面元素上打点评论。每条评论都带有 CSS selector、类型（`copy` / `style` / `question` / `bug`）和已解决标记 —— 你的编码 agent 因此能以结构化 JSON 拉取未解决的反馈，修改页面后再发布。评审闭环就此闭合，无需再往聊天里贴截图。
 
 > **免安装先试** —— 在 [pagepin.ai](https://pagepin.ai) 直接拖入（或粘贴）一个 HTML / Markdown 文件，立刻得到 1 小时有效的试用链接（无需账号）；或[在官方 Beta 实例免费注册](https://app.pagepin.ai/signup)长期保留页面。随时可导出并自托管。
