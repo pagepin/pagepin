@@ -21,8 +21,15 @@ export const tokens: Record<Locale, Record<string, string>> = {
     // —— 创建 ——
     'tokens.namePlaceholder': 'Label, e.g. claude-deploy',
     'tokens.createButton': 'Create token',
-    'tokens.created': '“{name}” created — copy it now; it won’t be shown again',
+    'tokens.created': '“{name}” created',
     'tokens.createFailed': 'Create failed',
+
+    // —— show-once 高亮卡片(创建/轮换后列表上方,常驻直到手动关闭) ——
+    'tokens.createdCardTitle': '“{name}” created',
+    'tokens.copyButton': 'Copy',
+    'tokens.showOnceWarning':
+      'This is the only time the full token is shown. Copy and store it now — afterwards you can only rotate it for a new value.',
+    'tokens.savedIt': 'I’ve saved it',
 
     // —— 列表 / 空态 ——
     'tokens.empty': 'No tokens yet — create one.',
@@ -46,7 +53,7 @@ export const tokens: Record<Locale, Record<string, string>> = {
     'tokens.rotateBody':
       'The old token stops working immediately; any agent or script using it needs the new value.',
     'tokens.rotateConfirm': 'Rotate',
-    'tokens.rotated': 'Rotated — copy the new value to your agent',
+    'tokens.rotated': 'Rotated',
     'tokens.rotateFailed': 'Rotate failed',
 
     // —— 吊销 ——
@@ -72,8 +79,14 @@ export const tokens: Record<Locale, Record<string, string>> = {
     // —— 创建 ——
     'tokens.namePlaceholder': '标签，例如 claude-deploy',
     'tokens.createButton': '创建 token',
-    'tokens.created': '已创建 “{name}” —— 请立即复制，之后不再显示',
+    'tokens.created': '已创建 “{name}”',
     'tokens.createFailed': '创建失败',
+
+    // —— show-once 高亮卡片(创建/轮换后列表上方,常驻直到手动关闭) ——
+    'tokens.createdCardTitle': '“{name}” 已创建',
+    'tokens.copyButton': '复制',
+    'tokens.showOnceWarning': '这是唯一一次显示完整 token。请立即复制并保存；之后只能轮换拿新值。',
+    'tokens.savedIt': '我已保存好了',
 
     // —— 列表 / 空态 ——
     'tokens.empty': '还没有 token —— 创建一个吧。',
@@ -96,7 +109,7 @@ export const tokens: Record<Locale, Record<string, string>> = {
     'tokens.rotateTitle': '轮换 “{name}”？',
     'tokens.rotateBody': '旧 token 会立即失效；任何使用它的 agent 或脚本都需要换用新值。',
     'tokens.rotateConfirm': '轮换',
-    'tokens.rotated': '已轮换 —— 请把新值复制给你的 agent',
+    'tokens.rotated': '已轮换',
     'tokens.rotateFailed': '轮换失败',
 
     // —— 吊销 ——

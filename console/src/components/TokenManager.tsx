@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Loader2, Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { api } from '../api';
 import { useT } from '../i18n';
 import { confirmDanger } from './ConfirmDialog';
@@ -24,7 +33,10 @@ export function TokenManager() {
   const [creating, setCreating] = useState(false);
   /** id → 本页会话内已知的明文（仅来自刚创建/轮换的响应，不持久化） */
   const [fresh, setFresh] = useState<Record<string, string>>({});
-  /** 最近一次复制动作标识（"<id>:token" / "<id>:prompt"），用于打勾反馈 */
+  /** 刚创建/轮换出的 token —— 触发列表上方的醒目「唯一一次」高亮卡片；
+   *  点「我已保存好了」才收起（不自动消失），这是 show-once 最关键的一屏。 */
+  const [justCreated, setJustCreated] = useState<{ name: string; token: string } | null>(null);
+  /** 最近一次复制动作标识（"<id>:token" / "<id>:prompt" / "card:token"），用于打勾反馈 */
   const [copied, setCopied] = useState<string | null>(null);
 
   const copy = (text: string, key: string) => {
@@ -55,7 +67,10 @@ export function TokenManager() {
       .createToken(n)
       .then((tok) => {
         setName('');
-        if (tok.token) setFresh((f) => ({ ...f, [tok.id]: tok.token! }));
+        if (tok.token) {
+          setFresh((f) => ({ ...f, [tok.id]: tok.token! }));
+          setJustCreated({ name: tok.name, token: tok.token });
+        }
         setTokens((prev) => [tok, ...(prev ?? [])]);
         toast(t('tokens.created', { name: tok.name }));
       })
@@ -73,7 +88,10 @@ export function TokenManager() {
     api
       .rotateToken(tok.id)
       .then((nt) => {
-        if (nt.token) setFresh((f) => ({ ...f, [nt.id]: nt.token! }));
+        if (nt.token) {
+          setFresh((f) => ({ ...f, [nt.id]: nt.token! }));
+          setJustCreated({ name: nt.name, token: nt.token });
+        }
         setTokens((prev) => (prev ?? []).map((x) => (x.id === nt.id ? nt : x)));
         toast(t('tokens.rotated'));
       })
@@ -131,6 +149,45 @@ export function TokenManager() {
           {t('tokens.createButton')}
         </button>
       </div>
+
+      {justCreated && (
+        <div className="mt-4 rounded-card border border-amber-300 bg-amber-50 px-4 py-3.5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+            <Check className="h-4 w-4 shrink-0 text-amber-600" />
+            {t('tokens.createdCardTitle', { name: justCreated.name })}
+          </div>
+          <div className="mt-2.5 flex items-stretch gap-2">
+            <code className="min-w-0 flex-1 break-all rounded-field border border-amber-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-ink-700">
+              {justCreated.token}
+            </code>
+            <button
+              type="button"
+              className="btn-primary shrink-0 self-start"
+              onClick={() => copy(justCreated.token, 'card:token')}
+            >
+              {copied === 'card:token' ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+              {copied === 'card:token' ? t('common.copied') : t('tokens.copyButton')}
+            </button>
+          </div>
+          <div className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-amber-800">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{t('tokens.showOnceWarning')}</span>
+          </div>
+          <div className="mt-2.5 text-right">
+            <button
+              type="button"
+              className="text-xs font-semibold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+              onClick={() => setJustCreated(null)}
+            >
+              {t('tokens.savedIt')}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 divide-y divide-ink-100 border-t border-ink-100">
         {tokens === null ? (
