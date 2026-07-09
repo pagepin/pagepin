@@ -160,6 +160,7 @@ export function TokenManager() {
             <code className="min-w-0 flex-1 break-all rounded-field border border-amber-200 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-ink-700">
               {justCreated.token}
             </code>
+            {/* 图标随复制态切换,但文字恒为「复制」—— 宽度不变,避免挤压 token 框换行导致的页面抖动 */}
             <button
               type="button"
               className="btn-primary shrink-0 self-start"
@@ -170,7 +171,7 @@ export function TokenManager() {
               ) : (
                 <Copy className="h-4 w-4" />
               )}
-              {copied === 'card:token' ? t('common.copied') : t('tokens.copyButton')}
+              {t('tokens.copyButton')}
             </button>
           </div>
           <div className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-amber-800">
