@@ -21,12 +21,12 @@ export const tokens: Record<Locale, Record<string, string>> = {
     // —— 创建 ——
     'tokens.namePlaceholder': 'Label, e.g. claude-deploy',
     'tokens.createButton': 'Create token',
-    'tokens.created': '“{name}” created',
+    'tokens.created': '“{name}” created — copy it now; it won’t be shown again',
     'tokens.createFailed': 'Create failed',
 
     // —— 列表 / 空态 ——
     'tokens.empty': 'No tokens yet — create one.',
-    'tokens.legacySuffix': '… (legacy token — can’t be shown; revoke & recreate)',
+    'tokens.hiddenSuffix': '… (shown only once at creation — rotate for a new value)',
     'tokens.lastUsed': 'Last used {time}',
     'tokens.neverUsed': 'Never used',
     'tokens.expires': ' · expires {date}',
@@ -72,12 +72,12 @@ export const tokens: Record<Locale, Record<string, string>> = {
     // —— 创建 ——
     'tokens.namePlaceholder': '标签，例如 claude-deploy',
     'tokens.createButton': '创建 token',
-    'tokens.created': '已创建 “{name}”',
+    'tokens.created': '已创建 “{name}” —— 请立即复制，之后不再显示',
     'tokens.createFailed': '创建失败',
 
     // —— 列表 / 空态 ——
     'tokens.empty': '还没有 token —— 创建一个吧。',
-    'tokens.legacySuffix': '… （旧版 token，无法显示；请吊销后重新创建）',
+    'tokens.hiddenSuffix': '… （仅创建时显示一次；需要新值请轮换）',
     'tokens.lastUsed': '上次使用于 {time}',
     'tokens.neverUsed': '从未使用',
     'tokens.expires': ' · {date} 到期',

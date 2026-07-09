@@ -71,6 +71,13 @@
       "when": 1783241954667,
       "tag": "0009_chemical_squadron_supreme",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1783279481137,
+      "tag": "0010_dark_baron_strucker",
+      "breakpoints": true
     }
   ]
 }

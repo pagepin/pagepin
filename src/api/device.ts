@@ -154,13 +154,13 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
       .set({
         status: 'approved',
         userId: user.id,
-        token: minted.token,
+        token: minted.plaintext, // 暂存明文等发起方取走(取走即删行);api_tokens 侧只有 hash
         tokenName: name,
         approvedAt: nowIso(),
       })
       .where(eq(deviceAuths.id, rec.id));
     console.log(
-      `device approved handle=${user.handle} user_code=${userCode} prefix=${minted.prefix}`,
+      `device approved handle=${user.handle} user_code=${userCode} prefix=${minted.row.prefix}`,
     );
     return c.json({ ok: true, token_name: name });
   });

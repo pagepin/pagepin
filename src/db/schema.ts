@@ -161,8 +161,7 @@ export const apiTokens = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull(),
     name: text('name').notNull(),
-    token: text('token'), // 明文(仅 owner 的 Cookie 会话可读;自托管拍板同内部版取舍)
-    tokenHash: text('token_hash').notNull(), // sha256(明文) hex,认证查询索引
+    tokenHash: text('token_hash').notNull(), // sha256(明文) hex,认证查询索引;明文只在创建/轮换响应里出现一次,不落库
     prefix: text('prefix').notNull(), // 明文前 15 位(pp_ + 12 hex),日志审计用
     createdAt: text('created_at').notNull(),
     lastUsedAt: text('last_used_at'),

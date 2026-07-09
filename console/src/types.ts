@@ -116,8 +116,8 @@ export interface VersionsOut {
 export interface TokenItem {
   id: string;
   name: string;
-  /** 明文；存明文方案之前创建的旧 token 为 null（只能吊销重建） */
-  token: string | null;
+  /** 明文 —— 只在创建/轮换的响应里出现一次（show-once，库中只存 hash）；列表接口不返回 */
+  token?: string;
   prefix: string;
   created_at: string;
   last_used_at: string | null;

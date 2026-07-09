@@ -14,12 +14,16 @@ function aiPrompt(): string {
   return 'npx skills add pagepin/pagepin -g';
 }
 
-/** API token 列表 + 创建 + 复制/轮换/吊销 —— 不带任何外框，供 TokenDialog 与 Settings 复用。 */
+/** API token 列表 + 创建 + 复制/轮换/吊销 —— 不带任何外框，供 TokenDialog 与 Settings 复用。
+ * token 明文是 show-once：只有创建/轮换的响应携带，这里存进 React state（fresh）供本页
+ * 会话内反复复制，刷新即失；列表接口只回 prefix，历史值无从找回（轮换拿新值）。 */
 export function TokenManager() {
   const t = useT();
   const [tokens, setTokens] = useState<TokenItem[] | null>(null);
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
+  /** id → 本页会话内已知的明文（仅来自刚创建/轮换的响应，不持久化） */
+  const [fresh, setFresh] = useState<Record<string, string>>({});
   /** 最近一次复制动作标识（"<id>:token" / "<id>:prompt"），用于打勾反馈 */
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -51,6 +55,7 @@ export function TokenManager() {
       .createToken(n)
       .then((tok) => {
         setName('');
+        if (tok.token) setFresh((f) => ({ ...f, [tok.id]: tok.token! }));
         setTokens((prev) => [tok, ...(prev ?? [])]);
         toast(t('tokens.created', { name: tok.name }));
       })
@@ -68,6 +73,7 @@ export function TokenManager() {
     api
       .rotateToken(tok.id)
       .then((nt) => {
+        if (nt.token) setFresh((f) => ({ ...f, [nt.id]: nt.token! }));
         setTokens((prev) => (prev ?? []).map((x) => (x.id === nt.id ? nt : x)));
         toast(t('tokens.rotated'));
       })
@@ -139,9 +145,9 @@ export function TokenManager() {
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-ink-700">{tok.name}</div>
                 <div className="truncate font-mono text-xs text-ink-400">
-                  {tok.token
+                  {fresh[tok.id]
                     ? `${tok.prefix}●●●●●●●●●●`
-                    : `${tok.prefix}${t('tokens.legacySuffix')}`}
+                    : `${tok.prefix}${t('tokens.hiddenSuffix')}`}
                 </div>
                 <div className="text-xs text-ink-300">
                   {tok.last_used_at
@@ -165,30 +171,28 @@ export function TokenManager() {
                     <Sparkles className="h-3.5 w-3.5" />
                   )}
                 </button>
-                {tok.token && (
-                  <>
-                    <button
-                      type="button"
-                      title={t('tokens.copyTokenTitle')}
-                      className="rounded-chip p-2 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
-                      onClick={() => copy(tok.token!, `${tok.id}:token`)}
-                    >
-                      {copied === `${tok.id}:token` ? (
-                        <Check className="h-3.5 w-3.5" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      title={t('tokens.rotateActionTitle')}
-                      className="rounded-chip p-2 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
-                      onClick={() => void rotate(tok)}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </button>
-                  </>
+                {fresh[tok.id] && (
+                  <button
+                    type="button"
+                    title={t('tokens.copyTokenTitle')}
+                    className="rounded-chip p-2 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
+                    onClick={() => copy(fresh[tok.id]!, `${tok.id}:token`)}
+                  >
+                    {copied === `${tok.id}:token` ? (
+                      <Check className="h-3.5 w-3.5" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </button>
                 )}
+                <button
+                  type="button"
+                  title={t('tokens.rotateActionTitle')}
+                  className="rounded-chip p-2 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
+                  onClick={() => void rotate(tok)}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </button>
                 <button
                   type="button"
                   title={t('tokens.revokeActionTitle')}

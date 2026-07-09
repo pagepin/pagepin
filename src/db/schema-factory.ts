@@ -124,7 +124,6 @@ export function buildSchema(kit: ColumnKit) {
       id: str('id', 64).primaryKey(),
       userId: str('user_id', 64).notNull(),
       name: str('name', 255).notNull(),
-      token: longStr('token'),
       tokenHash: str('token_hash', 64).notNull(),
       prefix: str('prefix', 32).notNull(),
       createdAt: str('created_at', 40).notNull(),

@@ -6,6 +6,7 @@
  * 运行:node --import tsx --test test/device-flow.test.ts(见 package.json test:unit)。
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 
 import { eq } from 'drizzle-orm';
@@ -107,11 +108,12 @@ test('device flow: code → approve → one-time token delivery', async () => {
   assert.equal(delivered.status, 'approved');
   assert.match(delivered.token, /^pp_[0-9a-f]{40}$/);
 
-  // 交付的 token 是一条真实 PAT(走与 /api/tokens 相同的铸造路径)
+  // 交付的 token 是一条真实 PAT(走与 /api/tokens 相同的铸造路径);库中只有 hash,无明文(show-once)
   const toks = await deps.db.select().from(apiTokens);
   assert.equal(toks.length, 1);
   assert.equal(toks[0]!.userId, 'u-test');
-  assert.equal(toks[0]!.token, delivered.token);
+  assert.equal(toks[0]!.tokenHash, createHash('sha256').update(delivered.token).digest('hex'));
+  assert.ok(!('token' in toks[0]!), 'plaintext must not be stored in api_tokens');
   assert.ok(toks[0]!.expiresAt, 'device-minted token carries an expiry (default TTL)'); // 兜底过期
 
   // 一次性:再轮询行已删 → expired
