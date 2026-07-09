@@ -1,4 +1,4 @@
-// 把 static/comments.js、static/marked.min.js、skills/pagepin/SKILL.md、references/api.md 内联成 TS 字符串常量,供 Workers 入口用。
+// 把 static/comments.js、static/marked.min.js、static/og-card.png、SKILL.md、api.md 内联成 TS 字符串常量,供 Workers 入口用。
 // Workers 无 fs;serving.ts 顶层 readFileSync 在 edge 会在 import 时崩 isolate。
 // 用法:pnpm gen:assets  →  写 src/generated/edge-assets.ts
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -20,7 +20,10 @@ const out =
   `export const MARKED_JS = ${lit(read('static/marked.min.js'))};\n` +
   `export const SKILL_MD = ${lit(read('skills/pagepin/SKILL.md'))};\n` +
   `export const API_MD = ${lit(read('skills/pagepin/references/api.md'))};\n` +
-  `export const FAVICON_ICO_B64 = ${JSON.stringify(readB64('static/favicon.ico'))};\n`;
+  `export const FAVICON_ICO_B64 = ${JSON.stringify(readB64('static/favicon.ico'))};\n` +
+  // 静态品牌 OG 卡图(en/zh),离线用 satori 渲染后 commit(见 static/og-card-*.png);运行时按 locale 伺服。
+  `export const OG_CARD_EN_B64 = ${JSON.stringify(readB64('static/og-card-en.png'))};\n` +
+  `export const OG_CARD_ZH_B64 = ${JSON.stringify(readB64('static/og-card-zh.png'))};\n`;
 
 mkdirSync(join(root, 'src/generated'), { recursive: true });
 writeFileSync(join(root, 'src/generated/edge-assets.ts'), out);

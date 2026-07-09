@@ -14,7 +14,8 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 import { extOf, relHref } from './autoindex.js';
-import { consoleBase } from './config.js';
+import { consoleBase, siteUrl } from './config.js';
+import type { Config } from './config.js';
 import {
   CLOCK_SVG,
   escapeHtml,
@@ -24,7 +25,13 @@ import {
   GLOBE_SVG,
   LOCK_SVG,
 } from './brand-gate.js';
-import { COMMENTS_JS, FAVICON_ICO_B64, MARKED_JS } from './generated/edge-assets.js';
+import {
+  COMMENTS_JS,
+  FAVICON_ICO_B64,
+  MARKED_JS,
+  OG_CARD_EN_B64,
+  OG_CARD_ZH_B64,
+} from './generated/edge-assets.js';
 import { t, type Locale } from './i18n/index.js';
 import { jsonError, localeOf } from './i18n/locale.js';
 import type { Plane } from './auth/sessions.js';
@@ -76,6 +83,9 @@ function decodeB64(b64: string): Uint8Array<ArrayBuffer> {
   return data;
 }
 const FAVICON_ICO = decodeB64(FAVICON_ICO_B64);
+// 静态品牌 OG 卡图(en/zh)—— 离线用 satori 渲染后 commit(static/og-card-*.png),此处解成字节按 locale 伺服。
+const OG_CARD_EN = decodeB64(OG_CARD_EN_B64);
+const OG_CARD_ZH = decodeB64(OG_CARD_ZH_B64);
 
 function injectTag(
   handle: string,
@@ -336,10 +346,11 @@ const mdShell = (
   inject: string,
   sizeBytes: number,
   locale: Locale,
+  ogHead = '',
 ) => `<!doctype html>
 <html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${FAVICON}${FONTS}<title>${fname}</title>
+${FAVICON}${FONTS}<title>${fname}</title>${ogHead}
 <style>
 :root{color-scheme:light}
 *{box-sizing:border-box}
@@ -406,6 +417,7 @@ const imgShell = (
   inject: string,
   view: ImgView | null,
   locale: Locale,
+  ogHead = '',
 ): string => {
   const pos = view
     ? `<span id="pp-img-pos" class="pp-img-pos">${t(locale, 'viewer.img.position', {
@@ -526,7 +538,7 @@ const imgShell = (
   return `<!doctype html>
 <html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-${FAVICON}${FONTS}<title>${title}</title>
+${FAVICON}${FONTS}<title>${title}</title>${ogHead}
 <style>
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;font-family:'Hanken Grotesk',system-ui,sans-serif;
@@ -578,6 +590,78 @@ function safeDecode(s: string): string {
   }
 }
 
+/** OG/Twitter 卡片 meta —— 让微信/Twitter/Slack/飞书 等分享时抓到标题、描述与卡图。
+ * 卡图是固定的静态品牌图(按 locale 选 en/zh),不做每页动态渲染 —— 标题/描述已足够区分内容,
+ * 图片保持品牌一致更省心(见 static/og-card-*.png)。标题从内容抓(md 的 H1 / html 的 title),
+ * 缺省回落 slug。图片与页面同 origin(平面级路由 /_pagepin/og.png,故按 origin 解析,单域不带 /p)。 */
+function ogMetaTags(
+  cfg: Config,
+  pageUrl: string,
+  locale: Locale,
+  title: string,
+  description?: string,
+): string {
+  const imgUrl = new URL(
+    locale === 'zh' ? '/_pagepin/og-zh.png' : '/_pagepin/og.png',
+    pageUrl,
+  ).toString();
+  const tt = escapeHtml(title);
+  const img = escapeHtml(imgUrl);
+  const desc = description ? escapeHtml(description) : '';
+  return (
+    `<meta property="og:type" content="website">` +
+    `<meta property="og:site_name" content="pagepin">` +
+    `<meta property="og:title" content="${tt}">` +
+    (desc ? `<meta property="og:description" content="${desc}">` : '') +
+    `<meta property="og:url" content="${escapeHtml(pageUrl)}">` +
+    `<meta property="og:image" content="${img}">` +
+    `<meta property="og:image:width" content="1200">` +
+    `<meta property="og:image:height" content="630">` +
+    `<meta name="twitter:card" content="summary_large_image">` +
+    `<meta name="twitter:title" content="${tt}">` +
+    (desc ? `<meta name="twitter:description" content="${desc}">` : '') +
+    `<meta name="twitter:image" content="${img}">`
+  );
+}
+
+/** 直传 HTML 的 og —— 只加缩略图相关 meta(og:image + twitter card),不碰用户 HTML 自带的
+ * <title>/描述/og:title;调用方须先确认页面未自带 og:image。图片按 locale 选静态品牌图。 */
+function ogImageMetaTags(cfg: Config, pageUrl: string, locale: Locale): string {
+  const imgUrl = new URL(
+    locale === 'zh' ? '/_pagepin/og-zh.png' : '/_pagepin/og.png',
+    pageUrl,
+  ).toString();
+  const img = escapeHtml(imgUrl);
+  return (
+    `<meta property="og:image" content="${img}">` +
+    `<meta property="og:image:width" content="1200">` +
+    `<meta property="og:image:height" content="630">` +
+    `<meta name="twitter:card" content="summary_large_image">` +
+    `<meta name="twitter:image" content="${img}">`
+  );
+}
+
+/** md 正文抓卡片元信息:首个 `# H1` 作标题、其后首个非空段作描述(截断)。缺 H1 → 标题 undefined。 */
+function extractMdMeta(text: string): { title?: string; description?: string } {
+  const lines = text.split(/\r?\n/);
+  let title: string | undefined;
+  let description: string | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (title === undefined) {
+      const h1 = /^#\s+(.+?)\s*#*$/.exec(line);
+      if (h1) title = h1[1]!.trim();
+      continue;
+    }
+    // H1 之后:第一段非空、非标题、非引用/列表标记开头的文字作描述
+    if (line && !/^[#>|\-*+]/.test(line) && !/^\d+\./.test(line)) {
+      description = line.length > 160 ? line.slice(0, 157) + '…' : line;
+      break;
+    }
+  }
+  return { title, description };
+}
+
 /** 静态 JS:no-cache + ETag revalidate(comments.js 发版即生效)/ vendor 长缓存 */
 function staticJs(
   c: Context<AppEnv>,
@@ -617,6 +701,16 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
   app.get('/_pagepin/marked.min.js', (c) =>
     staticJs(c, MARKED_ASSET.data, MARKED_ASSET.etag, 'public, max-age=86400'),
   );
+  // OG 社交卡图:固定静态品牌图(en/zh),shell/HTML/门页的 og:image 都指向这里。长缓存。
+  const ogPng = (data: Uint8Array<ArrayBuffer>) =>
+    new Response(data, {
+      headers: {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'public, max-age=604800, immutable',
+      },
+    });
+  app.get('/_pagepin/og.png', () => ogPng(OG_CARD_EN));
+  app.get('/_pagepin/og-zh.png', () => ogPng(OG_CARD_ZH));
   // AI agent 发现约定:双域时内容域也答 /llms.txt(agent 手里往往只有页面 URL),
   // 指到 console 的 skill.md;单域由 console 平面注册(app.ts mountSkillDocs),不重复挂。
   if (!single) {
@@ -763,6 +857,9 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
         : `${consoleBase(cfg)}/auth/handoff?next=${encodeURIComponent(c.req.path)}&non=${setOauthNonce(c, cfg)}`;
       const gateHeaders = { 'Cache-Control': 'no-store, private', ...agentHeaders };
       const hint = agentHint(slug, consoleBase(cfg), locale);
+      // 门页(登录墙/过期)也放一张通用品牌卡:私有链接分享到微信/Slack 至少显示成体面的品牌卡,
+      // 标题只用 "pagepin"(不带站点真实标题,不泄露)。经 gateDoc 的 headExtra 注入。
+      hint.head += ogMetaTags(cfg, siteUrl(cfg, handle, slug), locale, 'pagepin');
       if (staleKey) {
         return c.html(shareExpiredHtml(loginHref, locale, hint), 200, gateHeaders);
       }
@@ -816,6 +913,8 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     const shellInject = isTrial
       ? trialRibbonHtml(locale, site.expiresAt!, `${consoleBase(cfg)}/signup`, now) + injectHtml
       : injectHtml;
+    // 分享卡 meta 的页面 URL(og:url + 卡图 origin);标题:站点标题优先,其次内容(md 的 H1),末回落文件名。
+    const pageUrl = siteUrl(cfg, handle, slug);
 
     if (!rawMode && acceptHtml && IMG_EXTS.has(ext)) {
       if (await storage.exists(cur.storage_prefix + rel)) {
@@ -827,6 +926,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
             shellInject,
             imageView(await ensureFiles(site, cur), rel, siteBase),
             locale,
+            ogMetaTags(cfg, pageUrl, locale, site.title || fname),
           ),
           200,
           baseHeaders,
@@ -848,6 +948,15 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
           const text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
           // </ 转义防止 markdown 原文里的 </script> 提前闭合壳页脚本
           const contentJson = JSON.stringify(text).replaceAll('</', '<\\/');
+          // 分享卡:标题取站点标题 → md 的 H1 → 文件名;描述取 H1 后首段。
+          const md = extractMdMeta(text);
+          const ogHead = ogMetaTags(
+            cfg,
+            pageUrl,
+            locale,
+            site.title || md.title || fname,
+            md.description,
+          );
           return c.html(
             mdShell(
               escapeHtml(fname),
@@ -855,6 +964,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
               shellInject,
               opened.meta.contentLength ?? buf.byteLength,
               locale,
+              ogHead,
             ),
             200,
             baseHeaders,
@@ -876,10 +986,11 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     let body: ReadableStream<Uint8Array> | null = null;
     let hit = '';
     for (const cand of candidates) {
-      // 注入候选(HTML 且开评论/试用缎带)不带条件请求:响应体会被改写,存储层的 ETag 对不上号
+      // 注入候选(HTML 且开评论/试用缎带,或公开站要注 og 卡图)不带条件请求:响应体会被改写,ETag 对不上号
       const candLower = cand.toLowerCase();
       const injectThis =
-        (canInject || isTrial) && (candLower.endsWith('.html') || candLower.endsWith('.htm'));
+        (canInject || isTrial || pub) &&
+        (candLower.endsWith('.html') || candLower.endsWith('.htm'));
       try {
         const o = await storage.open(cur.storage_prefix + cand, {
           ifNoneMatch: injectThis ? undefined : c.req.header('if-none-match'),
@@ -918,10 +1029,17 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       tag += trialRibbonHtml(locale, site.expiresAt!, `${consoleBase(cfg)}/signup`, now);
     }
     if (htmlHit && canInject) tag += injectTag(handle, slug, hit, cur.id, locale);
-    if (tag && (meta.contentLength ?? 0) <= INJECT_MAX_BYTES) {
-      // ≤5MB:整读 + 字节级注入(跨运行时一致,保非 UTF-8/BOM 原样)
+    const smallHtml = htmlHit && (meta.contentLength ?? 0) <= INJECT_MAX_BYTES;
+    // ≤5MB HTML:整读 + 字节级注入(插到 </head> 前,跨运行时一致,保非 UTF-8/BOM 原样)。
+    // 公开站即使没有评论/试用注入,也补一段 og 卡图 meta(缩略图),让分享有卡片;
+    // 用户 HTML 自带 og:image 的一律不碰(尊重字节保真的原意)。
+    if (smallHtml && (tag || pub)) {
       const buf = new Uint8Array(await new Response(body).arrayBuffer());
-      const out = injectScriptBytes(buf, tag);
+      let inject = tag;
+      if (pub && !/og:image/i.test(new TextDecoder('latin1').decode(buf.subarray(0, 16384)))) {
+        inject = ogImageMetaTags(cfg, pageUrl, locale) + inject;
+      }
+      const out = inject ? injectScriptBytes(buf, inject) : buf;
       return new Response(out, {
         headers: { ...baseHeaders, 'Content-Type': meta.contentType },
       });
