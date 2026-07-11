@@ -18,7 +18,25 @@
  *    r 解决并前进（Gmail archive-and-next）、\ 收起抽屉、Esc 退出。
  *  - #pp-comment-<id> 深链直达并聚焦；窗口聚焦 + 30s 轮询静默刷新。
  *
+ * 移动端形态（Tideline：bottom sheet + AIM 打点）—— 桌面 v3 原样保留，移动是新增分支：
+ *  - 激活条件（启动时一次判定，会话内不随 resize 切换形态）：
+ *      (a) 主指针 coarse（触屏）且 screen 短边 ≤640px —— 手机竖/横屏都命中（用 screen 而非
+ *          innerWidth：无 <meta viewport> 的宿主页在手机上 layout viewport 是 980px）；
+ *          iPad(短边 ≥768) 不命中，仍走桌面抽屉；或
+ *      (b) 视口宽 ≤520px（任意指针）—— 取代旧的 @media(max-width:520px) 满宽抽屉规则。
+ *  - 唯一全局 chrome 是底部 sheet（[data-pp-role="sheet"]，data-pp-detent=peek|half|full 三档，
+ *    整条 peek bar 可拖可点：Pointer Events 拖拽 + 松手就近吸附 detent；挂载后一次性 peek-bounce
+ *    自我教学，prefers-reduced-motion 跳过）；右拇指角常驻「+ Note」FAB（[data-pp-role="fab"]）。
+ *  - AIM 瞄准模式（移动端的 C/评论模式）：整页 SVG evenodd 挖洞压暗、可锚定元素点亮
+ *    （[data-pp-role="aim-target"]）+ 底部指令条（[data-pp-role="aim-hint"]）；离目标的粗拇指点
+ *    吸附到「最近锚点」（绝不静默落成 @page）。打完点即退出 AIM，草稿落在 sheet 里（HALF 档）。
+ *  - 相机把锚点停在 sheet 上方的「实时空明区」——按目标 detent 的 sheet 顶边现算，不是固定视口比例。
+ *  - 底部余量走文档根 scroll-padding-bottom（非布局属性，零回流）；绝不往宿主页注入任何节点。
+ *  - 打点/图片框选统一迁到 Pointer Events（GROWTH-PLAN A4）：触屏也能在图片上拖拽框选区域。
+ *
  * e2e 钩子：稳定的 data-pp-role / data-pp-* 属性（与展示/i18n 解耦），见各处标注。
+ *   移动端新增：sheet / sheet-grab / sheet-meta / sheet-dots / fab / aim-dim / aim-target /
+ *   aim-hint / aim-cancel / step-prev / step-next / step-pos；root 带 data-pp-form=tideline|drawer。
  */
 (() => {
   'use strict';
@@ -97,6 +115,13 @@
       'toast.loadFailed': 'Failed to load comments: {error}',
       'badge.guest': 'guest',
       'placeholder.guestName': 'Your name (optional)',
+      'fab.note': 'Note',
+      'aim.tapTarget': 'Tap the part you want to comment on',
+      'empty.noneMobile': 'No comments yet.\nTap "+ Note", then tap the part of the page you mean.',
+      'aria.fab': 'Add a note',
+      'aria.sheetHandle': 'Drag to resize the review sheet; tap to expand or collapse',
+      'aria.prev': 'Previous comment',
+      'aria.next': 'Next comment',
     },
     zh: {
       'kind.copy': '文案',
@@ -154,6 +179,13 @@
       'toast.loadFailed': '加载评论失败：{error}',
       'badge.guest': '访客',
       'placeholder.guestName': '你的名字（可选）',
+      'fab.note': '留言',
+      'aim.tapTarget': '点一下你想评论的位置',
+      'empty.noneMobile': '暂无评论。\n点「+ 留言」，再点页面上要评论的位置。',
+      'aria.fab': '添加留言',
+      'aria.sheetHandle': '拖动调整评审面板高度；点按展开或收起',
+      'aria.prev': '上一条',
+      'aria.next': '下一条',
     },
   };
   // 命名为 tr 而非 t：本文件大量用 t 作线程参数（threadCard(t,…)/copyThreadLink(t)/const t = byId 等），
@@ -182,6 +214,16 @@
   const WIDE_MIN = 1536;
   const widthBucket = (w) => (w <= NARROW_MAX ? 'narrow' : w >= WIDE_MIN ? 'wide' : 'mid');
 
+  // ── 形态判定（Tideline vs 桌面抽屉）：启动时一次定死，会话内不随 resize 切换 ──
+  // 见文件头「移动端形态」。用 screen 短边而非 innerWidth 判「手机」：宿主页若无
+  // <meta viewport>，手机上 layout viewport 是 980px（innerWidth=980），但 screen.width
+  // 仍是设备 CSS 宽（如 390）——按 innerWidth 判会把真手机误判成桌面。
+  const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const MOBILE = (COARSE && Math.min(screen.width, screen.height) <= 640) || innerWidth <= 520;
+  const REDUCE = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // sheet 三档 detent；peek 高度固定，half/full 按视口现算（resize/转屏时重取）
+  const PEEK_H = 76;
+
   const state = {
     viewer: null,
     threads: [],
@@ -192,11 +234,15 @@
     draft: null, // { selector, rx, ry, box, kind, _cleanup } 新建草稿
     replyStash: new Map(), // threadId -> 未发送回复草稿
     autoHint: false, // 窄屏自动收起的一次性提示
+    detent: 'peek', // Tideline：sheet 当前档位 peek | half | full
+    sheetDragTop: null, // Tideline：拖拽中 sheet 顶边实时 y（松手吸附后清空）
   };
 
   // 收起态偏好持久化（全局共享：所有站点同一手动收起偏好；窄屏自动收起不写盘）
   const RAIL_KEY = 'pp-anno-rail';
   function loadRail() {
+    // Tideline 无抽屉：railOpen 恒 true，让共享路径里的 `if (!state.railOpen) setRail(true)` 全部 no-op
+    if (MOBILE) { state.railOpen = true; return; }
     let manual = null;
     try {
       const v = JSON.parse(localStorage.getItem(RAIL_KEY) || '{}');
@@ -305,6 +351,10 @@
     const t = el('div', 'pp-anno-toast', msg);
     t.dataset.ppAnno = '1';
     t.dataset.ppRole = 'toast';
+    // Tideline：toast 停在 sheet 顶边上方（FULL 档 sheet 几乎满屏 → 保持默认位置，z 序在 sheet 之上）
+    if (MOBILE && sheetEl && state.detent !== 'full') {
+      t.style.bottom = (innerHeight - sheetTopNow() + 14) + 'px';
+    }
     root.appendChild(t);
     setTimeout(() => t.remove(), 2600);
   }
@@ -316,6 +366,8 @@
   .pp-anno-ic{display:inline-flex}.pp-anno-ic svg{display:block}
   .pp-anno-mode-on:not(.pp-anno-paused){cursor:crosshair}
   .pp-anno-mode-on:not(.pp-anno-paused) *:not(.pp-anno-root, .pp-anno-root *){cursor:crosshair!important}
+  /* 评论/AIM 模式下触屏在图片上拖拽 = 框选而非滚页（Pointer Events 框选的触屏前提） */
+  .pp-anno-mode-on:not(.pp-anno-paused) img{touch-action:none!important}
   .pp-anno-hover-hint{outline:2px solid #0f7c72!important;outline-offset:2px!important;box-shadow:0 0 0 4px rgba(15,124,114,.12)!important}
   .pp-anno-bound{outline:2px solid rgba(15,124,114,.85)!important;outline-offset:2px!important;box-shadow:0 0 0 5px rgba(15,124,114,.12)!important}
   /* ── pin（泪滴，kind 上色，白圈在任意宿主色上都清晰） ── */
@@ -441,22 +493,83 @@
   .pp-anno-toast .pp-anno-ic{color:#7fe3d6}
   @keyframes ppPop{from{opacity:0;transform:translateX(-50%) translateY(6px)}}
   .pp-anno-aimhint{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:2147483100;background:rgba(17,22,27,.92);color:#fff;font:500 12px/1 'Hanken Grotesk',sans-serif;padding:9px 14px;border-radius:9px;box-shadow:0 10px 28px -10px rgba(17,22,27,.5);animation:ppPop .2s}
-  @media (max-width:520px){.pp-anno-drawer{width:100vw}.pp-anno-drawer.pp-anno-closed{transform:translateX(100vw)}}
+  /* ── Tideline（移动端 bottom sheet 形态；激活条件见文件头，≤520px 的旧满宽抽屉规则已被本形态取代） ── */
+  .pp-anno-sheet{position:fixed;left:0;right:0;z-index:2147483000;display:flex;flex-direction:column;
+    background:rgba(255,255,255,.97);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    border-top:1px solid #e1e4e6;border-radius:18px 18px 0 0;
+    box-shadow:0 -10px 34px -16px rgba(17,22,27,.4);
+    transition:top .28s cubic-bezier(.2,.8,.3,1),height .28s cubic-bezier(.2,.8,.3,1)}
+  .pp-anno-sheet *{font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif}
+  .pp-anno-sheet.pp-anno-dragging{transition:none}
+  .pp-anno-sheet.pp-anno-nudge{animation:ppNudge .7s cubic-bezier(.2,.8,.3,1) 1}
+  @keyframes ppNudge{0%,100%{transform:none}45%{transform:translateY(-12px)}}
+  .pp-anno-grab{flex:none;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+  .pp-anno-grab:active{cursor:grabbing}
+  .pp-anno-grab:focus-visible{outline:2px solid #0f7c72;outline-offset:-2px;border-radius:18px 18px 0 0}
+  .pp-anno-grabpill{margin:8px auto 0;width:38px;height:5px;border-radius:999px;background:#cfd4d8}
+  .pp-anno-grabrow{display:flex;align-items:center;gap:10px;padding:6px 12px 10px 14px;min-height:48px}
+  .pp-anno-grabchev{flex:none;color:#9aa1a9;display:inline-flex;transition:transform .2s}
+  .pp-anno-sheet[data-pp-detent="half"] .pp-anno-grabchev,.pp-anno-sheet[data-pp-detent="full"] .pp-anno-grabchev{transform:rotate(180deg)}
+  .pp-anno-sheetmeta{flex:1;min-width:0}
+  .pp-anno-sheetmeta-line{font:700 13px/1.2 'Hanken Grotesk',sans-serif;color:#11161b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pp-anno-dots{display:flex;gap:4px;margin-top:5px;overflow:hidden}
+  .pp-anno-dots i{flex:none;width:7px;height:7px;border-radius:50%;display:inline-block}
+  .pp-anno-fab{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:10px 15px;border:none;cursor:pointer;border-radius:12px;background:#0f7c72;color:#fff;font:700 13px/1 'Hanken Grotesk',sans-serif;box-shadow:0 6px 18px -6px rgba(15,124,114,.55)}
+  .pp-anno-fab:active{transform:scale(.96)}
+  .pp-anno-sheetlist{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:2px 12px 14px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;scrollbar-width:none;-ms-overflow-style:none}
+  .pp-anno-sheetlist::-webkit-scrollbar{width:0;height:0}
+  .pp-anno-sheetbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.95);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:4px 2px 8px;margin-bottom:6px}
+  /* AIM 瞄准模式：整页压暗（SVG evenodd 挖洞=点亮可锚定元素）+ 点亮框 + 底部指令条 */
+  .pp-anno-aimdim{position:absolute;left:0;top:0;z-index:2147482300;pointer-events:none}
+  .pp-anno-aimbox{position:absolute;z-index:2147482400;pointer-events:none;border:1.5px dashed #14958a;border-radius:8px;background:rgba(20,149,138,.08);box-sizing:border-box}
+  .pp-anno-aimchip{position:fixed;left:50%;transform:translateX(-50%);z-index:2147482950;display:flex;align-items:center;gap:8px;background:rgba(17,22,27,.95);color:#fff;border-radius:12px;padding:8px 8px 8px 14px;font:600 12.5px/1.35 'Hanken Grotesk',sans-serif;box-shadow:0 12px 30px -10px rgba(17,22,27,.6);animation:ppPop .2s;max-width:calc(100vw - 24px)}
+  .pp-anno-aimchip button{flex:none;border:none;cursor:pointer;border-radius:9px;background:rgba(255,255,255,.16);color:#fff;font:700 11.5px/1 'Hanken Grotesk',sans-serif;padding:0 12px;min-height:40px}
+  .pp-anno-aim .pp-anno-pin,.pp-anno-aim .pp-anno-region,.pp-anno-aim .pp-anno-glow{display:none}
+  /* 移动端触控目标放大（≥40px）+ iOS 聚焦输入不自动缩放（字号 ≥16px） */
+  .pp-anno-mobile .pp-anno-pin::after{content:"";position:absolute;left:-8px;top:-8px;right:-8px;bottom:-8px;border-radius:50%}
+  .pp-anno-mobile .pp-anno-card-bd{padding:11px 12px 11px 14px}
+  .pp-anno-mobile .pp-anno-resolvebtn{width:40px;height:40px;border-radius:10px}
+  .pp-anno-mobile .pp-anno-iconbtn{width:40px;height:40px;padding:0;display:grid;place-items:center}
+  .pp-anno-mobile .pp-anno-del.pp-anno-armed{width:auto}
+  .pp-anno-mobile .pp-anno-chip2{padding:9px 12px;font-size:11.5px}
+  .pp-anno-mobile .pp-anno-send{min-height:40px;padding:0 16px;font-size:12.5px}
+  .pp-anno-mobile .pp-anno-ghost{min-height:40px;padding:0 14px;font-size:12.5px}
+  .pp-anno-mobile .pp-anno-replybtn{padding:11px 12px}
+  .pp-anno-mobile .pp-anno-ta-wrap textarea{font-size:16px}
+  .pp-anno-mobile .pp-anno-nameinput{font-size:16px}
+  .pp-anno-mobile .pp-anno-seg button{min-height:40px;padding:0 14px;font-size:11px}
+  .pp-anno-mobile .pp-anno-wbtn{min-height:40px}
+  .pp-anno-steprow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;border-top:1px solid #eef0f1;padding-top:8px}
+  .pp-anno-stepbtn{width:44px;height:40px;display:grid;place-items:center;border:1px solid #e1e4e6;background:#fff;color:#5c636b;border-radius:10px;cursor:pointer}
+  .pp-anno-stepbtn:active{background:#f1f3f4}
+  .pp-anno-steppos{font:600 11.5px/1 'JetBrains Mono',monospace;color:#8a929b}
   @media (prefers-reduced-motion:reduce){.pp-anno-root *,.pp-anno-drawer,.pp-anno-drawer *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
-  @media print{.pp-anno-root,.pp-anno-drawer,.pp-anno-tab{display:none!important}}
+  @media print{.pp-anno-root,.pp-anno-drawer,.pp-anno-tab,.pp-anno-sheet{display:none!important}}
   `;
 
   /* ---------------- UI 骨架 ---------------- */
   let root, layer, drawer, listEl, tabEl;
+  let sheetEl, grabEl, sheetListEl; // Tideline
+  // 面板容器：桌面=抽屉，移动=sheet（草稿/回复的 querySelector 统一走这里）
+  const panel = () => (MOBILE ? sheetEl : drawer);
 
   function buildUI() {
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
-    root = el('div', 'pp-anno-root');
+    root = el('div', 'pp-anno-root' + (MOBILE ? ' pp-anno-mobile' : ''));
     root.dataset.ppAnno = '1';
     root.dataset.ppReady = '1'; // e2e「层就绪」门
+    root.dataset.ppForm = MOBILE ? 'tideline' : 'drawer'; // e2e：当前形态
     layer = el('div', 'pp-anno-layer');
+
+    if (MOBILE) {
+      buildSheet();
+      root.append(layer, sheetEl);
+      document.body.appendChild(root);
+      renderSheet();
+      return;
+    }
 
     drawer = el('aside', 'pp-anno-drawer');
     drawer.dataset.ppAnno = '1';
@@ -473,6 +586,99 @@
     root.append(layer, drawer, tabEl);
     document.body.appendChild(root);
     renderDrawer();
+  }
+
+  /* ---------------- Tideline：bottom sheet（detent 档位 + Pointer Events 拖拽） ---------------- */
+  function detentHeights() {
+    const vh = innerHeight;
+    return { peek: PEEK_H, half: Math.round(vh * 0.56), full: Math.round(vh * 0.92) };
+  }
+  const sheetTopFor = (d) => Math.max(0, innerHeight - detentHeights()[d]);
+  const sheetTopNow = () => (state.sheetDragTop != null ? state.sheetDragTop : sheetTopFor(state.detent));
+  function applyDetent() {
+    if (!sheetEl) return;
+    const top = sheetTopNow();
+    // 高度 = 视口内可见段（不是恒 FULL）：HALF 档列表的 clientHeight 才等于可见区，
+    // 内容全部可滚进视野（恒 FULL 会让列表尾段永远卡在视口下缘外）。
+    sheetEl.style.top = top + 'px';
+    sheetEl.style.height = (innerHeight - top) + 'px';
+    sheetEl.dataset.ppDetent = state.detent;
+    sheetEl.classList.toggle('pp-anno-dragging', state.sheetDragTop != null);
+  }
+  function setDetent(d) {
+    state.detent = d;
+    state.sheetDragTop = null;
+    applyDetent();
+  }
+
+  function buildSheet() {
+    sheetEl = el('section', 'pp-anno-sheet');
+    sheetEl.dataset.ppAnno = '1';
+    sheetEl.dataset.ppRole = 'sheet';
+    sheetEl.setAttribute('aria-label', tr('brand.review'));
+
+    grabEl = el('div', 'pp-anno-grab');
+    grabEl.dataset.ppRole = 'sheet-grab';
+    grabEl.setAttribute('role', 'button');
+    grabEl.setAttribute('aria-label', tr('aria.sheetHandle'));
+    grabEl.tabIndex = 0;
+    // 整条 peek bar 可拖：Pointer Events + 松手就近吸附；轻点（位移 <4px）= peek ↔ half 切换
+    let sheetDrag = null;
+    grabEl.addEventListener('pointerdown', (e) => {
+      if (!e.isPrimary) return;
+      if (e.target.closest('button')) return; // FAB 等按钮自己处理
+      sheetDrag = { id: e.pointerId, startY: e.clientY, baseTop: sheetTopNow(), moved: false };
+      try { grabEl.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+    });
+    grabEl.addEventListener('pointermove', (e) => {
+      if (!sheetDrag || e.pointerId !== sheetDrag.id) return;
+      const dy = e.clientY - sheetDrag.startY;
+      if (!sheetDrag.moved && Math.abs(dy) < 4) return;
+      sheetDrag.moved = true;
+      const hs = detentHeights();
+      state.sheetDragTop = Math.min(innerHeight - hs.peek, Math.max(innerHeight - hs.full, sheetDrag.baseTop + dy));
+      applyDetent();
+    });
+    const endSheetDrag = (e) => {
+      if (!sheetDrag || e.pointerId !== sheetDrag.id) return;
+      try { grabEl.releasePointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+      const moved = sheetDrag.moved;
+      sheetDrag = null;
+      if (!moved) { // 轻点整条 bar（不是 5px 小把手）也能开合
+        state.sheetDragTop = null;
+        setDetent(state.detent === 'peek' ? 'half' : 'peek');
+        return;
+      }
+      const top = state.sheetDragTop != null ? state.sheetDragTop : sheetTopFor(state.detent);
+      let best = 'peek', bd = Infinity;
+      for (const d of ['peek', 'half', 'full']) {
+        const dd = Math.abs(sheetTopFor(d) - top);
+        if (dd < bd) { bd = dd; best = d; }
+      }
+      setDetent(best);
+    };
+    grabEl.addEventListener('pointerup', endSheetDrag);
+    grabEl.addEventListener('pointercancel', endSheetDrag);
+    grabEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetent(state.detent === 'peek' ? 'half' : 'peek'); }
+    });
+
+    sheetListEl = el('div', 'pp-anno-sheetlist');
+    sheetListEl.dataset.ppRole = 'list';
+    listEl = sheetListEl; // scrollFocusedCardIntoView 共用
+    sheetEl.append(grabEl, sheetListEl);
+    applyDetent();
+  }
+
+  // Tideline 相机：把锚点停在 sheet 上方的「实时空明区」（按目标 detent 的 sheet 顶边现算）
+  function flyToEl(node, detent) {
+    if (!node) return;
+    const clear = Math.max(120, innerHeight - detentHeights()[detent || state.detent]);
+    const r = node.getBoundingClientRect();
+    const elTop = r.top + scrollY;
+    // 短元素停在空明区 ~45% 处；比空明区还高的元素让顶部贴近上缘（起始处总可见）
+    const target = r.height > clear ? elTop - clear * 0.12 : elTop + r.height / 2 - clear * 0.45;
+    scrollTo({ top: Math.max(0, target), behavior: REDUCE() ? 'auto' : 'smooth' });
   }
 
   /* ---------------- 锚点解析（逐字保留） ---------------- */
@@ -581,6 +787,8 @@
       const p = state.draft._rubberPos();
       if (rb && p) { rb.style.left = p.x + 'px'; rb.style.top = p.y + 'px'; rb.style.width = p.w + 'px'; rb.style.height = p.h + 'px'; }
     }
+    // Tideline AIM：压暗挖洞 + 点亮框随宿主变更/重摆重算（页面坐标系，窗口滚动无需重画）
+    if (MOBILE && state.mode === 'comment' && !state.draft) updateAimOverlay();
     syncDrawerCounts();
   }
 
@@ -588,6 +796,7 @@
   const openCount = () => state.threads.filter((t) => !t.resolved).length;
 
   function setRail(open, opts) {
+    if (MOBILE) return; // Tideline 无抽屉/收起 tab
     opts = opts || {};
     if (open === state.railOpen) return;
     if (!open && !opts.force) {
@@ -605,6 +814,7 @@
   }
 
   function renderDrawer() {
+    if (MOBILE) { renderSheet(); return; } // 移动端唯一面板是 sheet；保留函数名减少调用点分叉
     if (!drawer) return;
     drawer.textContent = '';
     const open = openCount();
@@ -622,15 +832,7 @@
 
     const meta = el('div', 'pp-anno-dwh-meta');
     meta.appendChild(el('span', 'pp-anno-dwh-sub', total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments')));
-    const seg = el('div', 'pp-anno-seg');
-    const segOpen = el('button', state.filter === 'open' ? 'pp-anno-on' : null, tr('filter.open', { open }));
-    segOpen.dataset.ppAct = 'filter'; segOpen.dataset.ppFilter = 'open';
-    segOpen.onclick = () => setFilter('open');
-    const segAll = el('button', state.filter === 'all' ? 'pp-anno-on' : null, tr('filter.all'));
-    segAll.dataset.ppFilter = 'all';
-    segAll.onclick = () => setFilter('all');
-    seg.append(segOpen, segAll);
-    meta.append(seg);
+    meta.append(filterSeg());
 
     const acts = el('div', 'pp-anno-dwh-acts');
     const cbtn = el('button', 'pp-anno-cbtn' + (state.mode === 'comment' ? ' pp-anno-on' : ''));
@@ -671,7 +873,93 @@
     if (state.focusedId) requestAnimationFrame(() => scrollFocusedCardIntoView());
   }
 
+  /* ---------------- Tideline：sheet 渲染 ---------------- */
+  // seg 过滤器（All/Open）：抽屉与 sheet 共用构建
+  function filterSeg() {
+    const open = openCount();
+    const seg = el('div', 'pp-anno-seg');
+    const segOpen = el('button', state.filter === 'open' ? 'pp-anno-on' : null, tr('filter.open', { open }));
+    segOpen.dataset.ppAct = 'filter'; segOpen.dataset.ppFilter = 'open';
+    segOpen.onclick = () => setFilter('open');
+    const segAll = el('button', state.filter === 'all' ? 'pp-anno-on' : null, tr('filter.all'));
+    segAll.dataset.ppFilter = 'all';
+    segAll.onclick = () => setFilter('all');
+    seg.append(segOpen, segAll);
+    return seg;
+  }
+
+  function renderSheet() {
+    if (!sheetEl) return;
+    const open = openCount();
+    const total = state.threads.length;
+
+    // grab bar：把手 + 开合箭头 + 计数/kind 点阵 + 右拇指角 FAB
+    grabEl.textContent = '';
+    grabEl.appendChild(el('div', 'pp-anno-grabpill'));
+    const row = el('div', 'pp-anno-grabrow');
+    const chev = el('span', 'pp-anno-grabchev');
+    chev.appendChild(svg('<path d="m18 15-6-6-6 6"/>', 16));
+    row.appendChild(chev);
+    const meta = el('div', 'pp-anno-sheetmeta');
+    const line = el('div', 'pp-anno-sheetmeta-line', total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments'));
+    line.dataset.ppRole = 'sheet-meta';
+    meta.appendChild(line);
+    if (total) {
+      const dots = el('div', 'pp-anno-dots');
+      dots.dataset.ppRole = 'sheet-dots';
+      for (const t of state.threads) {
+        const dot = el('i');
+        dot.style.background = t.resolved ? '#d7dadd' : (t.kind && KIND[t.kind] ? KIND[t.kind].color : NO_KIND);
+        dots.appendChild(dot);
+      }
+      meta.appendChild(dots);
+    }
+    row.appendChild(meta);
+    const fab = el('button', 'pp-anno-fab');
+    fab.dataset.ppRole = 'fab';
+    fab.setAttribute('aria-label', tr('aria.fab'));
+    fab.appendChild(svg(ICON.plus, 14));
+    fab.appendChild(document.createTextNode(tr('fab.note')));
+    fab.onclick = (e) => { e.stopPropagation(); state.mode === 'comment' ? exitComment() : enterComment(); };
+    row.appendChild(fab);
+    grabEl.appendChild(row);
+
+    // 列表：过滤条（sticky）+ 线程卡（与桌面同一套 threadCard/draftCard）
+    sheetListEl.textContent = '';
+    const ordered = orderedVisible();
+    if (!state.draft) {
+      const bar = el('div', 'pp-anno-sheetbar');
+      if (total > 0) bar.appendChild(filterSeg());
+      const wbtn = el('button', 'pp-anno-wbtn');
+      wbtn.dataset.ppAct = 'whole';
+      wbtn.title = tr('action.notePage');
+      wbtn.style.marginLeft = 'auto';
+      wbtn.appendChild(svg(ICON.msg, 13));
+      wbtn.onclick = openDraftForPage;
+      bar.appendChild(wbtn);
+      sheetListEl.appendChild(bar);
+    }
+    if (!ordered.length && !state.draft) {
+      sheetListEl.appendChild(el('div', 'pp-anno-empty', total ? tr('empty.noOpen') : tr('empty.noneMobile')));
+    } else {
+      for (const { t, a } of ordered) sheetListEl.appendChild(threadCard(t, a));
+    }
+    if (state.draft) sheetListEl.appendChild(draftCard());
+    if (state.focusedId) requestAnimationFrame(() => scrollFocusedCardIntoView());
+  }
+
+  function syncSheetCounts() {
+    if (!sheetEl) return;
+    const open = openCount();
+    const total = state.threads.length;
+    const line = sheetEl.querySelector('[data-pp-role="sheet-meta"]');
+    if (line) line.textContent = total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments');
+    const so = sheetEl.querySelector('[data-pp-filter="open"]');
+    if (so) so.textContent = tr('filter.open', { open });
+  }
+
   function syncDrawerCounts() {
+    if (MOBILE) { syncSheetCounts(); return; }
     const open = openCount();
     if (drawer && state.railOpen) {
       const sub = drawer.querySelector('.pp-anno-dwh-sub');
@@ -880,6 +1168,29 @@
 
     // 回复区
     wrap.appendChild(replyArea(t));
+
+    // Tideline：卡底部「上一条 / n / m / 下一条」步进（j/k 的触屏对应物，44×40 触控目标）
+    if (MOBILE) {
+      const ov = orderedVisible();
+      const idx = ov.findIndex((x) => x.t.id === t.id);
+      if (idx !== -1 && ov.length > 1) {
+        const steps = el('div', 'pp-anno-steprow');
+        const prev = el('button', 'pp-anno-stepbtn');
+        prev.dataset.ppRole = 'step-prev';
+        prev.setAttribute('aria-label', tr('aria.prev'));
+        prev.appendChild(svg('<path d="m15 18-6-6 6-6"/>', 16));
+        prev.onclick = (e) => { e.stopPropagation(); move(-1); };
+        const pos = el('span', 'pp-anno-steppos', (idx + 1) + ' / ' + ov.length);
+        pos.dataset.ppRole = 'step-pos';
+        const next = el('button', 'pp-anno-stepbtn');
+        next.dataset.ppRole = 'step-next';
+        next.setAttribute('aria-label', tr('aria.next'));
+        next.appendChild(svg('<path d="m9 18 6-6-6-6"/>', 16));
+        next.onclick = (e) => { e.stopPropagation(); move(1); };
+        steps.append(prev, pos, next);
+        wrap.appendChild(steps);
+      }
+    }
     return wrap;
   }
 
@@ -958,7 +1269,7 @@
         renderDrawer();
         render();
         // 重新聚焦回复框
-        requestAnimationFrame(() => { const f = drawer.querySelector('[data-pp-focused="1"] [data-pp-role="reply"]'); if (f) f.focus(); });
+        requestAnimationFrame(() => { const f = panel() && panel().querySelector('[data-pp-focused="1"] [data-pp-role="reply"]'); if (f) f.focus(); });
       } catch (err) { toast(err.message || tr('toast.failed')); send.disabled = false; }
     };
     send.onclick = (e) => { e.stopPropagation(); void submit(); };
@@ -974,15 +1285,23 @@
     const t = byId(id);
     if (!t) return;
     state.focusedId = id;
-    if (!state.railOpen) setRail(true);
+    if (MOBILE) {
+      // 选中线程时 sheet 至少抬到 HALF（peek 只够扫一眼）；已在 half/full 保持不动
+      if (state.detent === 'peek') setDetent('half');
+      renderDrawer();
+    } else if (!state.railOpen) setRail(true);
     else renderDrawer();
     render();
     if (scroll) {
       const a = resolveAnchor(t);
       if (a.el) {
-        const r = a.el.getBoundingClientRect();
-        const target = scrollY + r.top - innerHeight * 0.38 + r.height / 2;
-        scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+        if (MOBILE) {
+          flyToEl(a.el); // 相机：停进 sheet 上方实时空明区
+        } else {
+          const r = a.el.getBoundingClientRect();
+          const target = scrollY + r.top - innerHeight * 0.38 + r.height / 2;
+          scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+        }
       } else if (isPage(t)) {
         scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -1037,7 +1356,7 @@
   /* ---------------- 草稿（新建评论，落在抽屉里） ---------------- */
   const draftHasText = () => !!(state.draft && state.draft.text && state.draft.text.trim());
   function shakeDraft() {
-    const card = drawer && drawer.querySelector('[data-pp-role="draft"]');
+    const card = panel() && panel().querySelector('[data-pp-role="draft"]');
     if (!card) return;
     card.classList.remove('pp-anno-shaking'); void card.offsetWidth; card.classList.add('pp-anno-shaking');
     const ta = card.querySelector('textarea'); if (ta) ta.focus();
@@ -1052,7 +1371,9 @@
   }
   function openDraftFor(selector, rx, ry, box) {
     if (!clearDraft()) return; // 已有未发草稿：拦截
-    // 注意：不退出评论模式 —— 保留十字光标以便连续打点，并让评论模式下的「点空白关空草稿」两步式继续生效。
+    // 桌面：不退出评论模式 —— 保留十字光标以便连续打点，并让评论模式下的「点空白关空草稿」两步式继续生效。
+    // 移动（Tideline）：打完点即退出 AIM（压暗/点亮框/指令条撤掉），草稿落进 sheet。
+    if (MOBILE && state.mode === 'comment') { state.mode = 'rest'; teardownAim(); }
     const d = { selector, rx: rx == null ? 0.5 : rx, ry: ry == null ? 0.5 : ry, box: box || null, kind: null, text: '' };
     // box-select：在页面上画持久预览框 + 提供随滚动重摆的几何
     if (box && selector !== PAGE_SELECTOR) {
@@ -1069,12 +1390,20 @@
     }
     state.draft = d;
     state.focusedId = null;
-    if (!state.railOpen) setRail(true); else renderDrawer();
+    if (MOBILE) { setDetent('half'); renderDrawer(); }
+    else if (!state.railOpen) setRail(true); else renderDrawer();
     render();
+    if (MOBILE && selector !== PAGE_SELECTOR) {
+      let node = null;
+      try { node = document.querySelector(selector); } catch (e) { node = null; }
+      if (node) flyToEl(node, 'half'); // 相机：被评元素停在 HALF 档 sheet 上方的空明区
+    }
     requestAnimationFrame(() => {
-      const ta = drawer.querySelector('[data-pp-role="draft"] textarea');
+      const p = panel();
+      if (!p) return;
+      const ta = p.querySelector('[data-pp-role="draft"] textarea');
       if (ta) ta.focus();
-      const card = drawer.querySelector('[data-pp-role="draft"]');
+      const card = p.querySelector('[data-pp-role="draft"]');
       if (card) card.scrollIntoView({ block: 'nearest' });
     });
     syncFlags();
@@ -1186,10 +1515,138 @@
     toast(tr('toast.linkCopied'));
   }
 
+  /* ---------------- Tideline：AIM 瞄准模式（移动端的评论模式） ----------------
+   * 进入：FAB / c 键。页面压暗（SVG evenodd 挖洞）+ 可锚定元素点亮 + 底部指令条；sheet 落回 PEEK。
+   * 打点：click 捕获里吸附到「最近锚点」（rect 距离 0=命中内部，平手取面积小者），绝不静默落 @page。
+   * 候选集：启动 AIM 时按启发式收集（标题/段落/图/表/按钮/带 id 的块），几何每次 render 重算。 */
+  let aimTargets = null;
+  let aimChip = null;
+  function collectAimTargets() {
+    const out = [];
+    const CAND = 'h1,h2,h3,h4,h5,h6,p,li,img,figure,figcaption,pre,blockquote,table,button,video,canvas,svg,[id]';
+    let nodes = [];
+    try { nodes = document.body.querySelectorAll(CAND); } catch (e) { /* 忽略 */ }
+    for (const n of nodes) {
+      if (out.length >= 400) break;
+      if (n.closest('[data-pp-anno]')) continue;
+      const r = n.getBoundingClientRect();
+      if (r.width < 24 || r.height < 14 || r.width * r.height < 500) continue; // 太小，拇指点不准
+      if (r.width >= innerWidth * 0.96 && r.height > innerHeight * 1.1) continue; // 近整页 wrapper 不是有意义的锚点
+      out.push(n);
+    }
+    return out;
+  }
+  function updateAimOverlay() {
+    if (!MOBILE || state.mode !== 'comment' || state.draft || !aimTargets || !layer) return;
+    const docW = Math.max(document.documentElement.scrollWidth, innerWidth);
+    const docH = Math.max(document.documentElement.scrollHeight, innerHeight);
+    const rects = [];
+    for (const n of aimTargets) {
+      const r = n.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      rects.push({ x: r.left + scrollX - 3, y: r.top + scrollY - 3, w: r.width + 6, h: r.height + 6 });
+    }
+    // 压暗层：单条 evenodd path，洞内保持原亮度 = 「点亮」可锚定元素
+    let dim = layer.querySelector('.pp-anno-aimdim');
+    if (!dim) {
+      dim = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      dim.setAttribute('class', 'pp-anno-aimdim');
+      dim.dataset.ppAnno = '1';
+      dim.dataset.ppRole = 'aim-dim';
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p.setAttribute('fill', 'rgba(11,15,18,.42)');
+      p.setAttribute('fill-rule', 'evenodd');
+      dim.appendChild(p);
+      layer.appendChild(dim);
+    }
+    dim.setAttribute('width', String(docW));
+    dim.setAttribute('height', String(docH));
+    dim.setAttribute('viewBox', '0 0 ' + docW + ' ' + docH);
+    let dPath = 'M0 0H' + docW + 'V' + docH + 'H0Z';
+    for (const b of rects) dPath += 'M' + b.x + ' ' + b.y + 'h' + b.w + 'v' + b.h + 'h' + (-b.w) + 'Z';
+    dim.firstChild.setAttribute('d', dPath);
+    // 点亮框：数量对齐后按序复用
+    let boxes = layer.querySelectorAll('.pp-anno-aimbox');
+    if (boxes.length !== rects.length) {
+      boxes.forEach((b) => b.remove());
+      for (let i = 0; i < rects.length; i++) {
+        const b = el('div', 'pp-anno-aimbox');
+        b.dataset.ppAnno = '1';
+        b.dataset.ppRole = 'aim-target';
+        layer.appendChild(b);
+      }
+      boxes = layer.querySelectorAll('.pp-anno-aimbox');
+    }
+    rects.forEach((r, i) => {
+      const b = boxes[i];
+      b.style.left = r.x + 'px'; b.style.top = r.y + 'px';
+      b.style.width = r.w + 'px'; b.style.height = r.h + 'px';
+    });
+  }
+  function teardownAim() {
+    aimTargets = null;
+    if (aimChip) { aimChip.remove(); aimChip = null; }
+    if (root) root.classList.remove('pp-anno-aim');
+    if (layer) layer.querySelectorAll('.pp-anno-aimdim,.pp-anno-aimbox').forEach((n) => n.remove());
+  }
+  // 粗拇指打点：吸附最近锚点，取点在其 rect 内的投影为 rx/ry
+  function aimTapAt(x, y) {
+    let bestEl = null, bestR = null, bd = Infinity, bestArea = Infinity;
+    if (aimTargets) {
+      for (const n of aimTargets) {
+        const r = n.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        const dx = Math.max(r.left - x, 0, x - r.right);
+        const dy = Math.max(r.top - y, 0, y - r.bottom);
+        const dist = Math.hypot(dx, dy);
+        const area = r.width * r.height;
+        if (dist < bd - 0.5 || (Math.abs(dist - bd) <= 0.5 && area < bestArea)) {
+          bd = dist; bestArea = area; bestEl = n; bestR = r;
+        }
+      }
+    }
+    if (!bestEl) { // 极端页面（零候选）：退回命中点元素本身，仍不落 @page
+      const raw = document.elementFromPoint(x, y);
+      if (!raw || raw === document.body || raw === document.documentElement || raw.closest('[data-pp-anno]')) return;
+      bestEl = raw; bestR = raw.getBoundingClientRect();
+      if (!bestR.width || !bestR.height) return;
+    }
+    const rx = Math.min(1, Math.max(0, (x - bestR.left) / bestR.width));
+    const ry = Math.min(1, Math.max(0, (y - bestR.top) / bestR.height));
+    openDraftFor(cssPath(bestEl), rx, ry);
+  }
+  function enterAim() {
+    if (state.draft && !clearDraft()) return; // 有稿：抖动拦截
+    state.mode = 'comment';
+    aimTargets = collectAimTargets();
+    setDetent('peek'); // 让出取景空间；指令条停在 sheet 上方
+    state.focusedId = null;
+    root.classList.add('pp-anno-aim'); // pin/region/glow 让位（CSS 隐藏）
+    if (!aimChip) {
+      aimChip = el('div', 'pp-anno-aimchip');
+      aimChip.dataset.ppAnno = '1';
+      aimChip.dataset.ppRole = 'aim-hint';
+      aimChip.appendChild(document.createTextNode(tr('aim.tapTarget')));
+      const cancel = el('button', null, tr('btn.cancel'));
+      cancel.dataset.ppRole = 'aim-cancel';
+      cancel.onclick = (e) => { e.stopPropagation(); exitComment(); };
+      aimChip.appendChild(cancel);
+      aimChip.style.bottom = (PEEK_H + 12) + 'px';
+      root.appendChild(aimChip);
+    }
+    renderDrawer(); // 清掉可能的空草稿卡
+    updateAimOverlay();
+    syncFlags();
+  }
+
   /* ---------------- 评论模式 + 宿主级标记 ---------------- */
-  function enterComment() { state.mode = 'comment'; if (!state.railOpen) setRail(true); else renderDrawer(); syncFlags(); }
+  function enterComment() {
+    if (MOBILE) { enterAim(); return; }
+    state.mode = 'comment'; if (!state.railOpen) setRail(true); else renderDrawer(); syncFlags();
+  }
   function exitComment() {
     state.mode = 'rest';
+    if (MOBILE) { teardownAim(); syncFlags(); render(); return; }
     if (hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
     renderDrawer();
     syncFlags();
@@ -1203,9 +1660,9 @@
     const de = document.documentElement;
     de.classList.toggle('pp-anno-mode-on', state.mode === 'comment' && !state.draft);
     de.classList.toggle('pp-anno-paused', !!state.draft || replyFocused());
-    // aim hint
+    // aim hint（桌面顶部提示条；移动端 AIM 用自己的底部指令条 aim-hint）
     let h = root && root.querySelector('.pp-anno-aimhint');
-    if (state.mode === 'comment' && !state.draft) {
+    if (!MOBILE && state.mode === 'comment' && !state.draft) {
       if (!h) { h = el('div', 'pp-anno-aimhint', tr('hint.aim')); h.dataset.ppAnno = '1'; root.appendChild(h); }
     } else if (h) h.remove();
   }
@@ -1224,14 +1681,19 @@
   document.addEventListener('dragstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
   document.addEventListener('selectstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
 
-  /* ---------------- 图片框选（保留几何） ---------------- */
-  let suppressNextClick = false;
-  document.addEventListener('mousedown', (down) => {
-    if (state.mode !== 'comment' || state.draft || down.button !== 0) return;
+  /* ---------------- 图片框选（Pointer Events：鼠标/触屏/笔同一路径，几何保留；GROWTH-PLAN A4） ----------------
+   * 触屏前提：评论/AIM 模式下 img 的 touch-action:none（见 STYLE），拖动才走 pointermove 而不是滚页。
+   * click 抑制改为时间窗（触屏拖拽后浏览器不一定补发 click，布尔位会把下一次真点击吞掉）。 */
+  let suppressClickUntil = 0;
+  document.addEventListener('pointerdown', (down) => {
+    if (state.mode !== 'comment' || state.draft) return;
+    if (!down.isPrimary) return;
+    if (down.pointerType === 'mouse' && down.button !== 0) return;
     const img = down.target;
     if (!(img instanceof HTMLImageElement) || img.closest('[data-pp-anno]')) return;
     const r0 = img.getBoundingClientRect();
     if (!r0.width || !r0.height) return;
+    const pid = down.pointerId;
     const sx = down.clientX, sy = down.clientY;
     let rubber = null;
     const cl = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -1242,7 +1704,13 @@
       const y2 = cl(Math.max(sy, e.clientY), r0.top, r0.bottom);
       return { x1, y1, w: x2 - x1, h: y2 - y1 };
     };
+    const cleanup = () => {
+      removeEventListener('pointermove', onMove);
+      removeEventListener('pointerup', onUp);
+      removeEventListener('pointercancel', onCancel);
+    };
     const onMove = (e) => {
+      if (e.pointerId !== pid) return;
       if (!rubber) {
         if (Math.hypot(e.clientX - sx, e.clientY - sy) < 5) return;
         rubber = el('div', 'pp-anno-rubber'); rubber.dataset.ppAnno = '1'; layer.appendChild(rubber);
@@ -1251,20 +1719,26 @@
       rubber.style.left = (g.x1 + scrollX) + 'px'; rubber.style.top = (g.y1 + scrollY) + 'px';
       rubber.style.width = g.w + 'px'; rubber.style.height = g.h + 'px';
     };
+    const onCancel = (e) => {
+      if (e.pointerId !== pid) return;
+      cleanup();
+      if (rubber) rubber.remove();
+    };
     const onUp = (e) => {
-      removeEventListener('mousemove', onMove);
-      removeEventListener('mouseup', onUp);
+      if (e.pointerId !== pid) return;
+      cleanup();
       if (!rubber) return;
       rubber.remove();
-      suppressNextClick = true;
+      suppressClickUntil = Date.now() + 400;
       const g = geom(e);
       if (g.w < 8 || g.h < 8) return;
       openDraftFor(cssPath(img),
         cl((g.x1 - r0.left) / r0.width, 0, 1), cl((g.y1 - r0.top) / r0.height, 0, 1),
         { rw: Math.min(1, g.w / r0.width), rh: Math.min(1, g.h / r0.height) });
     };
-    addEventListener('mousemove', onMove);
-    addEventListener('mouseup', onUp);
+    addEventListener('pointermove', onMove);
+    addEventListener('pointerup', onUp);
+    addEventListener('pointercancel', onCancel);
   }, true);
 
   function composeAt(e) {
@@ -1276,8 +1750,16 @@
   }
 
   document.addEventListener('click', (e) => {
-    if (suppressNextClick) { suppressNextClick = false; e.preventDefault(); e.stopPropagation(); return; }
-    if (e.target.closest('[data-pp-anno]')) return;
+    if (e.target.closest('[data-pp-anno]')) return; // 自家 UI 的点击永不抑制（触屏拖拽后 400ms 内点「发送」不能被吞）
+    if (Date.now() < suppressClickUntil) { suppressClickUntil = 0; e.preventDefault(); e.stopPropagation(); return; }
+    // Tideline：AIM 模式下的粗拇指点 → 吸附最近锚点（openDraftFor 内部退出 AIM）
+    if (MOBILE) {
+      if (state.mode !== 'comment') return;
+      e.preventDefault();
+      e.stopPropagation();
+      aimTapAt(e.clientX, e.clientY);
+      return;
+    }
     if (state.mode === 'comment' || e.altKey || (e.metaKey && !e.ctrlKey)) {
       e.preventDefault();
       e.stopPropagation();
@@ -1307,7 +1789,11 @@
       case 'k': case 'K': e.preventDefault(); move(-1); break;
       case 'r': case 'R': e.preventDefault(); if (state.focusedId) void doResolve(state.focusedId); break;
       case 'c': case 'C': e.preventDefault(); state.mode === 'comment' ? exitComment() : enterComment(); break;
-      case '\\': e.preventDefault(); setRail(!state.railOpen, { refocusTab: !state.railOpen ? false : true }); break;
+      case '\\':
+        e.preventDefault();
+        if (MOBILE) setDetent(state.detent === 'peek' ? 'half' : 'peek'); // 硬键盘：\ 开合 sheet
+        else setRail(!state.railOpen, { refocusTab: !state.railOpen ? false : true });
+        break;
       default: break;
     }
   });
@@ -1330,7 +1816,11 @@
     }
   }
 
-  addEventListener('resize', () => { render(); onResizeWidth(); });
+  addEventListener('resize', () => {
+    render();
+    if (MOBILE) applyDetent(); // 转屏/工具栏收放：half/full 档高度按新视口重算（形态本身不切换）
+    else onResizeWidth();
+  });
   addEventListener('load', () => render());
 
   /* ---------------- 跟随重摆（保留） ---------------- */
@@ -1423,6 +1913,20 @@
     renderDrawer();
     render();
     maybeDeepLink();
+    if (MOBILE) {
+      // 底部余量：文档根 scroll-padding-bottom（非布局属性，零回流；帮 scrollIntoView/锚点跳转让开 PEEK 档）。
+      // 注：真正的底部 spacer 需往宿主页塞节点/改 padding（都被硬约束禁止），相机 flyToEl 已按 sheet 顶边取景兜底。
+      try { document.documentElement.style.scrollPaddingBottom = PEEK_H + 'px'; } catch (e) { /* 忽略 */ }
+      // 一次性 peek-bounce：sheet 自己动一下 = 「我可以拖」；prefers-reduced-motion 跳过
+      if (!REDUCE()) {
+        setTimeout(() => {
+          if (sheetEl && state.detent === 'peek' && state.sheetDragTop == null) {
+            sheetEl.classList.add('pp-anno-nudge');
+            setTimeout(() => { if (sheetEl) sheetEl.classList.remove('pp-anno-nudge'); }, 800);
+          }
+        }, 600);
+      }
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void boot());

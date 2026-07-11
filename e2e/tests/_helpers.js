@@ -36,13 +36,15 @@ function mkThread(n, selector, extra = {}) {
   };
 }
 
-/** boxes: [{id,left,top,text?}] → 绝对定位的锚点元素 + 注入脚本的整页 HTML。 */
-function fixtureHtml(boxes) {
+/** boxes: [{id,left,top,text?}] → 绝对定位的锚点元素 + 注入脚本的整页 HTML。
+ *  height 可选（移动端深链相机测试需要更长的页面才有滚动余量）。 */
+function fixtureHtml(boxes, height = 1300) {
   const style = boxes.map((b) => `#${b.id}{left:${b.left}px;top:${b.top}px}`).join('');
   const divs = boxes.map((b) => `<div class="box" id="${b.id}">${b.text || b.id}</div>`).join('\n  ');
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  html,body{margin:0;height:1300px;font-family:-apple-system,sans-serif}
+  html,body{margin:0;height:${height}px;font-family:-apple-system,sans-serif}
   .box{position:absolute;width:170px;height:70px;border:1px solid #ccc;
        border-radius:8px;padding:10px;background:#fafafa;box-sizing:border-box}
   ${style}
