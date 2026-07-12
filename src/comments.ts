@@ -370,8 +370,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         .from(commentThreads)
         .where(
           and(
-            eq(commentThreads.ownerHandle, handle),
-            eq(commentThreads.slug, slug),
+            // 按 siteId 收口(而非 handle+slug):slug 复用/软删重建时,旧站线程不得漂到新站
+            // (PAT 导出一直按 siteId,这里对齐口径;threads_site_idx 已有索引)
+            eq(commentThreads.siteId, site.id),
             eq(commentThreads.pagePath, rel),
             isNull(commentThreads.deletedAt),
           ),
