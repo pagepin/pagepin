@@ -362,7 +362,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
       if (rawPath === undefined) throw new ApiError(422, 'comment.path.missing');
       const handle = c.req.param('handle') ?? '';
       const slug = c.req.param('slug') ?? '';
-      await resolveCommenter(c, handle, slug);
+      const { site } = await resolveCommenter(c, handle, slug);
       const rel = normalizeSitePath(rawPath);
       if (rel === null) throw new ApiError(422, 'site.path.invalid');
       const threads = await db
@@ -377,7 +377,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
           ),
         )
         .orderBy(asc(commentThreads.createdAt));
-      return c.json({ threads: threads.map(threadOut) });
+      // site_version:当前版本指针。overlay 轮询据此感知「agent 发布了新版本」(横幅时刻),
+      // 也为后续版本级 stale 徽标预留;字段只增不改,老客户端无感。
+      return c.json({ threads: threads.map(threadOut), site_version: site.currentVersionId });
     }),
   );
 

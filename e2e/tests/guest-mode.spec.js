@@ -7,7 +7,7 @@
 const { test, expect } = require('@playwright/test');
 const {
   setup, goto, mkThread, NOW,
-  pin, focusedCard, act, cards, draft, ready,
+  pin, focusedCard, act, cards, composer: draft, ready,
 } = require('./_helpers');
 
 const GUEST = { sub: 'guest:g-abc123', name: null, handle: null, guest: true };

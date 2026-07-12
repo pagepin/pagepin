@@ -123,9 +123,13 @@ async function setup(page, opts = {}) {
         }),
       });
     }
-    // 线程列表（GET）
+    // 线程列表（GET）—— dyn 允许测试中途改版本/线程（模拟 agent 发新版/远程 resolve）
+    const dyn = opts.dyn;
     return threadsStatus === 200
-      ? route.fulfill({ json: { threads } })
+      ? route.fulfill({ json: {
+          threads: dyn && dyn.threads ? dyn.threads : threads,
+          site_version: (dyn && dyn.site_version) || 'v1',
+        } })
       : route.fulfill({ status: threadsStatus, json: { detail: '站点已关评论' } });
   });
 
@@ -152,6 +156,8 @@ const cards = (page) => page.locator('[data-pp-role="card"]');
 const card = (page, n) => page.locator(`[data-pp-role="card"][data-pp-num="${n}"]`);
 const focusedCard = (page) => page.locator('[data-pp-role="card"][data-pp-focused="1"]');
 const draft = (page) => page.locator('[data-pp-role="draft"]');
+// 就地气泡 composer(桌面元素草稿的默认形态;@page/丢锚回落 draft 卡)
+const composer = (page) => page.locator('[data-pp-role="composer"]');
 
 async function goto(page) {
   await page.goto('http://pagepin.test/');
@@ -162,5 +168,5 @@ const ready = async (page) => { await drawer(page).waitFor(); };
 module.exports = {
   COMMENTS_JS, NOW, VIEWER, DEFAULT_BOXES,
   mkThread, fixtureHtml, setup, goto,
-  pin, drawer, tab, act, cards, card, focusedCard, draft, ready,
+  pin, drawer, tab, act, cards, card, focusedCard, draft, composer, ready,
 };

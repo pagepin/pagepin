@@ -82,6 +82,18 @@
       'filter.all': 'All',
       'btn.clickElement': 'Click an element…',
       'btn.comment': 'Comment',
+      'moment.verTitle': '{v} published',
+      'moment.verBody': 'the agent updated this page',
+      'moment.verView': 'View update',
+      'moment.fixTitle': 'Fixed',
+      'moment.fixBody': '{who} handled the spot you flagged',
+      'moment.fixToast': '{n} flagged spot(s) were fixed',
+      'moment.doneTitle': 'Review round complete',
+      'moment.doneStats': '{n} comments · all resolved',
+      'moment.doneTime': 'first fix to zero in {t}',
+      'moment.timeUnder': 'under a minute',
+      'moment.timeMin': '{m} min',
+      'hint.firstOpen': 'Click here, then click anything on the page',
       'btn.reopen': 'Reopen',
       'btn.reply': 'Reply',
       'btn.cancel': 'Cancel',
@@ -146,6 +158,18 @@
       'filter.all': '全部',
       'btn.clickElement': '点击一个元素…',
       'btn.comment': '评论',
+      'moment.verTitle': '{v} 已发布',
+      'moment.verBody': 'agent 更新了这个页面',
+      'moment.verView': '查看更新',
+      'moment.fixTitle': '已修复',
+      'moment.fixBody': '{who} 处理了你标注的这处',
+      'moment.fixToast': '{n} 处标注已被修复',
+      'moment.doneTitle': '本轮评审完成',
+      'moment.doneStats': '{n} 条评论 · 全部解决',
+      'moment.doneTime': '从第一条解决到清零,用时 {t}',
+      'moment.timeUnder': '不到 1 分钟',
+      'moment.timeMin': '{m} 分钟',
+      'hint.firstOpen': '点这里,再点页面上要改的地方',
       'btn.reopen': '重新打开',
       'btn.reply': '回复',
       'btn.cancel': '取消',
@@ -342,7 +366,7 @@
       parts.unshift(part);
       node = node.parentNode;
     }
-    return 'body > ' + parts.join(' > ');
+    return parts.length ? 'body > ' + parts.join(' > ') : 'body'; // 直点 body:落合法选择器,而非悬尾的 'body > '
   }
   const anchorLabel = (sel) => (sel === PAGE_SELECTOR ? '@page' : sel.replace(/^#/, ''));
   // 线程当前 kind 的色（无 kind → 中性 slate；已解决 → 灰）
@@ -368,14 +392,22 @@
   .pp-anno-mode-on:not(.pp-anno-paused) *:not(.pp-anno-root, .pp-anno-root *){cursor:crosshair!important}
   /* 评论/AIM 模式下触屏在图片上拖拽 = 框选而非滚页（Pointer Events 框选的触屏前提） */
   .pp-anno-mode-on:not(.pp-anno-paused) img{touch-action:none!important}
-  .pp-anno-hover-hint{outline:2px solid #0f7c72!important;outline-offset:2px!important;box-shadow:0 0 0 4px rgba(15,124,114,.12)!important}
+  .pp-anno-hover-hint{outline:2px solid #14958a!important;outline-offset:3px!important;
+    box-shadow:0 0 0 6px rgba(61,175,164,.14),0 0 26px 2px rgba(61,175,164,.26)!important;
+    border-radius:6px;transition:box-shadow .2s ease,outline-color .2s ease!important}
   .pp-anno-bound{outline:2px solid rgba(15,124,114,.85)!important;outline-offset:2px!important;box-shadow:0 0 0 5px rgba(15,124,114,.12)!important}
   /* ── pin（泪滴，kind 上色，白圈在任意宿主色上都清晰） ── */
   .pp-anno-layer{position:absolute;top:0;left:0;width:100%;height:0;z-index:2147482000;transform:none;filter:none}
   .pp-anno-pin{position:absolute;z-index:2147482600;width:28px;height:28px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font:700 12px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transform:translate(-4px,-24px);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(28,26,23,.3);user-select:none;transition:transform .15s,box-shadow .15s}
   .pp-anno-pin:hover{transform:translate(-4px,-24px) scale(1.12)}
-  .pp-anno-pin.pp-anno-pulse{animation:ppPin .45s cubic-bezier(.2,1.6,.4,1)}
-  @keyframes ppPin{0%{transform:translate(-4px,-24px) scale(0)}60%{transform:translate(-4px,-24px) scale(1.12)}100%{transform:translate(-4px,-24px) scale(1)}}
+  .pp-anno-pin.pp-anno-pulse{animation:ppPin .52s cubic-bezier(.2,1.7,.35,1)}
+  @keyframes ppPin{0%{transform:translate(-4px,-24px) scale(0) rotate(-18deg)}
+    55%{transform:translate(-4px,-24px) scale(1.22) rotate(4deg)}
+    75%{transform:translate(-4px,-24px) scale(.94) rotate(-1deg)}
+    100%{transform:translate(-4px,-24px) scale(1) rotate(0)}}
+  .pp-anno-pin.pp-anno-pulse::after{content:'';position:absolute;inset:-3px;border-radius:inherit;
+    border:2px solid rgba(20,149,138,.7);animation:ppPinRing .7s cubic-bezier(.2,.8,.3,1) .12s both;pointer-events:none}
+  @keyframes ppPinRing{0%{transform:scale(.7);opacity:.9}100%{transform:scale(2.1);opacity:0}}
   .pp-anno-pin.pp-anno-resolved{filter:saturate(.4);box-shadow:0 2px 6px rgba(28,26,23,.2)}
   .pp-anno-pin.pp-anno-current{transform:translate(-4px,-24px) scale(1.16);z-index:2147482650;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 3px 12px rgba(28,26,23,.4)}
   .pp-anno-pin.pp-anno-current:hover{transform:translate(-4px,-24px) scale(1.16)}
@@ -543,6 +575,123 @@
   .pp-anno-stepbtn{width:44px;height:40px;display:grid;place-items:center;border:1px solid #e1e4e6;background:#fff;color:#5c636b;border-radius:10px;cursor:pointer}
   .pp-anno-stepbtn:active{background:#f1f3f4}
   .pp-anno-steppos{font:600 11.5px/1 'JetBrains Mono',monospace;color:#8a929b}
+  /* ── 就地气泡 composer(桌面默认评论流):pin 即头像,胶囊从它长出,单一表面两行 ── */
+  .pp-anno-composer{position:absolute;z-index:2147482900;width:300px;transform:scale(.4);opacity:0;
+    transition:transform .26s cubic-bezier(.2,1.5,.4,1),opacity .16s ease}
+  .pp-anno-composer.pp-anno-composer-in{transform:scale(1);opacity:1}
+  .pp-anno-composer.pp-anno-composer-seal{transform:scale(.05);opacity:0;
+    transition:transform .22s cubic-bezier(.55,0,.85,.25),opacity .18s ease}
+  .pp-anno-cpill{background:#fff;border-radius:8px 22px 22px 22px;padding:8px 8px 7px 12px;
+    box-shadow:0 12px 36px -10px rgba(17,22,27,.32),0 2px 8px rgba(17,22,27,.1),0 0 0 1px rgba(17,22,27,.045);
+    transition:border-radius .18s ease}
+  .pp-anno-cpill.pp-anno-cpill-multi{border-radius:8px 16px 16px 16px}
+  .pp-anno-cflip .pp-anno-cpill{border-radius:22px 8px 22px 22px}
+  .pp-anno-cflip .pp-anno-cpill.pp-anno-cpill-multi{border-radius:16px 8px 16px 16px}
+  .pp-anno-cmain{display:flex;align-items:flex-end;gap:8px}
+  .pp-anno-cmain textarea{flex:1;min-width:0;border:none;outline:none;background:transparent;resize:none;
+    padding:5px 0 5px;height:30px;max-height:120px;
+    font:500 13.5px/1.5 'Hanken Grotesk',-apple-system,system-ui,sans-serif;color:#11161b}
+  .pp-anno-cmain textarea::placeholder{color:#a6b0ae}
+  .pp-anno-csend{flex:none;border:none;cursor:pointer;display:grid;place-items:center;
+    width:32px;height:32px;border-radius:50%;background:#0f7c72;color:#fff;
+    transition:transform .12s cubic-bezier(.2,.8,.3,1),background .14s,opacity .14s}
+  .pp-anno-csend:hover{background:#0b6358}
+  .pp-anno-csend:active{transform:scale(.92)}
+  .pp-anno-csend:disabled{opacity:.5;cursor:default}
+  .pp-anno-csub{display:flex;align-items:center;gap:2px;margin:1px 0 0 -4px;min-height:22px}
+  .pp-anno-ckind{display:inline-flex;align-items:center;gap:5px;border:none;cursor:pointer;
+    background:transparent;border-radius:999px;padding:4px 6px;
+    font:600 10.5px/1 'Hanken Grotesk',sans-serif;color:#57606a;transition:background .12s ease}
+  .pp-anno-ckind i{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 1px rgba(17,22,27,.06)}
+  .pp-anno-ckind span{max-width:0;overflow:hidden;opacity:0;transition:max-width .18s ease,opacity .14s ease}
+  .pp-anno-ckind:hover span,.pp-anno-ckind.pp-anno-on span{max-width:48px;opacity:1}
+  .pp-anno-ckind:hover{background:#f1f4f3}
+  .pp-anno-ckind.pp-anno-on{background:#e6f4f2;color:#0b6358;box-shadow:inset 0 0 0 1px rgba(15,124,114,.35)}
+  .pp-anno-cname{flex:1;min-width:0}
+  .pp-anno-cname input{width:100%;border:none;outline:none;background:transparent;padding:3px 0;
+    font:600 11.5px/1.3 'Hanken Grotesk',-apple-system,system-ui,sans-serif;color:#11161b;
+    border-bottom:1px solid transparent}
+  .pp-anno-cname input::placeholder{color:#b3bcba;font-weight:500}
+  .pp-anno-cname input:focus{border-bottom-color:rgba(15,124,114,.4)}
+  .pp-anno-livepin{position:absolute;z-index:2147482590;width:28px;height:28px;border-radius:50% 50% 50% 4px;
+    background:#0f7c72;border:2.5px solid #fff;box-shadow:0 3px 10px rgba(11,99,88,.4);
+    display:grid;place-items:center;color:#fff;font:700 12px/1 'Hanken Grotesk',-apple-system,system-ui,sans-serif;
+    transform:translate(-4px,-24px) scale(0);
+    animation:ppLivePop .22s cubic-bezier(.2,1.6,.4,1) forwards,ppBreath 2.2s ease-in-out .3s infinite}
+  @keyframes ppLivePop{to{transform:translate(-4px,-24px) scale(1)}}
+  @keyframes ppBreath{0%,100%{box-shadow:0 3px 10px rgba(11,99,88,.4)}50%{box-shadow:0 3px 16px rgba(11,99,88,.55),0 0 0 5px rgba(61,175,164,.14)}}
+  /* ── 评论模式晕影(真实节点,避免与宿主页 html::after 冲突) ── */
+  .pp-anno-vignette{position:fixed;inset:0;pointer-events:none;z-index:2147481700;
+    box-shadow:inset 0 0 170px 24px rgba(11,99,88,.09);animation:ppVig .7s cubic-bezier(.2,.8,.3,1) both}
+  @keyframes ppVig{from{opacity:0}to{opacity:1}}
+  /* ── 循环时刻(克制档):新版本横幅 / 修复回执 / 收敛回执 ── */
+  .pp-anno-mtbanner{position:fixed;top:14px;left:50%;z-index:2147483200;display:flex;align-items:center;gap:10px;
+    padding:9px 10px 9px 14px;border-radius:999px;background:rgba(255,255,255,.96);border:1px solid #bfe5df;
+    box-shadow:0 8px 30px -8px rgba(11,99,88,.35),0 1px 3px rgba(17,22,27,.08);
+    font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;
+    transform:translate(-50%,-64px);opacity:0;transition:transform .42s cubic-bezier(.2,1.4,.4,1),opacity .3s ease}
+  .pp-anno-mtbanner.pp-anno-min{transform:translate(-50%,0);opacity:1}
+  .pp-anno-mtbanner .pp-anno-mdot{position:relative;width:9px;height:9px;border-radius:50%;background:#0f7c72;flex:none}
+  .pp-anno-mtbanner .pp-anno-mdot::after{content:'';position:absolute;inset:-4px;border-radius:50%;
+    border:2px solid #14958a;opacity:0;animation:ppMPing 2.2s cubic-bezier(.2,.8,.3,1) 1}
+  @keyframes ppMPing{0%{transform:scale(.5);opacity:.9}80%{transform:scale(1.5);opacity:0}100%{opacity:0}}
+  .pp-anno-mtbanner b{font-size:13px;font-weight:700;color:#11161b}
+  .pp-anno-mtbanner span{font-size:12.5px;color:#57606a}
+  .pp-anno-mtbanner button{border:none;cursor:pointer;font:700 12px/1 inherit;border-radius:999px;padding:7px 12px}
+  .pp-anno-mtbanner .pp-anno-mview{background:#0f7c72;color:#fff}
+  .pp-anno-mtbanner .pp-anno-mview:hover{background:#0b6358}
+  .pp-anno-mtbanner .pp-anno-mx{background:transparent;color:#9aa1a9;padding:7px 8px}
+  .pp-anno-mreceipt{position:absolute;z-index:2147482800;display:flex;align-items:flex-start;gap:9px;max-width:250px;
+    padding:10px 13px;border-radius:12px;background:rgba(255,255,255,.97);border:1px solid #bfe5df;
+    box-shadow:0 10px 32px -10px rgba(11,99,88,.4);font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;
+    transform:translateY(6px) scale(.96);opacity:0;transition:transform .38s cubic-bezier(.2,1.4,.4,1),opacity .28s ease}
+  .pp-anno-mreceipt.pp-anno-min{transform:none;opacity:1}
+  .pp-anno-mreceipt.pp-anno-mout{transform:translateY(-4px);opacity:0}
+  .pp-anno-mreceipt i{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;flex:none;background:#0f7c72;color:#fff}
+  .pp-anno-mreceipt i svg{width:12px;height:12px}
+  .pp-anno-mreceipt b{display:block;font-size:12.5px;font-weight:700;color:#11161b;line-height:1.35}
+  .pp-anno-mreceipt span{display:block;font-size:11.5px;color:#57606a;margin-top:2px;line-height:1.4}
+  .pp-anno-mreceipt em{font-style:normal;color:#0b6358;font-weight:600}
+  .pp-anno-mripple{position:absolute;z-index:2147482550;pointer-events:none;width:28px;height:28px;transform:translate(-4px,-24px)}
+  .pp-anno-mripple i{position:absolute;inset:0;border-radius:50%;border:2px solid #14958a;opacity:0;
+    animation:ppMRing 1s cubic-bezier(.2,.8,.3,1) forwards}
+  .pp-anno-mripple i:nth-child(2){animation-delay:.22s;border-color:#8fd3ca}
+  @keyframes ppMRing{0%{transform:scale(.6);opacity:.85}100%{transform:scale(2.4);opacity:0}}
+  .pp-anno-card.pp-anno-stamping{transform:scale(.98);opacity:.4;transition:transform .3s ease,opacity .3s ease}
+  .pp-anno-mstamp{position:absolute;z-index:5;top:50%;left:50%;display:grid;place-items:center;width:44px;height:44px;
+    border-radius:50%;background:#0f7c72;color:#fff;box-shadow:0 6px 20px -4px rgba(11,99,88,.55);
+    transform:translate(-50%,-50%) scale(0) rotate(-14deg);animation:ppMStamp .34s cubic-bezier(.2,1.4,.4,1) forwards}
+  .pp-anno-mstamp svg{width:22px;height:22px}
+  @keyframes ppMStamp{60%{transform:translate(-50%,-50%) scale(1.12) rotate(3deg)}100%{transform:translate(-50%,-50%) scale(1) rotate(0)}}
+  .pp-anno-mfinale{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;
+    padding:26px 18px 22px;border:1px solid #bfe5df;border-radius:14px;margin:14px 4px;
+    background:linear-gradient(180deg,#fff 0%,rgba(230,244,242,.4) 100%);overflow:hidden;
+    font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif}
+  .pp-anno-mfinale .pp-anno-mfc{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;
+    background:#0f7c72;color:#fff;transform:scale(0);animation:ppMStamp .4s cubic-bezier(.2,1.4,.4,1) .1s forwards}
+  .pp-anno-mfinale .pp-anno-mfc svg{width:22px;height:22px}
+  .pp-anno-mfinale b{font-size:14.5px;font-weight:800;color:#11161b;margin-top:12px;letter-spacing:-.01em}
+  .pp-anno-mfinale span{font-size:12px;color:#57606a;margin-top:5px;line-height:1.6}
+  .pp-anno-mfinale em{font-style:normal;font-weight:700;color:#0b6358}
+  /* ── guest 首访一次性提示 ── */
+  .pp-anno-firsthint{position:fixed;z-index:2147483100;max-width:230px;padding:9px 12px;border-radius:11px;
+    background:#11161b;color:#fff;font:600 12px/1.5 'Hanken Grotesk',-apple-system,system-ui,sans-serif;
+    box-shadow:0 10px 30px -8px rgba(17,22,27,.5);
+    transform:translateY(4px);opacity:0;transition:transform .3s cubic-bezier(.2,1.3,.4,1),opacity .2s ease}
+  .pp-anno-firsthint.pp-anno-min{transform:none;opacity:1}
+  .pp-anno-firsthint::after{content:'';position:absolute;top:-5px;right:26px;width:10px;height:10px;
+    background:#11161b;transform:rotate(45deg)}
+  /* ── 新增件的静态降级 ── */
+  @media (prefers-reduced-motion:reduce){
+    .pp-anno-composer,.pp-anno-mtbanner,.pp-anno-mreceipt,.pp-anno-firsthint{transition:none;transform:none;opacity:1}
+    .pp-anno-composer.pp-anno-composer-seal,.pp-anno-mreceipt.pp-anno-mout{opacity:0}
+    .pp-anno-mtbanner{transform:translate(-50%,0)}
+    .pp-anno-livepin{animation:none;transform:translate(-4px,-24px) scale(1)}
+    .pp-anno-mripple,.pp-anno-pin.pp-anno-pulse::after{display:none}
+    .pp-anno-mstamp,.pp-anno-mfinale .pp-anno-mfc{animation:none;transform:translate(-50%,-50%) scale(1)}
+    .pp-anno-mfinale .pp-anno-mfc{transform:scale(1)}
+    .pp-anno-vignette{animation:none;opacity:1}
+  }
   @media (prefers-reduced-motion:reduce){.pp-anno-root *,.pp-anno-drawer,.pp-anno-drawer *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
   @media print{.pp-anno-root,.pp-anno-drawer,.pp-anno-tab,.pp-anno-sheet{display:none!important}}
   `;
@@ -859,7 +1008,7 @@
     } else {
       for (const { t, a } of ordered) listEl.appendChild(threadCard(t, a));
     }
-    if (state.draft) listEl.appendChild(draftCard());
+    if (state.draft && !state.draft._inline) listEl.appendChild(draftCard());
     drawer.appendChild(listEl);
 
     // hint strip
@@ -944,7 +1093,7 @@
     } else {
       for (const { t, a } of ordered) sheetListEl.appendChild(threadCard(t, a));
     }
-    if (state.draft) sheetListEl.appendChild(draftCard());
+    if (state.draft && !state.draft._inline) sheetListEl.appendChild(draftCard());
     if (state.focusedId) requestAnimationFrame(() => scrollFocusedCardIntoView());
   }
 
@@ -1339,6 +1488,7 @@
       Object.assign(t, updated);
     } catch (e) { toast(e.message || tr('toast.failed')); resolveInFlight = false; return; }
     resolveInFlight = false;
+    if (!wasResolved) { try { await momentStamp(id); } catch (e) { /* 仪式失败不阻断 */ } }
     // resolve-and-advance：刚解决且 filter=open（卡会消失）→ 焦点前移到下一张
     if (!wasResolved && state.filter === 'open') {
       const ov2 = orderedVisible();
@@ -1351,6 +1501,7 @@
     }
     renderDrawer();
     render();
+    momentMaybeFinale();
   }
 
   /* ---------------- 草稿（新建评论，落在抽屉里） ---------------- */
@@ -1390,7 +1541,10 @@
     }
     state.draft = d;
     state.focusedId = null;
-    if (MOBILE) { setDetent('half'); renderDrawer(); }
+    // 桌面元素草稿默认「就地气泡」:点哪儿写哪儿;@page 与锚点节点缺失时回落抽屉草稿
+    const inlineOK = !MOBILE && selector !== PAGE_SELECTOR && mountInlineComposer(d);
+    if (inlineOK) renderDrawer();
+    else if (MOBILE) { setDetent('half'); renderDrawer(); }
     else if (!state.railOpen) setRail(true); else renderDrawer();
     render();
     if (MOBILE && selector !== PAGE_SELECTOR) {
@@ -1409,6 +1563,235 @@
     syncFlags();
   }
   const openDraftForPage = () => { if (state.mode === 'comment') exitComment(); openDraftFor(PAGE_SELECTOR, 0, 0); };
+
+  /* ---------------- 就地气泡 composer(桌面默认评论流) ----------------
+   * pin 即头像(首字+头像配色,呼吸待写态),胶囊贴着 pin 生长(朝 pin 侧圆角收小,右缘翻转镜像);
+   * 单一表面两行:主行=输入+圆形发送,次行=kind 彩点(owner)或署名(guest)。发送时胶囊缩回落点,
+   * 真 pin 原位接棒(pulse+环纹)。@page 与节点缺失回落抽屉草稿。 */
+  function mountInlineComposer(d) {
+    let node = null;
+    try { node = document.querySelector(d.selector); } catch (e) { node = null; }
+    if (!node || !layer) return false;
+    const r0 = node.getBoundingClientRect();
+    const ax = r0.left + scrollX + r0.width * d.rx;
+    const ay = r0.top + scrollY + r0.height * d.ry;
+    const whoName = state.viewer ? (state.viewer.name || loadGuestName() || (isGuest() ? tr('badge.guest') : '?')) : '?';
+    const ghost = el('span', 'pp-anno-livepin', initialOf(whoName));
+    ghost.dataset.ppAnno = '1';
+    ghost.style.background = avatarColor(whoName);
+    ghost.style.left = ax + 'px'; ghost.style.top = ay + 'px';
+    layer.appendChild(ghost);
+
+    const box = el('div', 'pp-anno-composer');
+    box.dataset.ppAnno = '1'; box.dataset.ppRole = 'composer';
+    const BW = 300, BH = 84;
+    let bx = ax + 30, by = ay - 33;
+    if (bx + BW > scrollX + innerWidth - 12) { bx = ax - BW - 34; box.classList.add('pp-anno-cflip'); }
+    by = Math.min(Math.max(scrollY + 8, by), scrollY + innerHeight - BH - 12);
+    bx = Math.max(scrollX + 8, bx);
+    box.style.left = bx + 'px'; box.style.top = by + 'px';
+    box.style.transformOrigin = (ax - bx) + 'px ' + (ay - by) + 'px';
+
+    const pill = el('div', 'pp-anno-cpill');
+    const main = el('div', 'pp-anno-cmain');
+    const ta = document.createElement('textarea');
+    ta.rows = 1;
+    ta.placeholder = tr('placeholder.elementNote');
+    const grow = () => {
+      ta.style.height = 'auto';
+      const h = Math.min(120, ta.scrollHeight);
+      ta.style.height = h + 'px';
+      pill.classList.toggle('pp-anno-cpill-multi', h > 30);
+    };
+    ta.oninput = () => { d.text = ta.value; grow(); syncFlags(); };
+    main.appendChild(ta);
+    const send = el('button', 'pp-anno-csend'); send.dataset.ppRole = 'send';
+    send.title = tr('btn.comment');
+    send.appendChild(svg(ICON.arrowR, 14));
+    main.appendChild(send);
+    pill.appendChild(main);
+
+    const sub = el('div', 'pp-anno-csub');
+    let nameInp = null;
+    if (isGuest()) {
+      nameInp = guestNameInput();
+      const nameWrap = el('span', 'pp-anno-cname');
+      nameWrap.appendChild(nameInp);
+      sub.appendChild(nameWrap);
+      nameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); ta.focus(); } };
+    } else {
+      for (const k of KIND_KEYS) {
+        const m = KIND[k];
+        const bch = el('button', 'pp-anno-ckind');
+        bch.dataset.ppKind = k;
+        bch.title = m.label;
+        const dot = el('i'); dot.style.background = m.color;
+        bch.appendChild(dot);
+        bch.appendChild(el('span', '', m.label));
+        bch.onclick = (e) => {
+          e.stopPropagation();
+          d.kind = d.kind === k ? null : k;
+          sub.querySelectorAll('.pp-anno-ckind').forEach((cx) => cx.classList.remove('pp-anno-on'));
+          if (d.kind) bch.classList.add('pp-anno-on');
+        };
+        sub.appendChild(bch);
+      }
+    }
+    pill.appendChild(sub);
+    box.appendChild(pill);
+    layer.appendChild(box);
+    requestAnimationFrame(() => { box.classList.add('pp-anno-composer-in'); ta.focus(); });
+
+    d._inline = true;
+    const prevCleanup = d._cleanup;
+    d._cleanup = () => { if (prevCleanup) prevCleanup(); box.remove(); ghost.remove(); };
+
+    const submit = async () => {
+      const text = ta.value.trim();
+      if (!text) { ta.focus(); return; }
+      send.disabled = true;
+      const anchor_text = fingerprint(node) || null;
+      const payload = {
+        path: CFG.path, selector: d.selector, rx: d.rx, ry: d.ry,
+        rw: d.box ? d.box.rw : null, rh: d.box ? d.box.rh : null, kind: d.kind, anchor_text, text,
+      };
+      if (nameInp) { const nm = nameInp.value.trim(); saveGuestName(nm); payload.author_name = nm || null; }
+      try {
+        const created = await createThread(payload);
+        d._cleanup = prevCleanup || null; // 密封动画期间 box/ghost 自行退场
+        box.classList.add('pp-anno-composer-seal');
+        setTimeout(() => { box.remove(); ghost.remove(); }, 240);
+        state.threads.push(created);
+        if (state.draft && state.draft._cleanup) state.draft._cleanup();
+        state.draft = null;
+        state.focusedId = created.id;
+        renderDrawer();
+        render();
+        const pin = layer.querySelector('.pp-anno-pin[data-tid="' + created.id + '"]');
+        if (pin) pin.classList.add('pp-anno-pulse');
+        syncFlags();
+      } catch (err) { toast(err.message || tr('toast.failed')); send.disabled = false; }
+    };
+    send.onclick = (e) => { e.stopPropagation(); void submit(); };
+    ta.onkeydown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submit(); }
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); clearDraft(true); renderDrawer(); render(); syncFlags(); }
+    };
+    return true;
+  }
+
+  /* ---------------- 循环时刻(克制档):反馈环在眼前闭合 ----------------
+   * M1 新版本横幅:轮询发现 site_version 变化(agent 重新部署了);
+   * M2 修复回执:轮询发现线程被远程 resolve —— pin 原位潮环+回执卡(pin 不在视口则 toast 汇总);
+   * M3 解决盖章:本地 resolve 的落地确认;M4 收敛回执:未解决清零时空态变本轮统计。 */
+  const moments = { lastVersion: null, pendingFixed: [], stats: { n: 0, firstAt: 0, lastAt: 0 }, finaleShown: false, banner: null };
+  const momentMark = () => { const now = Date.now(); if (!moments.stats.firstAt) moments.stats.firstAt = now; moments.stats.lastAt = now; moments.stats.n += 1; };
+  function momentSeed(v) { if (v) moments.lastVersion = v; }
+  function momentOnFetch(data, oldThreads) {
+    if (data && data.site_version) {
+      if (moments.lastVersion && data.site_version !== moments.lastVersion) momentBanner(data.site_version);
+      moments.lastVersion = data.site_version;
+    }
+    moments.pendingFixed = (data.threads || [])
+      .filter((nt) => { const o = oldThreads.find((x) => x.id === nt.id); return o && !o.resolved && nt.resolved; })
+      .map((nt) => {
+        const last = nt.comments[nt.comments.length - 1];
+        const pin = layer && layer.querySelector('.pp-anno-pin[data-tid="' + nt.id + '"]');
+        return {
+          id: nt.id, who: (last && last.author_name) || 'agent',
+          px: pin ? parseFloat(pin.style.left) : null, py: pin ? parseFloat(pin.style.top) : null,
+        };
+      });
+  }
+  function momentAfterRefresh() {
+    const list = moments.pendingFixed; moments.pendingFixed = [];
+    const seen = list.filter((f) => f.py != null && f.py > scrollY - 40 && f.py < scrollY + innerHeight + 40);
+    const unseen = list.length - seen.length;
+    seen.forEach((f, i) => setTimeout(() => momentReceipt(f), i * 650));
+    if (unseen > 0) toast(tr('moment.fixToast', { n: unseen }));
+    list.forEach(momentMark);
+    if (list.length) setTimeout(momentMaybeFinale, seen.length * 650 + 400);
+  }
+  function momentBanner(toV) {
+    if (moments.banner) moments.banner.remove();
+    const bn = el('div', 'pp-anno-mtbanner');
+    bn.dataset.ppAnno = '1';
+    bn.setAttribute('role', 'status');
+    bn.appendChild(el('span', 'pp-anno-mdot'));
+    const tb = document.createElement('b'); tb.textContent = tr('moment.verTitle', { v: toV }); bn.appendChild(tb);
+    bn.appendChild(el('span', '', tr('moment.verBody')));
+    const view = el('button', 'pp-anno-mview', tr('moment.verView'));
+    view.onclick = () => location.reload();
+    const x = el('button', 'pp-anno-mx', '\u2715');
+    const dismiss = () => { bn.classList.remove('pp-anno-min'); setTimeout(() => bn.remove(), 350); if (moments.banner === bn) moments.banner = null; };
+    x.onclick = dismiss;
+    bn.append(view, x);
+    document.body.appendChild(bn);
+    moments.banner = bn;
+    requestAnimationFrame(() => bn.classList.add('pp-anno-min'));
+    setTimeout(dismiss, 9000);
+  }
+  function momentReceipt(f) {
+    if (!layer || f.px == null) return;
+    if (!REDUCE()) {
+      const rip = el('span', 'pp-anno-mripple');
+      rip.innerHTML = '<i></i><i></i>';
+      rip.style.left = f.px + 'px'; rip.style.top = f.py + 'px';
+      layer.appendChild(rip);
+      setTimeout(() => rip.remove(), 1400);
+    }
+    const r = el('div', 'pp-anno-mreceipt');
+    r.dataset.ppAnno = '1';
+    const ic = el('i'); ic.appendChild(svg(ICON.check, 12)); r.appendChild(ic);
+    const bd = el('div');
+    const tb = document.createElement('b'); tb.textContent = tr('moment.fixTitle'); bd.appendChild(tb);
+    const sp = el('span');
+    const em = document.createElement('em'); em.textContent = f.who;
+    // {who} 处理了你标注的这处 —— 主语着色:按 {who} 分段拼
+    const tpl = tr('moment.fixBody', { who: '\u0001' }).split('\u0001');
+    sp.appendChild(document.createTextNode(tpl[0]));
+    sp.appendChild(em);
+    if (tpl[1]) sp.appendChild(document.createTextNode(tpl[1]));
+    bd.appendChild(sp);
+    r.appendChild(bd);
+    r.style.left = Math.max(8, f.px - 20) + 'px';
+    r.style.top = (f.py + 12) + 'px';
+    layer.appendChild(r);
+    requestAnimationFrame(() => r.classList.add('pp-anno-min'));
+    setTimeout(() => { r.classList.add('pp-anno-mout'); setTimeout(() => r.remove(), 350); }, 6200);
+  }
+  async function momentStamp(id) {
+    momentMark();
+    if (REDUCE()) return;
+    const card = panel() && panel().querySelector('[data-pp-role="card"][data-tid="' + id + '"]');
+    if (!card) return;
+    const st = el('span', 'pp-anno-mstamp');
+    st.appendChild(svg(ICON.check, 20));
+    card.appendChild(st);
+    card.classList.add('pp-anno-stamping');
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  function momentMaybeFinale() {
+    if (openCount() > 0) { moments.finaleShown = false; return; }
+    if (moments.finaleShown || moments.stats.n === 0) return;
+    const empty = panel() && panel().querySelector('.pp-anno-empty');
+    if (!empty) return;
+    moments.finaleShown = true;
+    const ms = Math.max(0, moments.stats.lastAt - moments.stats.firstAt);
+    const t = ms < 60000 ? tr('moment.timeUnder') : tr('moment.timeMin', { m: Math.round(ms / 60000) });
+    const fin = el('div', 'pp-anno-mfinale');
+    const fc = el('span', 'pp-anno-mfc'); fc.appendChild(svg(ICON.check, 20)); fin.appendChild(fc);
+    const tb = document.createElement('b'); tb.textContent = tr('moment.doneTitle'); fin.appendChild(tb);
+    const st = el('span');
+    const em = document.createElement('em'); em.textContent = tr('moment.doneStats', { n: state.threads.length });
+    st.appendChild(em);
+    st.appendChild(document.createElement('br'));
+    st.appendChild(document.createTextNode(tr('moment.doneTime', { t })));
+    fin.appendChild(st);
+    empty.replaceChildren(fin);
+    empty.style.padding = '0';
+  }
 
   function draftCard() {
     const d = state.draft;
@@ -1640,12 +2023,15 @@
   }
 
   /* ---------------- 评论模式 + 宿主级标记 ---------------- */
+  let vignetteEl = null;
   function enterComment() {
     if (MOBILE) { enterAim(); return; }
     state.mode = 'comment'; if (!state.railOpen) setRail(true); else renderDrawer(); syncFlags();
+    if (!vignetteEl) { vignetteEl = el('div', 'pp-anno-vignette'); vignetteEl.dataset.ppAnno = '1'; document.body.appendChild(vignetteEl); }
   }
   function exitComment() {
     state.mode = 'rest';
+    if (vignetteEl) { vignetteEl.remove(); vignetteEl = null; }
     if (MOBILE) { teardownAim(); syncFlags(); render(); return; }
     if (hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
     renderDrawer();
@@ -1856,6 +2242,7 @@
     if (state.draft) return; // 撰写中不打断
     try {
       const data = await fetchThreads();
+      try { momentOnFetch(data, state.threads); } catch (e) { /* 仪式失败不阻断 */ }
       const before = JSON.stringify(state.threads.map((t) => [t.id, t.comments.length, t.resolved]));
       const after = JSON.stringify(data.threads.map((t) => [t.id, t.comments.length, t.resolved]));
       if (before !== after) {
@@ -1863,6 +2250,7 @@
         if (state.focusedId && !byId(state.focusedId)) state.focusedId = null;
         renderDrawer();
         render();
+        try { momentAfterRefresh(); } catch (e) { /* 仪式失败不阻断 */ }
       }
     } catch (e) { /* 静默 */ }
   }
@@ -1885,6 +2273,29 @@
   });
 
   /* ---------------- 深链 #pp-comment-<id>（id 形态宽匹配；长度不设下限——find 兜底） ---------------- */
+  /* guest 首访一次性提示:挂在抽屉「+ 评论」按钮下方,8s 或任意点击后消失,只出现一次 */
+  function firstOpenHint() {
+    if (MOBILE || !isGuest()) return; // 移动端 FAB 自带自我教学(peek-bounce + 文字钮)
+    try { if (localStorage.getItem('pp-hint-v1')) return; } catch (e) { return; }
+    const btn = drawer && drawer.querySelector('.pp-anno-cbtn');
+    if (!btn || !state.railOpen) return;
+    const r = btn.getBoundingClientRect();
+    const tip = el('div', 'pp-anno-firsthint', tr('hint.firstOpen'));
+    tip.dataset.ppAnno = '1';
+    tip.style.top = (r.bottom + 10) + 'px';
+    tip.style.right = Math.max(8, innerWidth - r.right) + 'px';
+    document.body.appendChild(tip);
+    requestAnimationFrame(() => tip.classList.add('pp-anno-min'));
+    const done = () => {
+      tip.classList.remove('pp-anno-min');
+      setTimeout(() => tip.remove(), 300);
+      try { localStorage.setItem('pp-hint-v1', '1'); } catch (e) { /* 忽略 */ }
+      removeEventListener('pointerdown', done, true);
+    };
+    addEventListener('pointerdown', done, true);
+    setTimeout(done, 8000);
+  }
+
   function maybeDeepLink() {
     const m = location.hash.match(/^#pp-comment-([\w-]+)$/);
     if (!m) return;
@@ -1906,6 +2317,7 @@
     try {
       const data = await fetchThreads();
       state.threads = data.threads;
+      momentSeed(data.site_version || null); // 版本基线:此后 site_version 变化 = agent 发了新版本
     } catch (e) {
       if (e.status === 403) { root.remove(); return; } // 站点已关评论
       toast(tr('toast.loadFailed', { error: e.message || '' }));
@@ -1913,6 +2325,7 @@
     renderDrawer();
     render();
     maybeDeepLink();
+    firstOpenHint();
     if (MOBILE) {
       // 底部余量：文档根 scroll-padding-bottom（非布局属性，零回流；帮 scrollIntoView/锚点跳转让开 PEEK 档）。
       // 注：真正的底部 spacer 需往宿主页塞节点/改 padding（都被硬约束禁止），相机 flyToEl 已按 sheet 顶边取景兜底。

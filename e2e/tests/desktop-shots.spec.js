@@ -3,7 +3,7 @@
 // 跑法:pnpm exec playwright test tests/desktop-shots.spec.js
 // 产物:test-results/desktop-shots/d1..d7.png(1600×900,抽屉自动展开档)
 const { test } = require('@playwright/test');
-const { mkThread, setup, goto, pin, drawer, tab, draft, focusedCard, ready } =
+const { mkThread, setup, goto, pin, drawer, tab, draft, composer, focusedCard, ready } =
   require('./_helpers');
 
 test.use({ viewport: { width: 1600, height: 900 } });
@@ -49,13 +49,14 @@ test('d3 评论模式:十字光标悬停锚点', async ({ page }) => {
   await shot(page, 'd3-comment-mode');
 });
 
-test('d4 草稿:打点后草稿卡落抽屉(kind chips)', async ({ page }) => {
+test('d4 草稿:就地胶囊 composer(pin 即头像)', async ({ page }) => {
   await setup(page, { threads: THREADS });
   await goto(page); await ready(page);
   await page.keyboard.press('c');
   await page.locator('#t4').click();
-  await draft(page).waitFor();
-  await draft(page).locator('textarea').fill('按钮和标题的间距太挤了');
+  await composer(page).waitFor();
+  await composer(page).locator('textarea').fill('按钮和标题的间距太挤了');
+  await page.waitForTimeout(400);
   await shot(page, 'd4-draft');
 });
 

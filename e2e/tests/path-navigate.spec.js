@@ -2,7 +2,7 @@
 // pagepin:navigate(图片查看器壳的 lightbox 就地切换)与评论层的契约:
 // 切路径 → 重拉线程、后续新建评论落在新路径;草稿未发 → preventDefault 阻断。
 const { test, expect } = require('@playwright/test');
-const { setup, goto, draft, ready } = require('./_helpers');
+const { setup, goto, composer: draft, ready } = require('./_helpers'); // 元素草稿已就地气泡化
 
 const SVG = encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#9ab"/></svg>',
@@ -21,8 +21,8 @@ const navigateTo = (page, path) =>
     path,
   );
 
-const draftTa = (page) => page.locator('[data-pp-role="draft"] textarea');
-const draftSend = (page) => page.locator('[data-pp-role="draft"] [data-pp-role="send"]');
+const draftTa = (page) => page.locator('[data-pp-role="composer"] textarea');
+const draftSend = (page) => page.locator('[data-pp-role="composer"] [data-pp-role="send"]');
 
 test('切路径:按新 path 重拉线程,之后新建的评论落在新路径', async ({ page }) => {
   let created = null;
