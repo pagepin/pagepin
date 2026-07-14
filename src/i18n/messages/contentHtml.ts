@@ -62,10 +62,18 @@ export const contentHtml: Record<Locale, Record<string, string>> = {
     'html.ago.hour.other': '{n} hours ago',
     'html.ago.justNow': 'just now',
 
-    // —— 查看器壳:markdown(serving.mdShell) ——
+    // —— 查看器壳:markdown(serving.mdShell + static/md-viewer.js) ——
     'viewer.md.meta': 'Markdown · {size}',
     'viewer.md.viewRaw': 'View raw',
     'viewer.md.rendering': 'Rendering…',
+    'viewer.md.toc': 'Contents',
+    'viewer.md.copy': 'Copy',
+    'viewer.md.copied': 'Copied',
+    'viewer.md.alertNote': 'Note',
+    'viewer.md.alertTip': 'Tip',
+    'viewer.md.alertImportant': 'Important',
+    'viewer.md.alertWarning': 'Warning',
+    'viewer.md.alertCaution': 'Caution',
 
     // —— 查看器壳:图片导航(serving.imgShell) ——
     'viewer.img.position': '{i} / {n}',
@@ -134,6 +142,14 @@ export const contentHtml: Record<Locale, Record<string, string>> = {
     'viewer.md.meta': 'Markdown · {size}',
     'viewer.md.viewRaw': '查看源码',
     'viewer.md.rendering': '渲染中…',
+    'viewer.md.toc': '目录',
+    'viewer.md.copy': '复制',
+    'viewer.md.copied': '已复制',
+    'viewer.md.alertNote': '注意',
+    'viewer.md.alertTip': '提示',
+    'viewer.md.alertImportant': '重要',
+    'viewer.md.alertWarning': '警告',
+    'viewer.md.alertCaution': '当心',
 
     // —— 查看器壳:图片导航 ——
     'viewer.img.position': '{i} / {n}',

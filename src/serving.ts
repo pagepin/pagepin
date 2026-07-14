@@ -28,7 +28,10 @@ import {
 import {
   COMMENTS_JS,
   FAVICON_ICO_B64,
+  HLJS_JS,
   MARKED_JS,
+  MD_VIEWER_CSS,
+  MD_VIEWER_JS,
   OG_CARD_EN_B64,
   OG_CARD_ZH_B64,
 } from './generated/edge-assets.js';
@@ -73,6 +76,9 @@ function staticAsset(js: string): StaticAsset {
 }
 const COMMENTS_ASSET = staticAsset(COMMENTS_JS);
 const MARKED_ASSET = staticAsset(MARKED_JS);
+const HLJS_ASSET = staticAsset(HLJS_JS);
+const MD_VIEWER_JS_ASSET = staticAsset(MD_VIEWER_JS);
+const MD_VIEWER_CSS_ASSET = staticAsset(MD_VIEWER_CSS);
 
 // favicon.ico —— 二进制资源 base64 内联(edge 无 fs),import 时解一次成字节。
 // 内容域根 /favicon.ico 兜底用:托管页未自带 <link rel=icon> 时浏览器请求它,回落 pagepin 标。
@@ -347,35 +353,23 @@ const mdShell = (
   sizeBytes: number,
   locale: Locale,
   ogHead = '',
-) => `<!doctype html>
+) => {
+  // md-viewer.js 里的本地化文案(TOC 标题 / 复制按钮 / GitHub Alerts 五类标题)
+  const strings = JSON.stringify({
+    toc: t(locale, 'viewer.md.toc'),
+    copy: t(locale, 'viewer.md.copy'),
+    copied: t(locale, 'viewer.md.copied'),
+    alertNote: t(locale, 'viewer.md.alertNote'),
+    alertTip: t(locale, 'viewer.md.alertTip'),
+    alertImportant: t(locale, 'viewer.md.alertImportant'),
+    alertWarning: t(locale, 'viewer.md.alertWarning'),
+    alertCaution: t(locale, 'viewer.md.alertCaution'),
+  });
+  return `<!doctype html>
 <html lang="${locale}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${FAVICON}${FONTS}<title>${fname}</title>${ogHead}
-<style>
-:root{color-scheme:light}
-*{box-sizing:border-box}
-body{margin:0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:#3a424b;background:#fff}
-.pp-md-head{display:flex;align-items:center;gap:11px;padding:13px 22px;border-bottom:1px solid #f0f1f2;background:#fcfcfd}
-.pp-md-ic{width:30px;height:30px;border-radius:8px;background:#eef0f1;color:#6b7480;display:grid;place-items:center;flex-shrink:0}
-.pp-md-name{display:block;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:#11161b;line-height:1.3}
-.pp-md-sub{display:block;font-size:11.5px;color:#9aa1a9;margin-top:1px}
-.pp-md-raw{margin-left:auto;display:inline-flex;align-items:center;gap:5px;text-decoration:none;
-  border:1px solid #e1e4e6;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600;color:#3a424b}
-.pp-md-raw:hover{border-color:#0f7c72;color:#0f7c72}
-main{max-width:680px;margin:0 auto;padding:34px 28px 96px;line-height:1.7;font-size:15.5px}
-h1,h2,h3,h4{line-height:1.3;margin:1.6em 0 .6em;font-weight:700;color:#11161b}
-h1{font-size:28px;letter-spacing:-.01em} h2{font-size:19px;padding-bottom:.25em;border-bottom:1px solid #f0f1f2}
-h3{font-size:16px} p{margin:.8em 0;color:#3a424b} a{color:#0f7c72}
-code{background:#f4f5f6;padding:.15em .45em;border-radius:5px;font-size:.86em;
-  font-family:'JetBrains Mono',monospace;color:#0b6358}
-pre{background:#11161b;border-radius:10px;padding:14px 18px;overflow-x:auto}
-pre code{background:none;padding:0;font-size:.84em;line-height:1.65;color:#cfd6d4}
-blockquote{margin:.8em 0;padding:.4em 1em;color:#57606a;border-left:3px solid #bfe5df;background:#f6f9f8;border-radius:0 6px 6px 0}
-table{border-collapse:collapse;margin:1em 0;display:block;overflow-x:auto}
-th,td{border:1px solid #e7e9eb;padding:7px 14px} th{background:#f4f5f6}
-img{max-width:100%;border-radius:8px} hr{border:none;border-top:1px solid #eef0f1;margin:2em 0}
-ul,ol{padding-left:1.6em} li{margin:.3em 0}
-</style>
+<link rel="stylesheet" href="/_pagepin/md-viewer.css">
 ${inject}</head>
 <body>
 <header class="pp-md-head">
@@ -385,11 +379,11 @@ ${inject}</head>
 </header>
 <main id="pp-md-content">${t(locale, 'viewer.md.rendering')}</main>
 <script src="/_pagepin/marked.min.js"></script>
-<script>
-document.getElementById('pp-md-content').innerHTML =
-  marked.parse(${contentJson}, { gfm: true, breaks: true });
-</script>
+<script src="/_pagepin/hljs.min.js"></script>
+<script src="/_pagepin/md-viewer.js"></script>
+<script>ppMdViewer.render(${contentJson}, { strings: ${strings} });</script>
 </body></html>`;
+};
 
 /** 同版本兄弟图片(顺序与画廊一致:rel 升序);单图/旧版本无清单 → null。 */
 interface ImgView {
@@ -662,21 +656,28 @@ function extractMdMeta(text: string): { title?: string; description?: string } {
   return { title, description };
 }
 
-/** 静态 JS:no-cache + ETag revalidate(comments.js 发版即生效)/ vendor 长缓存 */
-function staticJs(
+/** 静态文本资产:no-cache + ETag revalidate(comments.js/md-viewer 发版即生效)/ vendor 长缓存 */
+function staticText(
   c: Context<AppEnv>,
   data: Uint8Array<ArrayBuffer>,
   etag: string,
   cacheControl: string,
+  contentType: string,
 ): Response {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/javascript; charset=utf-8',
+    'Content-Type': contentType,
     'Cache-Control': cacheControl,
     ETag: etag,
   };
   if (c.req.header('if-none-match') === etag) return new Response(null, { status: 304, headers });
   return new Response(data, { headers });
 }
+const staticJs = (
+  c: Context<AppEnv>,
+  data: Uint8Array<ArrayBuffer>,
+  etag: string,
+  cacheControl: string,
+): Response => staticText(c, data, etag, cacheControl, 'application/javascript; charset=utf-8');
 
 export interface ServingOptions {
   /** HTML 注入策略(Workers 注入 HTMLRewriter 流式注入器,见 serving-inject.ts);
@@ -700,6 +701,21 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
   );
   app.get('/_pagepin/marked.min.js', (c) =>
     staticJs(c, MARKED_ASSET.data, MARKED_ASSET.etag, 'public, max-age=86400'),
+  );
+  app.get('/_pagepin/hljs.min.js', (c) =>
+    staticJs(c, HLJS_ASSET.data, HLJS_ASSET.etag, 'public, max-age=86400'),
+  );
+  app.get('/_pagepin/md-viewer.js', (c) =>
+    staticJs(c, MD_VIEWER_JS_ASSET.data, MD_VIEWER_JS_ASSET.etag, 'no-cache'),
+  );
+  app.get('/_pagepin/md-viewer.css', (c) =>
+    staticText(
+      c,
+      MD_VIEWER_CSS_ASSET.data,
+      MD_VIEWER_CSS_ASSET.etag,
+      'no-cache',
+      'text/css; charset=utf-8',
+    ),
   );
   // OG 社交卡图:固定静态品牌图(en/zh),shell/HTML/门页的 og:image 都指向这里。长缓存。
   const ogPng = (data: Uint8Array<ArrayBuffer>) =>

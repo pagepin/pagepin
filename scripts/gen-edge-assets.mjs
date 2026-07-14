@@ -18,6 +18,9 @@ const out =
   `/* eslint-disable */\n` +
   `export const COMMENTS_JS = ${lit(read('static/comments.js'))};\n` +
   `export const MARKED_JS = ${lit(read('static/marked.min.js'))};\n` +
+  `export const HLJS_JS = ${lit(read('static/hljs.min.js'))};\n` +
+  `export const MD_VIEWER_JS = ${lit(read('static/md-viewer.js'))};\n` +
+  `export const MD_VIEWER_CSS = ${lit(read('static/md-viewer.css'))};\n` +
   `export const SKILL_MD = ${lit(read('skills/pagepin/SKILL.md'))};\n` +
   `export const API_MD = ${lit(read('skills/pagepin/references/api.md'))};\n` +
   `export const FAVICON_ICO_B64 = ${JSON.stringify(readB64('static/favicon.ico'))};\n` +
