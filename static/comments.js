@@ -6,19 +6,25 @@
  *  - 分享会话访客（guest）：/api/viewer 带 ?handle=&slug= 探测，返回 guest:true 进入访客模式 ——
  *    可建线程/回复/删自己的线程；resolve/reopen/kind 修改控件一律隐藏（服务端对 guest PATCH 401）；
  *    署名走请求体 author_name（localStorage 'pp-guest-name' 预填，留空由服务端落「访客」）；
- *  - 锚点 = CSS 选择器 + 元素内相对偏移；"@page" = 整页评论（无 pin，仅抽屉卡片）；
- *    选择器失效（页面改版）降级为抽屉里的「锚点丢失」卡片（不丢评论）。
+ *  - 锚点 = CSS 选择器 + 元素内相对偏移；"@page" = 整页评论（无 pin，仅托盘列表项）；
+ *    选择器失效（页面改版）降级为托盘里的「锚点丢失」项（不丢评论）。
  *
- * 交互模型（v3，右侧浮动抽屉 + 常驻 j/k + 发光相机）：
- *  - 右侧一根浮动抽屉是唯一全局 chrome：页面满宽渲染、零回流（抽屉 fixed 覆盖，不预留宽度）；
- *    前导 16px 羽化成透明，窄屏（≤1366）自动收起为右缘 tab，宽屏（≥1536）自动展开。
- *  - 读与改都在抽屉内的线程卡：聚焦卡就地展开（评论流 + 回复 + kind + 解决/重开/删除）。
- *  - 导航即「常驻 j/k + 发光相机」：聚焦元素套发光环并把视口滚到取景位；点 pin = 聚焦该卡。
- *  - C 进评论模式（十字光标）：点元素 / 在图片上拖框 = 打点，草稿落在抽屉里；
- *    r 解决并前进（Gmail archive-and-next）、\ 收起抽屉、Esc 退出。
+ * 交互模型（Lumen 桌面：泪滴 pin + at-pin popover + 右下 pill 坞/托盘 + 顶部潮汐珠链 + 仪式感时刻）：
+ *  - 右下常驻 pill 坞（[data-pp-role="dock"]）：画笔 = arm 评论模式（[data-pp-act="comment"]），
+ *    计数钮（[data-pp-role="dock-count"]，[data-pp-act="collapse"]）= 开合托盘 + 未解决数。
+ *  - 托盘（[data-pp-role="tray"]）= 列表面：版本徽章 + 未解决数 + 全部/未解决筛选 + 线程行
+ *    （[data-pp-role="card"]，stale/lost/done 徽章）+ 快捷键脚注；零回流（fixed 覆盖，不预留宽度）。
+ *  - at-pin popover（[data-pp-role="card"][data-pp-focused="1"]）= 详情面：浮在 pin 旁，
+ *    评论流 + 回复 + kind + 解决/重开/删除/复制链接/关闭；随滚动重摆，避让托盘则翻到 pin 左侧。
+ *  - 顶部 strand 珠链（[data-pp-role="strand"]，配置位 CFG.strand）：每线程一颗珠，映射文档纵向位置。
+ *  - 点 pin/珠/托盘行 = 聚焦（弹 popover + halo + 相机滚动）；导航即「常驻 j/k + 相机」。
+ *  - C/画笔进评论模式（十字光标）：点元素 / 在图片上拖框 = 打点，草稿落成锚点旁的浮动气泡；
+ *    r 解决并前进（Gmail archive-and-next）、\ 开合托盘、Esc 级联关闭（草稿→popover→seal→横幅→托盘→退模式）。
+ *  - 仪式感时刻：发布 sweep 光带 + stale 横幅；resolve 泪滴升腾 + 盖章；全清 = 全屏「潮退沙平」封印 seal。
  *  - #pp-comment-<id> 深链直达并聚焦；窗口聚焦 + 30s 轮询静默刷新。
+ *  - 配置位（部署经 script data-*）：glass（false=纯色降级，X5 WebView）、strand（顶栏冲突时可关）、armed（默认进模式）。
  *
- * 移动端形态（Tideline：bottom sheet + AIM 打点）—— 桌面 v3 原样保留，移动是新增分支：
+ * 移动端形态（Tideline：bottom sheet + AIM 打点）—— 与桌面正交，本次重设计不动：
  *  - 激活条件（启动时一次判定，会话内不随 resize 切换形态）：
  *      (a) 主指针 coarse（触屏）且 screen 短边 ≤640px —— 手机竖/横屏都命中（用 screen 而非
  *          innerWidth：无 <meta viewport> 的宿主页在手机上 layout viewport 是 980px）；
@@ -36,7 +42,9 @@
  *
  * e2e 钩子：稳定的 data-pp-role / data-pp-* 属性（与展示/i18n 解耦），见各处标注。
  *   移动端新增：sheet / sheet-grab / sheet-meta / sheet-dots / fab / aim-dim / aim-target /
- *   aim-hint / aim-cancel / step-prev / step-next / step-pos；root 带 data-pp-form=tideline|drawer。
+ *   aim-hint / aim-cancel / step-prev / step-next / step-pos；root 带 data-pp-form=tideline|lumen。
+ *   桌面 Lumen 钩子：dock / dock-count / tray / strand / card(+data-pp-focused) / draft / copy-link /
+ *   reply / send / resolve / reopen / delete / guest-name / guest-badge；data-pp-act=comment|collapse|whole|close-card。
  */
 (() => {
   'use strict';
@@ -51,6 +59,10 @@
     path: script.dataset.path,
     version: script.dataset.version,
     lang: script.dataset.lang,
+    // Lumen 配置位（部署可通过 script data-* 覆盖；默认见下）
+    glass: script.dataset.glass !== 'false', // 玻璃面（false=纯色降级，X5 WebView）
+    strand: script.dataset.strand !== 'false', // 顶部潮汐珠链（宿主有 fixed 顶栏时可关）
+    armed: script.dataset.armed === 'true', // 默认进入评论模式
   };
   if (!CFG.handle || !CFG.slug || !CFG.path) return;
 
@@ -69,7 +81,6 @@
       'time.hoursAgo': '{n}h ago',
       'time.daysAgo': '{n}d ago',
       'brand.review': 'Review',
-      'action.hideDrawer': 'Hide drawer (\\)',
       'action.notePage': 'Note on the whole page',
       'action.copyLink': 'Copy link',
       'action.resolveNext': 'Resolve & next (r)',
@@ -80,7 +91,6 @@
       'meta.noComments': 'No comments yet',
       'filter.open': 'Open {open}',
       'filter.all': 'All',
-      'btn.clickElement': 'Click an element…',
       'btn.comment': 'Comment',
       'moment.verTitle': '{v} published',
       'moment.verBody': 'the agent updated this page',
@@ -105,8 +115,6 @@
       'hint.hide': 'hide',
       'hint.enterReply': 'Enter to reply',
       'hint.aim': 'Click an element to comment · drag on an image to box a region · Esc to exit',
-      'hint.narrow': 'Narrow window — drawer tucked away so the page stays full-width',
-      'aria.openDrawer': 'Open review drawer',
       'aria.openDrawerUnresolved': 'Open review drawer ({open} unresolved)',
       'aria.openDrawerResolved': 'Open review drawer (all resolved)',
       'banner.resolved': 'Resolved',
@@ -126,6 +134,25 @@
       'toast.linkCopied': 'Link copied',
       'toast.loadFailed': 'Failed to load comments: {error}',
       'badge.guest': 'guest',
+      // ── Lumen 桌面新增 ──
+      'dock.arm': 'Comment mode (c)',
+      'dock.armed': 'Comment mode on · Esc to exit',
+      'dock.tray': 'pagepin review (\\)',
+      'action.closeCard': 'Close (Esc)',
+      'card.pos': '{n} / {total}',
+      'card.staleVer': 'written on {v} · may be stale',
+      'card.lostKept': 'anchor lost · comment kept',
+      'badge.lost': 'anchor lost',
+      'card.resolvedAt': 'Resolved · at {v}',
+      'hint.close': 'close',
+      'banner.staleReview': 'Review stale comments',
+      'banner.later': 'Later',
+      'banner.publishedStale': '{v} published · {n} comment(s) on an older version',
+      'seal.title': 'Tide out, sand smooth · All clear',
+      'seal.body': 'all {n} comments this round are resolved',
+      'seal.continue': 'Click anywhere to continue',
+      'draft.publish': 'Publish',
+      'placeholder.comment': 'comment here…',
       'placeholder.guestName': 'Your name (optional)',
       'fab.note': 'Note',
       'aim.tapTarget': 'Tap the part you want to comment on',
@@ -145,7 +172,6 @@
       'time.hoursAgo': '{n} 小时前',
       'time.daysAgo': '{n} 天前',
       'brand.review': '评审',
-      'action.hideDrawer': '隐藏抽屉 (\\)',
       'action.notePage': '对整个页面留言',
       'action.copyLink': '复制链接',
       'action.resolveNext': '解决并前进 (r)',
@@ -156,7 +182,6 @@
       'meta.noComments': '暂无评论',
       'filter.open': '未解决 {open}',
       'filter.all': '全部',
-      'btn.clickElement': '点击一个元素…',
       'btn.comment': '评论',
       'moment.verTitle': '{v} 已发布',
       'moment.verBody': 'agent 更新了这个页面',
@@ -181,8 +206,6 @@
       'hint.hide': '隐藏',
       'hint.enterReply': '回车发送回复',
       'hint.aim': '点击一个元素来评论 · 在图片上拖拽框选区域 · 按 Esc 退出',
-      'hint.narrow': '窗口较窄 —— 抽屉已收起，让页面保持满宽',
-      'aria.openDrawer': '打开评审抽屉',
       'aria.openDrawerUnresolved': '打开评审抽屉（{open} 条未解决）',
       'aria.openDrawerResolved': '打开评审抽屉（全部已解决）',
       'banner.resolved': '已解决',
@@ -202,6 +225,25 @@
       'toast.linkCopied': '链接已复制',
       'toast.loadFailed': '加载评论失败：{error}',
       'badge.guest': '访客',
+      // ── Lumen 桌面新增 ──
+      'dock.arm': '评论模式 (c)',
+      'dock.armed': '评论模式开 · Esc 退出',
+      'dock.tray': 'pagepin 评审 (\\)',
+      'action.closeCard': '关闭 · Esc',
+      'card.pos': '{n} / {total}',
+      'card.staleVer': '写于 {v} · 可能过期',
+      'card.lostKept': '锚点丢失 · 评论仍保留',
+      'badge.lost': '锚点丢失',
+      'card.resolvedAt': '已解决 · 于 {v}',
+      'hint.close': '关闭',
+      'banner.staleReview': '巡检过期评论',
+      'banner.later': '稍后',
+      'banner.publishedStale': '{v} 已发布 · {n} 条评论写于旧版本',
+      'seal.title': '潮退沙平 · All clear',
+      'seal.body': '本轮评审的 {n} 条评论已全部解决',
+      'seal.continue': '点击任意处继续',
+      'draft.publish': '发布',
+      'placeholder.comment': '评论这里…',
       'placeholder.guestName': '你的名字（可选）',
       'fab.note': '留言',
       'aim.tapTarget': '点一下你想评论的位置',
@@ -232,13 +274,7 @@
   const RESOLVED_COLOR = '#aeb4ba';
   const AVA = ['#2f6fb0', '#0f7c72', '#7c4bc0', '#c07a16', '#b14a42'];
 
-  // 抽屉尺寸 + 宽度感知自动收起（占用宽度依赖：96px@1280 / 53px@1366 / 16px@1440[羽化吃掉] / 0@≥1536）。
-  const DRAWER_W = 320;
-  const NARROW_MAX = 1366;
-  const WIDE_MIN = 1536;
-  const widthBucket = (w) => (w <= NARROW_MAX ? 'narrow' : w >= WIDE_MIN ? 'wide' : 'mid');
-
-  // ── 形态判定（Tideline vs 桌面抽屉）：启动时一次定死，会话内不随 resize 切换 ──
+  // ── 形态判定（Tideline vs 桌面 Lumen 层）：启动时一次定死，会话内不随 resize 切换 ──
   // 见文件头「移动端形态」。用 screen 短边而非 innerWidth 判「手机」：宿主页若无
   // <meta viewport>，手机上 layout viewport 是 980px（innerWidth=980），但 screen.width
   // 仍是设备 CSS 宽（如 390）——按 innerWidth 判会把真手机误判成桌面。
@@ -251,38 +287,34 @@
   const state = {
     viewer: null,
     threads: [],
-    filter: 'open', // open | all（抽屉与 pin：是否显示已解决）
-    focusedId: null, // 当前在抽屉里展开的线程
+    filter: 'open', // open | all（托盘与 pin：是否显示已解决）
+    focusedId: null, // 当前弹出 popover 的线程
     mode: 'rest', // rest | comment（十字光标打点模式）
-    railOpen: true, // 抽屉是否展开
+    railOpen: true, // Lumen 托盘是否展开（railOpen 语义从抽屉迁移到托盘）
     draft: null, // { selector, rx, ry, box, kind, _cleanup } 新建草稿
     replyStash: new Map(), // threadId -> 未发送回复草稿
-    autoHint: false, // 窄屏自动收起的一次性提示
     detent: 'peek', // Tideline：sheet 当前档位 peek | half | full
     sheetDragTop: null, // Tideline：拖拽中 sheet 顶边实时 y（松手吸附后清空）
+    seal: null, // Lumen 全清封印覆盖层 DOM（在场时非空）
   };
 
-  // 收起态偏好持久化（全局共享：所有站点同一手动收起偏好；窄屏自动收起不写盘）
+  // 托盘开合偏好持久化（全局共享；键名沿用 pp-anno-rail，语义=托盘开合）
   const RAIL_KEY = 'pp-anno-rail';
   function loadRail() {
-    // Tideline 无抽屉：railOpen 恒 true，让共享路径里的 `if (!state.railOpen) setRail(true)` 全部 no-op
+    // Tideline 无托盘：railOpen 恒 true，让共享路径里的 `if (!state.railOpen) setRail(true)` 全部 no-op
     if (MOBILE) { state.railOpen = true; return; }
     let manual = null;
     try {
       const v = JSON.parse(localStorage.getItem(RAIL_KEY) || '{}');
       if (v && typeof v === 'object' && typeof v.open === 'boolean') manual = v.open;
     } catch (e) { /* localStorage 不可用：忽略 */ }
-    // 手动偏好优先；无偏好时默认展开（评审者一进来就看到评论）。
-    // 窄屏不在「初始」隐藏（1280–1366 是笔记本主力分辨率，初始藏掉=看不到评论）；
-    // 只有用户「主动把窗口从更宽缩进窄屏」这个 crossing 才自动收起（见 onResizeWidth）。
+    // 手动偏好优先；无偏好时默认展开（评审者一进来就看到评论列表）
     state.railOpen = manual != null ? manual : true;
-    lastBucket = typeof window === 'undefined' ? 'wide' : widthBucket(window.innerWidth);
   }
   function persistRail() {
     try { localStorage.setItem(RAIL_KEY, JSON.stringify({ open: state.railOpen })); }
     catch (e) { /* 忽略 */ }
   }
-  let lastBucket = 'wide';
 
   /* ---------------- 分享会话访客（guest） ----------------
    * /api/viewer 返回 guest:true 时进入：写操作放行（建线程/回复/删自己的），
@@ -343,6 +375,10 @@
     undo: '<path d="M3 7v6h6M3 13a9 9 0 1 0 3-7.7L3 8"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     enter: '<path d="M9 10l-5 5 5 5M20 4v7a4 4 0 0 1-4 4H4"/>',
+    pen: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
+    up: '<path d="m5 12 7-7 7 7M12 19V5"/>',
+    send: '<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/>',
+    seal: '<path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/>',
   };
   const avatarColor = (name) => AVA[[...(name || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AVA.length];
   const initialOf = (name) => (name || '?').trim().slice(0, 1).toUpperCase();
@@ -383,9 +419,12 @@
     setTimeout(() => t.remove(), 2600);
   }
 
-  /* ---------------- 样式（抽屉模型） ---------------- */
+  /* ---------------- 样式（Lumen 桌面 + Tideline 移动） ---------------- */
+  // Lumen 系统字体栈（去掉从未加载的 'Hanken Grotesk'/'JetBrains Mono' 幽灵字体名）
+  const LUM_SANS = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif`;
+  const LUM_MONO = `ui-monospace,SFMono-Regular,Menlo,monospace`;
   const STYLE = `
-  .pp-anno-root{position:absolute;top:0;left:0;width:100%;height:0;font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;font-size:14px;line-height:1.55;color:#11161b;transform:none;filter:none}
+  .pp-anno-root{position:absolute;top:0;left:0;width:100%;height:0;font-family:${LUM_SANS};font-size:14px;line-height:1.55;color:#11161b;transform:none;filter:none}
   .pp-anno-root *{box-sizing:border-box;margin:0;padding:0}
   .pp-anno-ic{display:inline-flex}.pp-anno-ic svg{display:block}
   .pp-anno-mode-on:not(.pp-anno-paused){cursor:crosshair}
@@ -398,60 +437,35 @@
   .pp-anno-bound{outline:2px solid rgba(15,124,114,.85)!important;outline-offset:2px!important;box-shadow:0 0 0 5px rgba(15,124,114,.12)!important}
   /* ── pin（泪滴，kind 上色，白圈在任意宿主色上都清晰） ── */
   .pp-anno-layer{position:absolute;top:0;left:0;width:100%;height:0;z-index:2147482000;transform:none;filter:none}
-  .pp-anno-pin{position:absolute;z-index:2147482600;width:28px;height:28px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font:700 12px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transform:translate(-4px,-24px);border:2.5px solid #fff;box-shadow:0 3px 10px rgba(28,26,23,.3);user-select:none;transition:transform .15s,box-shadow .15s}
+  .pp-anno-pin{position:absolute;z-index:2147482600;width:28px;height:28px;border-radius:50% 50% 50% 4px;display:grid;place-items:center;color:#fff;font:700 12px/1 ${LUM_SANS};cursor:pointer;transform:translate(-4px,-24px);border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.25);user-select:none;transition:transform .15s,box-shadow .15s}
   .pp-anno-pin:hover{transform:translate(-4px,-24px) scale(1.12)}
-  .pp-anno-pin.pp-anno-pulse{animation:ppPin .52s cubic-bezier(.2,1.7,.35,1)}
-  @keyframes ppPin{0%{transform:translate(-4px,-24px) scale(0) rotate(-18deg)}
-    55%{transform:translate(-4px,-24px) scale(1.22) rotate(4deg)}
-    75%{transform:translate(-4px,-24px) scale(.94) rotate(-1deg)}
-    100%{transform:translate(-4px,-24px) scale(1) rotate(0)}}
+  .pp-anno-pin.pp-anno-pulse{animation:lumPinPop .32s cubic-bezier(.2,.8,.3,1) both}
+  @keyframes lumPinPop{0%{opacity:0;transform:translate(-4px,-24px) scale(.3)}
+    65%{transform:translate(-4px,-24px) scale(1.12)}
+    100%{opacity:1;transform:translate(-4px,-24px) scale(1)}}
   .pp-anno-pin.pp-anno-pulse::after{content:'';position:absolute;inset:-3px;border-radius:inherit;
     border:2px solid rgba(20,149,138,.7);animation:ppPinRing .7s cubic-bezier(.2,.8,.3,1) .12s both;pointer-events:none}
   @keyframes ppPinRing{0%{transform:scale(.7);opacity:.9}100%{transform:scale(2.1);opacity:0}}
   .pp-anno-pin.pp-anno-resolved{filter:saturate(.4);box-shadow:0 2px 6px rgba(28,26,23,.2)}
-  .pp-anno-pin.pp-anno-current{transform:translate(-4px,-24px) scale(1.16);z-index:2147482650;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 3px 12px rgba(28,26,23,.4)}
+  .pp-anno-pin.pp-anno-current{transform:translate(-4px,-24px) scale(1.16);z-index:2147482650;box-shadow:0 0 0 4px rgba(20,149,138,.2),0 3px 8px rgba(0,0,0,.28)}
   .pp-anno-pin.pp-anno-current:hover{transform:translate(-4px,-24px) scale(1.16)}
   .pp-anno-region{position:absolute;z-index:2147481900;border:2px solid;border-radius:5px;pointer-events:none;box-sizing:border-box}
   .pp-anno-region.pp-anno-resolved{opacity:.35;filter:saturate(.3)}
+  /* 桌面 box 区域 = Lumen highlight（底部 2px line；可点=聚焦线程）——移动端保持原全框，勿改 */
+  .pp-anno-root:not(.pp-anno-mobile) .pp-anno-region{border:none;border-bottom:2px solid;border-radius:2px;transition:background .18s}
+  .pp-anno-root:not(.pp-anno-mobile) .pp-anno-region.pp-anno-resolved{opacity:.7}
   .pp-anno-rubber{position:absolute;z-index:2147482700;border:2px dashed #0f7c72;background:rgba(15,124,114,.08);border-radius:5px;pointer-events:none;box-sizing:border-box}
   /* ── 发光相机：聚焦元素套发光环（不可交互） ── */
   .pp-anno-glow{position:absolute;z-index:2147481950;border-radius:8px;pointer-events:none;box-sizing:border-box;animation:ppBloom .6s cubic-bezier(.2,.8,.3,1) both}
   @keyframes ppBloom{0%{opacity:0;transform:scale(1.04)}40%{opacity:1}100%{opacity:.95;transform:scale(1)}}
-  /* ── 右侧浮动抽屉（唯一全局 chrome；fixed 覆盖、绝不预留宽度=零回流；前导 16px 羽化透明） ── */
-  .pp-anno-drawer{position:fixed;top:0;right:0;height:100%;width:${DRAWER_W}px;z-index:2147483000;display:flex;flex-direction:column;
-    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
-    background:linear-gradient(to right,rgba(255,255,255,0) 0,rgba(255,255,255,.97) 16px);
-    box-shadow:-10px 0 34px -20px rgba(17,22,27,.45);
-    transition:transform .3s cubic-bezier(.2,.8,.3,1)}
-  .pp-anno-drawer.pp-anno-closed{transform:translateX(${DRAWER_W}px)}
-  .pp-anno-drawer *{font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif}
-  .pp-anno-dwh{flex:none;border-bottom:1px solid #eef0f1;padding:11px 13px 9px 18px}
-  .pp-anno-dwh-top{display:flex;align-items:center;justify-content:space-between}
-  .pp-anno-brand{display:inline-flex;align-items:center;gap:7px;font:800 13px/1 'Hanken Grotesk',sans-serif;letter-spacing:-.01em;color:#11161b}
-  .pp-anno-brand i{display:grid;place-items:center;width:20px;height:20px;border-radius:6px;background:#11161b;color:#fff}
-  .pp-anno-brand i svg{width:12px;height:12px}
-  .pp-anno-dwh-collapse{border:none;background:transparent;cursor:pointer;color:#9aa1a9;width:24px;height:24px;border-radius:6px;display:grid;place-items:center}
-  .pp-anno-dwh-collapse:hover{background:#f1f3f4;color:#11161b}
-  .pp-anno-dwh-meta{display:flex;align-items:center;justify-content:space-between;margin-top:9px;gap:8px}
-  .pp-anno-dwh-sub{font-size:11px;color:#8a929b}
-  .pp-anno-seg{display:inline-flex;align-items:center;border:1px solid #e1e4e6;border-radius:7px;padding:2px;gap:2px}
-  .pp-anno-seg button{border:none;background:transparent;cursor:pointer;font:600 10.5px/1 'Hanken Grotesk',sans-serif;color:#8a929b;padding:3px 8px;border-radius:5px}
-  .pp-anno-seg button.pp-anno-on{background:#11161b;color:#fff}
-  .pp-anno-dwh-acts{display:flex;gap:6px;margin-top:10px}
-  .pp-anno-cbtn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;cursor:pointer;border-radius:8px;background:#0f7c72;color:#fff;font:600 12px/1 'Hanken Grotesk',sans-serif;padding:8px 10px}
-  .pp-anno-cbtn:hover{background:#0b6358}
-  .pp-anno-cbtn.pp-anno-on{background:#11161b}
-  .pp-anno-wbtn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px dashed #cdd3d9;cursor:pointer;border-radius:8px;background:#fff;color:#6b7480;font:600 12px/1 'Hanken Grotesk',sans-serif;padding:8px 11px}
-  .pp-anno-wbtn:hover{border-color:#0f7c72;color:#0f7c72;background:#f3faf8}
-  /* 列表自己滚动，但隐藏其滚动条 —— 避免与宿主页滚动条并排（注入面板不是文档，不再起第二条滚动条）。
-     滚轮/触控板/拖动照常可滚；底部用 dwhint::before 渐隐提示还有内容。 */
-  .pp-anno-dwlist{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px 10px 10px 18px;scrollbar-width:none;-ms-overflow-style:none;overscroll-behavior:contain}
-  .pp-anno-dwlist::-webkit-scrollbar{width:0;height:0}
-  .pp-anno-dwhint{position:relative;flex:none;border-top:1px solid #eef0f1;background:#f8f9fa;padding:7px 13px 7px 18px;display:flex;flex-wrap:wrap;gap:4px 9px;align-items:center}
-  .pp-anno-dwhint::before{content:"";position:absolute;left:0;right:0;top:-22px;height:22px;pointer-events:none;background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.97))}
-  .pp-anno-kpair{display:inline-flex;align-items:center;gap:4px;font:500 10px/1 'JetBrains Mono',monospace;color:#8a929b}
-  .pp-anno-kpair kbd{font:700 9.5px/1 'JetBrains Mono',monospace;color:#3a424b;border:1px solid #dfe2e4;background:#fff;border-radius:4px;padding:2px 4px;box-shadow:0 1px 0 #e7e9eb}
-  /* ── 线程卡 ── */
+  /* filterSeg（托盘与 sheet 共用的 All/Open 段） */
+  .pp-anno-seg{display:inline-flex;align-items:center;border:1px solid #e1e4e6;border-radius:999px;padding:2px;gap:2px}
+  .pp-anno-seg button{border:none;background:transparent;cursor:pointer;font:600 11px/1 ${LUM_SANS};color:#6b7480;padding:4px 11px;border-radius:999px}
+  .pp-anno-seg button.pp-anno-on{background:rgba(230,244,242,.9);color:#0b6358}
+  /* 对整页留言小钮（托盘头 + sheet bar 共用） */
+  .pp-anno-wbtn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px dashed #cdd3d9;cursor:pointer;border-radius:999px;background:transparent;color:#6b7480;font:600 12px/1 ${LUM_SANS};padding:6px 11px}
+  .pp-anno-wbtn:hover{border-color:#0f7c72;color:#0f7c72}
+  /* ── 线程卡（Tideline sheet 复用；桌面详情走 .pp-anno-pop popover） ── */
   .pp-anno-card{position:relative;margin-bottom:8px;border:1px solid #e7e9eb;border-radius:11px;background:#fff;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(17,22,27,.04);transition:box-shadow .24s cubic-bezier(.2,.8,.3,1),border-color .2s,opacity .2s;animation:ppCard .2s cubic-bezier(.2,1.3,.4,1)}
   @keyframes ppCard{from{opacity:0;transform:translateY(6px) scale(.98)}}
   .pp-anno-card:hover{border-color:#d7dadd}
@@ -460,49 +474,49 @@
   .pp-anno-card-rail{position:absolute;top:0;bottom:0;left:0;width:3px}
   .pp-anno-card-bd{padding:9px 10px 9px 12px}
   .pp-anno-card-hd{display:flex;align-items:center;gap:8px}
-  .pp-anno-num{flex:none;width:20px;height:20px;border-radius:50% 50% 50% 3px;display:grid;place-items:center;color:#fff;font:700 10.5px/1 'Hanken Grotesk',sans-serif}
-  .pp-anno-ava{flex:none;border-radius:50%;display:grid;place-items:center;color:#fff;font:700 11px/1 'Hanken Grotesk',sans-serif}
+  .pp-anno-num{flex:none;width:20px;height:20px;border-radius:50% 50% 50% 3px;display:grid;place-items:center;color:#fff;font:700 10.5px/1 ${LUM_SANS}}
+  .pp-anno-ava{flex:none;border-radius:50%;display:grid;place-items:center;color:#fff;font:700 11px/1 ${LUM_SANS}}
   .pp-anno-who{font-size:12.5px;font-weight:600;color:#11161b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
   .pp-anno-when{font-size:10.5px;color:#b3b9bf;font-weight:400}
-  .pp-anno-anchor{font:600 10px/1 'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
-  .pp-anno-stalebadge{font:600 10px/1 'Hanken Grotesk',sans-serif;color:#b08423}
+  .pp-anno-anchor{font:600 10px/1 ${LUM_MONO};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+  .pp-anno-stalebadge{font:600 10px/1 ${LUM_SANS};color:#b08423}
   .pp-anno-card-acts{margin-left:auto;display:flex;align-items:center;gap:2px;flex:none}
   .pp-anno-iconbtn{border:none;background:none;cursor:pointer;color:#9aa1a9;padding:5px;border-radius:6px;display:inline-flex}
   .pp-anno-iconbtn:hover{background:#f1f3f4;color:#0f7c72}
   .pp-anno-resolvebtn{border:1px solid #e1e4e6;background:#fff;cursor:pointer;color:#9aa1a9;width:24px;height:24px;border-radius:7px;display:grid;place-items:center}
   .pp-anno-resolvebtn:hover{border-color:#0f7c72;color:#0f7c72}
-  .pp-anno-donechip{flex:none;display:inline-flex;align-items:center;gap:4px;font:700 9.5px/1 'Hanken Grotesk',sans-serif;text-transform:uppercase;letter-spacing:.04em;color:#8a929b;background:#eef0f1;border-radius:999px;padding:3px 7px}
+  .pp-anno-donechip{flex:none;display:inline-flex;align-items:center;gap:4px;font:700 9.5px/1 ${LUM_SANS};text-transform:uppercase;letter-spacing:.04em;color:#8a929b;background:#eef0f1;border-radius:999px;padding:3px 7px}
   .pp-anno-snippet{margin-top:6px;font-size:12px;line-height:1.45;color:#5c636b;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
   .pp-anno-card-ft{margin-top:7px;display:flex;align-items:center;gap:9px;font-size:10.5px;color:#b3b9bf}
   .pp-anno-kindlab{display:inline-flex;align-items:center;gap:4px;font-weight:600}
   .pp-anno-kindlab i{width:6px;height:6px;border-radius:50%;display:inline-block}
   /* 聚焦卡展开区 */
-  .pp-anno-resolved-banner{display:flex;align-items:center;gap:6px;background:#f4f6f7;padding:6px 11px;font:700 10px/1 'Hanken Grotesk',sans-serif;text-transform:uppercase;letter-spacing:.05em;color:#8a929b}
+  .pp-anno-resolved-banner{display:flex;align-items:center;gap:6px;background:#f4f6f7;padding:6px 11px;font:700 10px/1 ${LUM_SANS};text-transform:uppercase;letter-spacing:.05em;color:#8a929b}
   .pp-anno-msgs{margin-top:9px;display:flex;flex-direction:column;gap:9px}
   .pp-anno-msg{display:flex;gap:8px}
   .pp-anno-msg>div:last-child{flex:1;min-width:0}
   .pp-anno-msg-line{display:flex;align-items:center;gap:6px}
   .pp-anno-txt{font-size:12.5px;line-height:1.5;margin-top:2px;color:#34302b;word-break:break-word;white-space:pre-wrap}
   .pp-anno-chips{display:flex;gap:5px;margin-top:9px;flex-wrap:wrap}
-  .pp-anno-chip2{display:inline-flex;align-items:center;gap:5px;font:600 10.5px/1 'Hanken Grotesk',sans-serif;padding:4px 8px;border-radius:999px;border:1px solid #e1e4e6;background:#fff;color:#8a929b;cursor:pointer;white-space:nowrap}
+  .pp-anno-chip2{display:inline-flex;align-items:center;gap:5px;font:600 10.5px/1 ${LUM_SANS};padding:4px 8px;border-radius:999px;border:1px solid #e1e4e6;background:#fff;color:#8a929b;cursor:pointer;white-space:nowrap}
   .pp-anno-chip2 i{width:6px;height:6px;border-radius:50%;display:inline-block}
   .pp-anno-chip2.pp-anno-on{color:#fff;border-color:transparent}
   .pp-anno-chip2.pp-anno-on i{background:#fff!important}
   .pp-anno-replyarea{margin-top:9px}
-  .pp-anno-replybtn{width:100%;display:flex;align-items:center;gap:7px;border:1px dashed #e1e4e6;background:#fff;cursor:pointer;border-radius:8px;padding:8px 10px;font:500 12px/1 'Hanken Grotesk',sans-serif;color:#9aa1a9}
+  .pp-anno-replybtn{width:100%;display:flex;align-items:center;gap:7px;border:1px dashed #e1e4e6;background:#fff;cursor:pointer;border-radius:8px;padding:8px 10px;font:500 12px/1 ${LUM_SANS};color:#9aa1a9}
   .pp-anno-replybtn:hover{border-color:#0f7c72;color:#0f7c72}
-  .pp-anno-replybtn kbd{margin-left:auto;font:700 9px/1 'JetBrains Mono',monospace;color:#9aa1a9;border:1px solid #e1e4e6;background:#fff;border-radius:4px;padding:1px 4px}
+  .pp-anno-replybtn kbd{margin-left:auto;font:700 9px/1 ${LUM_MONO};color:#9aa1a9;border:1px solid #e1e4e6;background:#fff;border-radius:4px;padding:1px 4px}
   .pp-anno-ta-wrap{border:1.5px solid #cdd3d9;border-radius:9px;background:#fafbfb;padding:6px;transition:border-color .15s}
   .pp-anno-ta-wrap:focus-within{border-color:#0f7c72;background:#fff}
-  .pp-anno-ta-wrap textarea{width:100%;border:none;background:transparent;resize:none;font:400 12.5px/1.5 'Hanken Grotesk',sans-serif;color:#11161b;outline:none}
-  .pp-anno-nameinput{width:100%;border:none;border-bottom:1px dashed #e1e4e6;background:transparent;font:600 11.5px/1.4 'Hanken Grotesk',sans-serif;color:#11161b;outline:none;padding:2px 2px 5px;margin-bottom:5px}
+  .pp-anno-ta-wrap textarea{width:100%;border:none;background:transparent;resize:none;font:400 12.5px/1.5 ${LUM_SANS};color:#11161b;outline:none}
+  .pp-anno-nameinput{width:100%;border:none;border-bottom:1px dashed #e1e4e6;background:transparent;font:600 11.5px/1.4 ${LUM_SANS};color:#11161b;outline:none;padding:2px 2px 5px;margin-bottom:5px}
   .pp-anno-nameinput::placeholder{color:#b3b9bf;font-weight:400}
-  .pp-anno-guestbadge{flex:none;font:600 9px/1 'Hanken Grotesk',sans-serif;text-transform:uppercase;letter-spacing:.04em;color:#9aa1a9;border:1px solid #e1e4e6;border-radius:4px;padding:1.5px 4px}
+  .pp-anno-guestbadge{flex:none;font:600 9px/1 ${LUM_SANS};text-transform:uppercase;letter-spacing:.04em;color:#9aa1a9;border:1px solid #e1e4e6;border-radius:4px;padding:1.5px 4px}
   .pp-anno-ta-row{display:flex;align-items:center;gap:8px;margin-top:6px}
   .pp-anno-hint{font-size:10.5px;color:#b3b9bf}
-  .pp-anno-send{margin-left:auto;background:#0f7c72;color:#fff;border:none;padding:6px 12px;border-radius:7px;font:600 11.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .pp-anno-send{margin-left:auto;background:#0f7c72;color:#fff;border:none;padding:6px 12px;border-radius:7px;font:600 11.5px/1 ${LUM_SANS};cursor:pointer;display:inline-flex;align-items:center;gap:5px}
   .pp-anno-send:hover{background:#0b6358}.pp-anno-send:disabled{opacity:.4;cursor:default}
-  .pp-anno-ghost{background:#fff;border:1px solid #e1e4e6;color:#8a929b;padding:6px 11px;border-radius:7px;font:600 11.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer}
+  .pp-anno-ghost{background:#fff;border:1px solid #e1e4e6;color:#8a929b;padding:6px 11px;border-radius:7px;font:600 11.5px/1 ${LUM_SANS};cursor:pointer}
   .pp-anno-ghost:hover{border-color:#0f7c72;color:#0f7c72}
   .pp-anno-del{color:#b14a42!important}
   .pp-anno-del.pp-anno-armed{color:#fff!important;background:#c2361b!important;padding:5px 8px!important}
@@ -510,28 +524,21 @@
   .pp-anno-draft{border:2px solid #0f7c72;box-shadow:0 14px 30px -12px rgba(17,22,27,.18)}
   .pp-anno-draft.pp-anno-shaking{animation:ppShake .3s}
   @keyframes ppShake{0%,100%{margin-left:0}25%{margin-left:-7px}75%{margin-left:7px}}
-  .pp-anno-seltag{margin-left:auto;font:600 10px/1 'JetBrains Mono',monospace;color:#8a929b;background:#f1f3f4;border-radius:6px;padding:3px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+  .pp-anno-seltag{margin-left:auto;font:600 10px/1 ${LUM_MONO};color:#8a929b;background:#f1f3f4;border-radius:6px;padding:3px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
   /* 空态 */
   .pp-anno-empty{text-align:center;color:#9aa1a9;font-size:12px;padding:30px 18px;line-height:1.7}
-  /* ── 收起 tab（抽屉第 2 形态：右缘竖条） ── */
-  .pp-anno-tab{position:fixed;top:50%;right:0;transform:translateY(-50%);z-index:2147483000;display:flex;align-items:center;gap:6px;border:1px solid #e1e4e6;border-right:none;background:#fff;color:#3a424b;cursor:pointer;padding:13px 8px;border-radius:11px 0 0 11px;box-shadow:-6px 0 20px -12px rgba(17,22,27,.4);font:700 11px/1 'Hanken Grotesk',sans-serif;writing-mode:vertical-rl;animation:ppTabIn .2s cubic-bezier(.2,1.3,.4,1)}
-  .pp-anno-tab:hover{transform:translateY(-50%) translateX(-2px)}
-  .pp-anno-tab:focus-visible{outline:2px solid #0f7c72;outline-offset:2px}
-  .pp-anno-tab .pp-anno-ic{transform:rotate(90deg)}
-  .pp-anno-tab .pp-anno-tabdot{writing-mode:horizontal-tb;background:#14958a;color:#fff;border-radius:999px;min-width:16px;height:16px;font:700 9.5px/16px 'JetBrains Mono',monospace;text-align:center;padding:0 4px}
-  @keyframes ppTabIn{from{opacity:0;transform:translateY(-50%) translateX(10px)}}
-  /* ── toast ── */
-  .pp-anno-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:2147483100;background:#15191c;color:#f3efe7;font-size:12.5px;font-weight:500;padding:9px 16px;border-radius:9px;box-shadow:0 10px 28px -8px rgba(15,124,114,.6);animation:ppPop .2s;display:inline-flex;align-items:center;gap:7px}
+  /* ── toast（Lumen：底部居中深色胶囊 + 青绿 ✓） ── */
+  .pp-anno-toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);z-index:2147483100;background:rgba(17,22,27,.92);color:#fff;font-size:12.5px;font-weight:500;padding:8px 14px;border-radius:10px;box-shadow:0 12px 30px -10px rgba(0,0,0,.4);animation:lumToast .22s cubic-bezier(.2,.8,.3,1) both;display:inline-flex;align-items:center;gap:8px}
   .pp-anno-toast .pp-anno-ic{color:#7fe3d6}
   @keyframes ppPop{from{opacity:0;transform:translateX(-50%) translateY(6px)}}
-  .pp-anno-aimhint{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:2147483100;background:rgba(17,22,27,.92);color:#fff;font:500 12px/1 'Hanken Grotesk',sans-serif;padding:9px 14px;border-radius:9px;box-shadow:0 10px 28px -10px rgba(17,22,27,.5);animation:ppPop .2s}
+  .pp-anno-aimhint{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:2147483100;background:rgba(17,22,27,.92);color:#fff;font:500 12px/1 ${LUM_SANS};padding:9px 14px;border-radius:9px;box-shadow:0 10px 28px -10px rgba(17,22,27,.5);animation:ppPop .2s}
   /* ── Tideline（移动端 bottom sheet 形态；激活条件见文件头，≤520px 的旧满宽抽屉规则已被本形态取代） ── */
   .pp-anno-sheet{position:fixed;left:0;right:0;z-index:2147483000;display:flex;flex-direction:column;
     background:rgba(255,255,255,.97);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     border-top:1px solid #e1e4e6;border-radius:18px 18px 0 0;
     box-shadow:0 -10px 34px -16px rgba(17,22,27,.4);
     transition:top .28s cubic-bezier(.2,.8,.3,1),height .28s cubic-bezier(.2,.8,.3,1)}
-  .pp-anno-sheet *{font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif}
+  .pp-anno-sheet *{font-family:${LUM_SANS}}
   .pp-anno-sheet.pp-anno-dragging{transition:none}
   .pp-anno-sheet.pp-anno-nudge{animation:ppNudge .7s cubic-bezier(.2,.8,.3,1) 1}
   @keyframes ppNudge{0%,100%{transform:none}45%{transform:translateY(-12px)}}
@@ -543,10 +550,10 @@
   .pp-anno-grabchev{flex:none;color:#9aa1a9;display:inline-flex;transition:transform .2s}
   .pp-anno-sheet[data-pp-detent="half"] .pp-anno-grabchev,.pp-anno-sheet[data-pp-detent="full"] .pp-anno-grabchev{transform:rotate(180deg)}
   .pp-anno-sheetmeta{flex:1;min-width:0}
-  .pp-anno-sheetmeta-line{font:700 13px/1.2 'Hanken Grotesk',sans-serif;color:#11161b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pp-anno-sheetmeta-line{font:700 13px/1.2 ${LUM_SANS};color:#11161b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pp-anno-dots{display:flex;gap:4px;margin-top:5px;overflow:hidden}
   .pp-anno-dots i{flex:none;width:7px;height:7px;border-radius:50%;display:inline-block}
-  .pp-anno-fab{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:10px 15px;border:none;cursor:pointer;border-radius:12px;background:#0f7c72;color:#fff;font:700 13px/1 'Hanken Grotesk',sans-serif;box-shadow:0 6px 18px -6px rgba(15,124,114,.55)}
+  .pp-anno-fab{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:10px 15px;border:none;cursor:pointer;border-radius:12px;background:#0f7c72;color:#fff;font:700 13px/1 ${LUM_SANS};box-shadow:0 6px 18px -6px rgba(15,124,114,.55)}
   .pp-anno-fab:active{transform:scale(.96)}
   .pp-anno-sheetlist{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:2px 12px 14px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;scrollbar-width:none;-ms-overflow-style:none}
   .pp-anno-sheetlist::-webkit-scrollbar{width:0;height:0}
@@ -554,8 +561,8 @@
   /* AIM 瞄准模式：整页压暗（SVG evenodd 挖洞=点亮可锚定元素）+ 点亮框 + 底部指令条 */
   .pp-anno-aimdim{position:absolute;left:0;top:0;z-index:2147482300;pointer-events:none}
   .pp-anno-aimbox{position:absolute;z-index:2147482400;pointer-events:none;border:1.5px dashed #14958a;border-radius:8px;background:rgba(20,149,138,.08);box-sizing:border-box}
-  .pp-anno-aimchip{position:fixed;left:50%;transform:translateX(-50%);z-index:2147482950;display:flex;align-items:center;gap:8px;background:rgba(17,22,27,.95);color:#fff;border-radius:12px;padding:8px 8px 8px 14px;font:600 12.5px/1.35 'Hanken Grotesk',sans-serif;box-shadow:0 12px 30px -10px rgba(17,22,27,.6);animation:ppPop .2s;max-width:calc(100vw - 24px)}
-  .pp-anno-aimchip button{flex:none;border:none;cursor:pointer;border-radius:9px;background:rgba(255,255,255,.16);color:#fff;font:700 11.5px/1 'Hanken Grotesk',sans-serif;padding:0 12px;min-height:40px}
+  .pp-anno-aimchip{position:fixed;left:50%;transform:translateX(-50%);z-index:2147482950;display:flex;align-items:center;gap:8px;background:rgba(17,22,27,.95);color:#fff;border-radius:12px;padding:8px 8px 8px 14px;font:600 12.5px/1.35 ${LUM_SANS};box-shadow:0 12px 30px -10px rgba(17,22,27,.6);animation:ppPop .2s;max-width:calc(100vw - 24px)}
+  .pp-anno-aimchip button{flex:none;border:none;cursor:pointer;border-radius:9px;background:rgba(255,255,255,.16);color:#fff;font:700 11.5px/1 ${LUM_SANS};padding:0 12px;min-height:40px}
   .pp-anno-aim .pp-anno-pin,.pp-anno-aim .pp-anno-region,.pp-anno-aim .pp-anno-glow{display:none}
   /* 移动端触控目标放大（≥40px）+ iOS 聚焦输入不自动缩放（字号 ≥16px） */
   .pp-anno-mobile .pp-anno-pin::after{content:"";position:absolute;left:-8px;top:-8px;right:-8px;bottom:-8px;border-radius:50%}
@@ -574,7 +581,7 @@
   .pp-anno-steprow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;border-top:1px solid #eef0f1;padding-top:8px}
   .pp-anno-stepbtn{width:44px;height:40px;display:grid;place-items:center;border:1px solid #e1e4e6;background:#fff;color:#5c636b;border-radius:10px;cursor:pointer}
   .pp-anno-stepbtn:active{background:#f1f3f4}
-  .pp-anno-steppos{font:600 11.5px/1 'JetBrains Mono',monospace;color:#8a929b}
+  .pp-anno-steppos{font:600 11.5px/1 ${LUM_MONO};color:#8a929b}
   /* ── 评论模式晕影(真实节点,避免与宿主页 html::after 冲突) ── */
   .pp-anno-vignette{position:fixed;inset:0;pointer-events:none;z-index:2147481700;
     box-shadow:inset 0 0 170px 24px rgba(11,99,88,.09);animation:ppVig .7s cubic-bezier(.2,.8,.3,1) both}
@@ -583,7 +590,7 @@
   .pp-anno-mtbanner{position:fixed;top:14px;left:50%;z-index:2147483200;display:flex;align-items:center;gap:10px;
     padding:9px 10px 9px 14px;border-radius:999px;background:rgba(255,255,255,.96);border:1px solid #bfe5df;
     box-shadow:0 8px 30px -8px rgba(11,99,88,.35),0 1px 3px rgba(17,22,27,.08);
-    font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;
+    font-family:${LUM_SANS};
     transform:translate(-50%,-64px);opacity:0;transition:transform .42s cubic-bezier(.2,1.4,.4,1),opacity .3s ease}
   .pp-anno-mtbanner.pp-anno-min{transform:translate(-50%,0);opacity:1}
   .pp-anno-mtbanner .pp-anno-mdot{position:relative;width:9px;height:9px;border-radius:50%;background:#0f7c72;flex:none}
@@ -598,7 +605,7 @@
   .pp-anno-mtbanner .pp-anno-mx{background:transparent;color:#9aa1a9;padding:7px 8px}
   .pp-anno-mreceipt{position:absolute;z-index:2147482800;display:flex;align-items:flex-start;gap:9px;max-width:250px;
     padding:10px 13px;border-radius:12px;background:rgba(255,255,255,.97);border:1px solid #bfe5df;
-    box-shadow:0 10px 32px -10px rgba(11,99,88,.4);font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;
+    box-shadow:0 10px 32px -10px rgba(11,99,88,.4);font-family:${LUM_SANS};
     transform:translateY(6px) scale(.96);opacity:0;transition:transform .38s cubic-bezier(.2,1.4,.4,1),opacity .28s ease}
   .pp-anno-mreceipt.pp-anno-min{transform:none;opacity:1}
   .pp-anno-mreceipt.pp-anno-mout{transform:translateY(-4px);opacity:0}
@@ -621,7 +628,7 @@
   .pp-anno-mfinale{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;
     padding:26px 18px 22px;border:1px solid #bfe5df;border-radius:14px;margin:14px 4px;
     background:linear-gradient(180deg,#fff 0%,rgba(230,244,242,.4) 100%);overflow:hidden;
-    font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif}
+    font-family:${LUM_SANS}}
   .pp-anno-mfinale .pp-anno-mfc{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;
     background:#0f7c72;color:#fff;transform:scale(0);animation:ppMStamp .4s cubic-bezier(.2,1.4,.4,1) .1s forwards}
   .pp-anno-mfinale .pp-anno-mfc svg{width:22px;height:22px}
@@ -630,12 +637,13 @@
   .pp-anno-mfinale em{font-style:normal;font-weight:700;color:#0b6358}
   /* ── guest 首访一次性提示 ── */
   .pp-anno-firsthint{position:fixed;z-index:2147483100;max-width:230px;padding:9px 12px;border-radius:11px;
-    background:#11161b;color:#fff;font:600 12px/1.5 'Hanken Grotesk',-apple-system,system-ui,sans-serif;
+    background:#11161b;color:#fff;font:600 12px/1.5 ${LUM_SANS};
     box-shadow:0 10px 30px -8px rgba(17,22,27,.5);
     transform:translateY(4px);opacity:0;transition:transform .3s cubic-bezier(.2,1.3,.4,1),opacity .2s ease}
   .pp-anno-firsthint.pp-anno-min{transform:none;opacity:1}
   .pp-anno-firsthint::after{content:'';position:absolute;top:-5px;right:26px;width:10px;height:10px;
     background:#11161b;transform:rotate(45deg)}
+  .pp-anno-firsthint.pp-anno-hint-up::after{top:auto;bottom:-5px}
   /* ── 新增件的静态降级 ── */
   @media (prefers-reduced-motion:reduce){
     .pp-anno-mtbanner,.pp-anno-mreceipt,.pp-anno-firsthint{transition:none;transform:none;opacity:1}
@@ -646,24 +654,155 @@
     .pp-anno-mfinale .pp-anno-mfc{transform:scale(1)}
     .pp-anno-vignette{animation:none;opacity:1}
   }
-  @media (prefers-reduced-motion:reduce){.pp-anno-root *,.pp-anno-drawer,.pp-anno-drawer *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
-  @media print{.pp-anno-root,.pp-anno-drawer,.pp-anno-tab,.pp-anno-sheet{display:none!important}}
+  @media (prefers-reduced-motion:reduce){.pp-anno-root *,.pp-anno-root{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+  @media print{.pp-anno-root,.pp-anno-sheet{display:none!important}}
+
+  /* ================= Lumen 桌面层 ================= */
+  /* keyframes（原样抄自设计稿） */
+  @keyframes lumBubbleIn{0%{opacity:0;transform:translateY(10px) scale(.92)}60%{transform:translateY(-2px) scale(1.01)}100%{opacity:1;transform:none}}
+  @keyframes lumSweep{0%{transform:translateX(-100%);opacity:0}12%{opacity:1}88%{opacity:1}100%{transform:translateX(100%);opacity:0}}
+  @keyframes lumBannerIn{from{opacity:0;transform:translate(-50%,-14px)}to{opacity:1;transform:translate(-50%,0)}}
+  @keyframes lumSealIn{0%{opacity:0;transform:scale(.86)}55%{transform:scale(1.03)}100%{opacity:1;transform:scale(1)}}
+  @keyframes lumSealBg{from{opacity:0}to{opacity:1}}
+  @keyframes lumHalo{0%{opacity:0;transform:scale(.7)}45%{opacity:.8}100%{opacity:0;transform:scale(1.5)}}
+  @keyframes lumBreathe{0%{transform:scale(.82);opacity:.55}70%,100%{transform:scale(1.32);opacity:0}}
+  @keyframes lumRise{0%{opacity:.9;transform:translate(-4px,-24px) scale(1)}100%{opacity:0;transform:translate(-4px,-120px) scale(.55)}}
+  @keyframes lumToast{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+  @keyframes lumDockIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+  @keyframes lumShimmerB{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.16)}50%{box-shadow:0 0 0 5px rgba(217,119,6,.04)}}
+
+  /* 聚焦 pin 呼吸环（桌面；移动端关） */
+  .pp-anno-pin.pp-anno-current::after{content:'';position:absolute;inset:-7px;border-radius:999px;border:2px solid var(--pp-ring,#14958a);opacity:.55;animation:lumBreathe 2.2s ease-out infinite;pointer-events:none}
+  .pp-anno-mobile .pp-anno-pin.pp-anno-current::after{display:none}
+  /* 焦点 halo（一次性环） */
+  .pp-anno-halo{position:absolute;z-index:2147481960;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:999px;border:2px solid;animation:lumHalo .65s ease-out both;pointer-events:none}
+  /* resolve 泪滴升腾 */
+  .pp-anno-riser{position:absolute;z-index:2147482550;width:28px;height:28px;border-radius:999px 999px 999px 4px;animation:lumRise .7s cubic-bezier(.3,.7,.4,1) both;pointer-events:none}
+
+  /* ── 右下 pill 坞（常驻） ── */
+  .pp-anno-dock{position:fixed;right:16px;bottom:16px;z-index:2147482440;display:flex;align-items:center;height:44px;border-radius:999px;border:1px solid rgba(17,22,27,.1);background:rgba(255,255,255,.96);box-shadow:0 12px 30px -12px rgba(17,22,27,.45);overflow:hidden;font-family:${LUM_SANS}}
+  .pp-anno-dock-arm{display:flex;width:46px;height:44px;align-items:center;justify-content:center;border:none;background:transparent;color:#9aa1a9;cursor:pointer;transition:background .2s,color .2s}
+  .pp-anno-dock-arm.pp-anno-on{background:#0f7c72;color:#fff}
+  .pp-anno-dock-sep{width:1px;height:24px;background:rgba(17,22,27,.08)}
+  .pp-anno-dock-count{display:flex;height:44px;align-items:center;gap:7px;border:none;background:transparent;padding:0 14px;font:700 13px/1 ${LUM_SANS};color:#11161b;cursor:pointer}
+  .pp-anno-dock-count:focus-visible{outline:2px solid #0f7c72;outline-offset:-2px}
+  .pp-anno-dock-dot{width:8px;height:8px;border-radius:999px;background:#0f7c72;box-shadow:0 0 0 3px rgba(15,124,114,.18)}
+
+  /* ── 托盘（列表面） ── */
+  .pp-anno-tray{position:fixed;right:16px;bottom:70px;z-index:2147482420;width:324px;border-radius:14px;border:1px solid rgba(17,22,27,.1);background:var(--lum-surface);box-shadow:0 24px 60px -20px rgba(17,22,27,.35);overflow:hidden;font-family:${LUM_SANS};animation:lumDockIn .24s cubic-bezier(.2,.8,.3,1) both}
+  .pp-anno-tray-hd{display:flex;flex-wrap:wrap;align-items:center;gap:8px;border-bottom:1px solid rgba(17,22,27,.07);padding:9px 12px}
+  .pp-anno-tray-brand{display:flex;align-items:center;gap:7px;font:700 12.5px/1 ${LUM_SANS};color:#11161b}
+  .pp-anno-tray-ver{font:400 11px/1 ${LUM_MONO};color:#6b7480;background:rgba(17,22,27,.05);border-radius:999px;padding:3px 9px}
+  .pp-anno-tray-open{font-size:12px;color:#4b535c}
+  .pp-anno-tray-open b{color:#0f7c72}
+  .pp-anno-tray-filters{display:flex;align-items:center;gap:6px;padding:8px 12px 0}
+  .pp-anno-traylist{max-height:300px;overflow-y:auto;padding:6px;scrollbar-width:none;-ms-overflow-style:none;overscroll-behavior:contain}
+  .pp-anno-traylist::-webkit-scrollbar{width:0;height:0}
+  .pp-anno-tray-ft{display:flex;gap:10px;flex-wrap:wrap;border-top:1px solid rgba(17,22,27,.07);padding:7px 13px;font:400 10.5px/1.4 ${LUM_MONO};color:#9aa1a9}
+  /* 托盘行 */
+  .pp-anno-trow{display:flex;width:100%;align-items:flex-start;gap:9px;border:none;background:transparent;border-radius:10px;padding:9px 10px;text-align:left;cursor:pointer;transition:background .15s;font-family:${LUM_SANS}}
+  .pp-anno-trow:hover{background:rgba(17,22,27,.04)}
+  .pp-anno-trow.pp-anno-on{background:rgba(20,149,138,.14)}
+  .pp-anno-trow-n{flex:none;display:flex;width:20px;height:20px;align-items:center;justify-content:center;border-radius:999px 999px 999px 3px;color:#fff;font:700 10.5px/1 ${LUM_SANS};margin-top:1px}
+  .pp-anno-trow-bd{min-width:0;flex:1}
+  .pp-anno-trow-l1{display:flex;align-items:center;gap:6px}
+  .pp-anno-trow-lab{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:400 11px/1.3 ${LUM_MONO}}
+  .pp-anno-trow-ex{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;font-size:12px;color:#6b7480}
+  .pp-anno-badge-stale{flex:none;border-radius:999px;background:rgba(254,243,219,.9);border:1px solid #f3d9a4;color:#92600a;font:700 9px/1.4 ${LUM_SANS};padding:1px 6px}
+  .pp-anno-badge-lost{flex:none;border-radius:999px;background:rgba(17,22,27,.05);border:1px dashed rgba(17,22,27,.22);color:#6b7480;font:700 9px/1.4 ${LUM_SANS};padding:1px 6px;animation:lumShimmerB 1.8s ease-in-out .4s 3}
+  .pp-anno-badge-done{flex:none;display:inline-flex;align-items:center;gap:3px;border-radius:999px;background:rgba(230,244,242,.9);color:#0b6358;font:700 9px/1.4 ${LUM_SANS};padding:1px 6px}
+  .pp-anno-tray-empty{padding:26px 16px;text-align:center;font-size:12px;color:#9aa1a9;line-height:1.7;white-space:pre-line}
+
+  /* ── at-pin 线程卡 popover（详情面） ── */
+  .pp-anno-card.pp-anno-pop{position:absolute;margin:0;width:312px;border:1px solid rgba(17,22,27,.1);border-radius:16px 16px 16px 4px;background:var(--lum-surface);box-shadow:0 4px 12px rgba(17,22,27,.08),0 26px 64px -20px rgba(17,22,27,.32);overflow:visible;cursor:default;z-index:2147482500;animation:lumBubbleIn .26s cubic-bezier(.2,.8,.3,1) both;font-family:${LUM_SANS}}
+  .pp-anno-pop-hd{display:flex;align-items:center;gap:8px;padding:11px 14px 0}
+  .pp-anno-pop-sel{font:400 11px/1.3 ${LUM_MONO};color:#6b7480;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px}
+  .pp-anno-pop-pos{margin-left:auto;flex:none;font:400 10.5px/1 ${LUM_MONO};color:#9aa1a9}
+  .pp-anno-pop-ib{display:flex;flex:none;width:26px;height:26px;align-items:center;justify-content:center;border:none;background:transparent;border-radius:8px;color:#9aa1a9;cursor:pointer}
+  .pp-anno-pop-ib:hover{background:rgba(17,22,27,.05);color:#0f7c72}
+  .pp-anno-pop-ib.pp-anno-del:hover{background:rgba(194,54,27,.1)}
+  .pp-anno-pop-ib.pp-anno-del.pp-anno-armed{width:auto;padding:0 8px;background:#c2361b;color:#fff;font:700 10.5px/1 ${LUM_SANS}}
+  .pp-anno-pop-msgs{max-height:250px;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:11px;scrollbar-width:none;-ms-overflow-style:none}
+  .pp-anno-pop-msgs::-webkit-scrollbar{width:0;height:0}
+  .pp-anno-pop-ft{border-top:1px solid rgba(17,22,27,.07);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+  .pp-anno-pop .pp-anno-resolved-banner{display:flex;align-items:center;gap:6px;margin:8px 14px 0;border-radius:10px;background:rgba(230,244,242,.85);padding:6px 10px;font:700 11.5px/1 ${LUM_SANS};text-transform:none;letter-spacing:0;color:#0b6358}
+  .pp-anno-pop-reopen{margin-left:auto;border:1px solid #bfe5df;background:rgba(255,255,255,.85);border-radius:999px;padding:2px 10px;font:600 10.5px/1 ${LUM_SANS};color:#0b6358;cursor:pointer}
+  .pp-anno-pop-resolve{display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid rgba(17,22,27,.12);background:rgba(255,255,255,.7);border-radius:10px;padding:8px 0;font:600 12px/1 ${LUM_SANS};color:#4b535c;cursor:pointer;width:100%}
+  .pp-anno-pop-resolve:hover{border-color:#0f7c72;color:#0f7c72}
+  /* popover 内回复框：把共享 .pp-anno-replyarea/.pp-anno-ta-wrap 收进 Lumen 皮 */
+  .pp-anno-pop .pp-anno-replyarea{margin:0}
+  .pp-anno-pop .pp-anno-ta-wrap{border:1px solid rgba(17,22,27,.12);border-radius:10px;background:rgba(255,255,255,.7)}
+  .pp-anno-ta-row-lum{display:flex;align-items:flex-end;gap:6px}
+  .pp-anno-ta-row-lum .pp-anno-ta-wrap{flex:1;min-width:0}
+  .pp-anno-send-lum{flex:none;width:36px;height:36px;padding:0;border-radius:10px;display:flex;align-items:center;justify-content:center}
+  .pp-anno-pop .pp-anno-ta-wrap:focus-within{border-color:#0f7c72;background:#fff}
+
+  /* ── 就地草稿气泡 ── */
+  .pp-anno-dbubble{position:absolute;width:300px;border:1px solid rgba(17,22,27,.1);border-radius:16px 16px 16px 4px;background:var(--lum-surface);box-shadow:0 4px 12px rgba(17,22,27,.08),0 24px 60px -20px rgba(17,22,27,.3);padding:12px 14px;z-index:2147482520;animation:lumBubbleIn .26s cubic-bezier(.2,.8,.3,1) both;font-family:${LUM_SANS}}
+  .pp-anno-dbubble.pp-anno-shaking{animation:ppShake .3s}
+  .pp-anno-dbubble-row{display:flex;align-items:flex-start;gap:8px}
+  .pp-anno-dbubble textarea{flex:1;resize:none;border:none;background:transparent;font:400 13.5px/1.55 ${LUM_SANS};color:#11161b;outline:none;max-height:140px;overflow-y:auto;min-height:38px}
+  .pp-anno-dbubble-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px}
+  .pp-anno-dbubble-sel{font:400 10.5px/1.3 ${LUM_MONO};color:#9aa1a9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pp-anno-dbubble-acts{display:flex;align-items:center;gap:6px;flex:none}
+  .pp-anno-dbubble-cancel{border:none;background:transparent;font-size:12px;color:#9aa1a9;cursor:pointer;padding:6px 8px}
+  .pp-anno-dbubble-pub{display:flex;align-items:center;gap:6px;border:none;border-radius:999px;background:#0f7c72;color:#fff;font:600 12.5px/1 ${LUM_SANS};padding:7px 14px;cursor:pointer}
+  .pp-anno-dbubble-pub:hover{background:#0b6358}
+  .pp-anno-dbubble .pp-anno-chips{margin-top:8px}
+
+  /* ── 顶部 strand 潮汐珠链 ── */
+  .pp-anno-strand{position:fixed;top:0;left:0;right:0;height:16px;z-index:2147482300;pointer-events:none}
+  .pp-anno-strand-rail{position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,rgba(20,149,138,.12),rgba(20,149,138,.45) 30%,rgba(20,149,138,.45) 70%,rgba(20,149,138,.12))}
+  .pp-anno-bead{position:absolute;top:1.5px;transform:translate(-50%,-50%);width:22px;height:22px;border:none;background:transparent;padding:0;cursor:pointer;pointer-events:auto;display:flex;align-items:center;justify-content:center}
+  .pp-anno-bead i{display:block;border-radius:999px;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);transition:width .15s,height .15s}
+
+  /* ── sweep 发布光带 ── */
+  .pp-anno-sweep{position:fixed;inset:0;z-index:2147483055;pointer-events:none;overflow:hidden}
+  .pp-anno-sweep i{position:absolute;top:0;bottom:0;left:0;width:100%;background:linear-gradient(100deg,transparent 30%,rgba(127,227,214,.16) 46%,rgba(20,149,138,.22) 50%,rgba(127,227,214,.16) 54%,transparent 70%);animation:lumSweep 1.1s cubic-bezier(.4,.1,.3,1) both}
+
+  /* ── 全清封印 seal（全屏） ── */
+  .pp-anno-seal{position:fixed;inset:0;z-index:2147483300;pointer-events:auto;cursor:pointer;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(230,244,242,.92) 0%,rgba(255,255,255,.86) 68%);animation:lumSealBg .5s ease both;font-family:${LUM_SANS}}
+  .pp-anno-seal-in{text-align:center;padding:40px;animation:lumSealIn .5s cubic-bezier(.2,.8,.3,1) .15s both}
+  .pp-anno-seal-mark{display:inline-flex;width:64px;height:64px;align-items:center;justify-content:center;border-radius:999px;background:#0f7c72;color:#fff;box-shadow:0 0 0 10px rgba(15,124,114,.12),0 0 0 22px rgba(15,124,114,.05),0 20px 50px -16px rgba(11,90,83,.6)}
+  /* seal 内复用 .pp-anno-mfinale 钩子：清掉其卡片外观，只当文字容器 */
+  .pp-anno-seal .pp-anno-mfinale{display:block;border:none;background:none;padding:0;margin:0}
+  .pp-anno-seal-title{display:block;margin-top:20px;font-size:24px;font-weight:700;letter-spacing:-.01em;color:#08433d}
+  .pp-anno-seal-body{margin-top:8px;font-size:14px;color:#4b535c}
+  .pp-anno-seal-hint{margin-top:18px;font-size:11.5px;color:#9aa1a9}
+
+  /* glass surface + 降级（配置位 glass=false 或不支持 backdrop-filter → 纯色） */
+  .pp-anno-root{--lum-surface:#ffffff}
+  @supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+    .pp-anno-glass .pp-anno-tray,.pp-anno-glass .pp-anno-card.pp-anno-pop,.pp-anno-glass .pp-anno-dbubble,.pp-anno-glass .pp-anno-mtbanner{
+      background:rgba(255,255,255,.8);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4)}
+  }
+  /* 移动端 sheet 的同款兜底：X5 等无 backdrop-filter 内核直接纯白，避免半透明糊字 */
+  @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+    .pp-anno-sheet,.pp-anno-sheetbar{background:#fff}
+  }
+  /* Lumen 桌面件的 reduced-motion 静态降级 */
+  @media (prefers-reduced-motion:reduce){
+    .pp-anno-tray,.pp-anno-card.pp-anno-pop,.pp-anno-dbubble,.pp-anno-seal,.pp-anno-seal-in{animation:none}
+    .pp-anno-pin.pp-anno-current::after,.pp-anno-halo,.pp-anno-riser,.pp-anno-sweep,.pp-anno-bead i,.pp-anno-badge-lost{animation:none}
+    .pp-anno-halo,.pp-anno-riser,.pp-anno-sweep{display:none}
+  }
   `;
 
   /* ---------------- UI 骨架 ---------------- */
-  let root, layer, drawer, listEl, tabEl;
+  let root, layer, listEl;
   let sheetEl, grabEl, sheetListEl; // Tideline
-  // 面板容器：桌面=抽屉，移动=sheet（草稿/回复的 querySelector 统一走这里）
-  const panel = () => (MOBILE ? sheetEl : drawer);
+  let dockEl, trayEl, strandEl, popEl, draftEl; // Lumen 桌面
+  // querySelector 统一容器：桌面=root（含 layer 内的 popover/草稿气泡 + 托盘），移动=sheet
+  const panel = () => (MOBILE ? sheetEl : root);
 
   function buildUI() {
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
-    root = el('div', 'pp-anno-root' + (MOBILE ? ' pp-anno-mobile' : ''));
+    root = el('div', 'pp-anno-root' + (MOBILE ? ' pp-anno-mobile' : '') + (!MOBILE && CFG.glass ? ' pp-anno-glass' : ''));
     root.dataset.ppAnno = '1';
     root.dataset.ppReady = '1'; // e2e「层就绪」门
-    root.dataset.ppForm = MOBILE ? 'tideline' : 'drawer'; // e2e：当前形态
+    root.dataset.ppForm = MOBILE ? 'tideline' : 'lumen'; // e2e：当前形态
     layer = el('div', 'pp-anno-layer');
 
     if (MOBILE) {
@@ -674,20 +813,20 @@
       return;
     }
 
-    drawer = el('aside', 'pp-anno-drawer');
-    drawer.dataset.ppAnno = '1';
-    drawer.dataset.ppRole = 'drawer';
-    if (!state.railOpen) drawer.classList.add('pp-anno-closed');
+    // Lumen 桌面：坞（常驻）+ 托盘（列表）+ strand（珠链）在 root；popover/草稿气泡挂 layer（随页坐标滚动）
+    dockEl = el('div', 'pp-anno-dock');
+    dockEl.dataset.ppAnno = '1';
+    dockEl.dataset.ppRole = 'dock';
+    trayEl = el('aside', 'pp-anno-tray');
+    trayEl.dataset.ppAnno = '1';
+    trayEl.dataset.ppRole = 'tray';
+    strandEl = el('div', 'pp-anno-strand');
+    strandEl.dataset.ppAnno = '1';
+    strandEl.dataset.ppRole = 'strand';
 
-    tabEl = el('button', 'pp-anno-tab');
-    tabEl.dataset.ppAnno = '1';
-    tabEl.dataset.ppRole = 'tab';
-    tabEl.setAttribute('aria-label', tr('aria.openDrawer'));
-    tabEl.onclick = () => setRail(true);
-    tabEl.style.display = state.railOpen ? 'none' : '';
-
-    root.append(layer, drawer, tabEl);
+    root.append(layer, strandEl, trayEl, dockEl);
     document.body.appendChild(root);
+    if (CFG.armed) enterComment();
     renderDrawer();
   }
 
@@ -844,17 +983,22 @@
       n += 1;
       t._num = n;
       const col = kindColor(t);
+      const focused = state.focusedId === t.id;
       if (t.rw != null && t.rh != null && a.el) {
         const r = a.el.getBoundingClientRect();
         const reg = el('div', 'pp-anno-region' + (t.resolved ? ' pp-anno-resolved' : ''));
         reg.dataset.ppAnno = '1';
         reg.dataset.tid = t.id;
         reg.style.borderColor = col;
-        reg.style.background = 'color-mix(in srgb, ' + col + ' 10%, transparent)';
+        // Lumen highlight：默认 12% / 聚焦 22% / 已解决 13%
+        const mix = t.resolved ? 13 : (focused ? 22 : 12);
+        reg.style.background = 'color-mix(in srgb, ' + col + ' ' + mix + '%, transparent)';
         reg.style.left = (r.left + scrollX + r.width * t.rx) + 'px';
         reg.style.top = (r.top + scrollY + r.height * t.ry) + 'px';
         reg.style.width = (r.width * t.rw) + 'px';
         reg.style.height = (r.height * t.rh) + 'px';
+        // 桌面：点区域 = 聚焦线程（移动端保持 pointer-events:none，不改）
+        if (!MOBILE) { reg.style.pointerEvents = 'auto'; reg.style.cursor = 'pointer'; reg.onclick = (e) => { e.stopPropagation(); focusThread(t.id, true); }; }
         layer.appendChild(reg);
       }
       const pin = el('div', 'pp-anno-pin' + (t.resolved ? ' pp-anno-resolved' : '')
@@ -865,6 +1009,7 @@
       pin.style.left = pos.x + 'px';
       pin.style.top = pos.y + 'px';
       pin.style.background = col;
+      if (focused) pin.style.setProperty('--pp-ring', col); // 呼吸环取 kindColor
       if (t.resolved) { pin.textContent = ''; pin.appendChild(svg(ICON.check, 13)); }
       else pin.textContent = String(n);
       pin.onclick = (e) => { e.stopPropagation(); focusThread(t.id, true); };
@@ -892,14 +1037,56 @@
     }
     // Tideline AIM：压暗挖洞 + 点亮框随宿主变更/重摆重算（页面坐标系，窗口滚动无需重画）
     if (MOBILE && state.mode === 'comment' && !state.draft) updateAimOverlay();
+    else if (!MOBILE) positionFloating(); // 桌面：popover/草稿气泡随滚动重摆
     syncDrawerCounts();
+  }
+
+  /* ---------------- Lumen 桌面：popover / 草稿气泡 定位（随页坐标滚动） ---------------- */
+  // 返回线程锚点的页面坐标 pin 尖点（无锚点/@page → null）
+  function anchorPin(t) { return anchorXY(t); }
+  // popover 摆位：pin 右 16px；托盘开且会压到右下托盘带 → 翻到 pin 左侧；无锚点 → 视口上部居中
+  function cardPos(pin, w) {
+    w = w || 312;
+    const vLeft = scrollX, vTop = scrollY, vw = innerWidth, vh = innerHeight;
+    if (!pin) return { x: vLeft + Math.max(12, (vw - w) / 2), y: vTop + 96 };
+    let cx = Math.min(pin.x + 16, vLeft + vw - w - 16);
+    // 托盘占右下带（fixed right16 width324 bottom70）——卡会滑到托盘下方则翻到 pin 左侧
+    if (state.railOpen) {
+      const trayLeft = vLeft + vw - 16 - 324;
+      const nearBottom = pin.y > vTop + vh - 380;
+      if (nearBottom && cx + w > trayLeft - 12) cx = pin.x - w - 16;
+    }
+    return { x: Math.max(vLeft + 12, cx), y: pin.y + 12 };
+  }
+  function positionFloating() {
+    if (popEl) {
+      const t = byId(state.focusedId);
+      const p = cardPos(t ? anchorPin(t) : null, 312);
+      popEl.style.left = p.x + 'px';
+      popEl.style.top = p.y + 'px';
+    }
+    if (draftEl && state.draft) {
+      const p = cardPos(draftAnchorPin(state.draft), 300);
+      draftEl.style.left = p.x + 'px';
+      draftEl.style.top = p.y + 'px';
+    }
+  }
+  // 草稿锚点页面坐标（point/box 用 selector+rx/ry；@page → null=居中）
+  function draftAnchorPin(d) {
+    if (!d || d.selector === PAGE_SELECTOR) return null;
+    let node = null;
+    try { node = document.querySelector(d.selector); } catch (e) { node = null; }
+    if (!node) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.left + scrollX + r.width * d.rx, y: r.top + scrollY + r.height * d.ry };
   }
 
   /* ---------------- 抽屉渲染 ---------------- */
   const openCount = () => state.threads.filter((t) => !t.resolved).length;
 
+  // 托盘开合（railOpen 语义迁移到托盘；\ 或坞计数钮切换）
   function setRail(open, opts) {
-    if (MOBILE) return; // Tideline 无抽屉/收起 tab
+    if (MOBILE) return; // Tideline 无托盘
     opts = opts || {};
     if (open === state.railOpen) return;
     if (!open && !opts.force) {
@@ -907,73 +1094,384 @@
       if (state.draft && draftHasText() && !opts.discard) { shakeDraft(); return; }
     }
     state.railOpen = open;
-    if (!opts.auto) persistRail(); // 自动收起不写盘（只记手动偏好）
-    drawer.classList.toggle('pp-anno-closed', !open);
-    tabEl.style.display = open ? 'none' : '';
-    if (open) { renderDrawer(); requestAnimationFrame(() => scrollFocusedCardIntoView()); }
-    else if (opts.refocusTab) tabEl.focus();
-    syncDrawerCounts(); // 收起时也要把 tab 的图标/未解决数画出来
+    if (!opts.auto) persistRail();
+    renderTray();
+    renderDock();
     syncFlags();
+    if (open) requestAnimationFrame(() => scrollFocusedCardIntoView());
   }
 
+  // 桌面渲染入口：坞 + 托盘 + 珠链 + popover + 草稿气泡（MOBILE 走 sheet）
   function renderDrawer() {
     if (MOBILE) { renderSheet(); return; } // 移动端唯一面板是 sheet；保留函数名减少调用点分叉
-    if (!drawer) return;
-    drawer.textContent = '';
+    renderDock();
+    renderTray();
+    renderStrand();
+    renderPopover();
+    renderDraftBubble();
+  }
+
+  /* ---------------- 右下 pill 坞（常驻） ---------------- */
+  function renderDock() {
+    if (!dockEl) return;
+    dockEl.textContent = '';
+    const armed = state.mode === 'comment';
+    const open = openCount();
+    const arm = el('button', 'pp-anno-dock-arm' + (armed ? ' pp-anno-on' : ''));
+    arm.dataset.ppAct = 'comment';
+    arm.title = armed ? tr('dock.armed') : tr('dock.arm');
+    arm.setAttribute('aria-label', armed ? tr('dock.armed') : tr('dock.arm'));
+    arm.appendChild(svg(ICON.pen, 16));
+    arm.onclick = () => (state.mode === 'comment' ? exitComment() : enterComment());
+    const count = el('button', 'pp-anno-dock-count');
+    count.dataset.ppRole = 'dock-count';
+    count.dataset.ppAct = 'collapse';
+    count.title = tr('dock.tray');
+    count.setAttribute('aria-label', open > 0 ? tr('aria.openDrawerUnresolved', { open }) : tr('aria.openDrawerResolved'));
+    count.appendChild(el('span', 'pp-anno-dock-dot'));
+    if (open > 0) count.appendChild(document.createTextNode(String(open))); // 零未解决 → 无计数徽标
+    count.onclick = () => setRail(!state.railOpen);
+    dockEl.append(arm, el('span', 'pp-anno-dock-sep'), count);
+  }
+
+  /* ---------------- 托盘（列表面） ---------------- */
+  function renderTray() {
+    if (!trayEl) return;
+    trayEl.style.display = state.railOpen ? '' : 'none';
+    trayEl.classList.toggle('pp-anno-tray-closed', !state.railOpen);
+    if (!state.railOpen) return;
+    trayEl.textContent = '';
     const open = openCount();
     const total = state.threads.length;
 
-    // header
-    const hd = el('div', 'pp-anno-dwh');
-    const top = el('div', 'pp-anno-dwh-top');
-    const brand = el('span', 'pp-anno-brand');
-    const bi = el('i'); bi.appendChild(svg(ICON.cmd, 12)); brand.append(bi, document.createTextNode(tr('brand.review')));
-    const collapse = el('button', 'pp-anno-dwh-collapse'); collapse.dataset.ppAct = 'collapse'; collapse.title = tr('action.hideDrawer');
-    collapse.appendChild(svg(ICON.arrowR, 14));
-    collapse.onclick = () => setRail(false, { refocusTab: true });
-    top.append(brand, collapse);
-
-    const meta = el('div', 'pp-anno-dwh-meta');
-    meta.appendChild(el('span', 'pp-anno-dwh-sub', total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments')));
-    meta.append(filterSeg());
-
-    const acts = el('div', 'pp-anno-dwh-acts');
-    const cbtn = el('button', 'pp-anno-cbtn' + (state.mode === 'comment' ? ' pp-anno-on' : ''));
-    cbtn.dataset.ppAct = 'comment';
-    cbtn.appendChild(svg(ICON.plus, 14));
-    cbtn.appendChild(document.createTextNode(state.mode === 'comment' ? tr('btn.clickElement') : tr('btn.comment')));
-    cbtn.onclick = () => (state.mode === 'comment' ? exitComment() : enterComment());
+    // 头：品牌点 + 版本徽章 + 未解决数 + 对整页留言
+    const hd = el('div', 'pp-anno-tray-hd');
+    const brand = el('span', 'pp-anno-tray-brand');
+    brand.appendChild(el('span', 'pp-anno-dock-dot'));
+    brand.appendChild(document.createTextNode('pagepin'));
+    hd.appendChild(brand);
+    if (CFG.version) hd.appendChild(el('span', 'pp-anno-tray-ver', CFG.version));
+    hd.appendChild(el('span', 'pp-anno-tray-open', total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments')));
     const wbtn = el('button', 'pp-anno-wbtn'); wbtn.dataset.ppAct = 'whole'; wbtn.title = tr('action.notePage');
+    wbtn.style.marginLeft = 'auto';
     wbtn.appendChild(svg(ICON.msg, 13));
     wbtn.onclick = openDraftForPage;
-    acts.append(cbtn, wbtn);
+    hd.appendChild(wbtn);
+    trayEl.appendChild(hd);
 
-    hd.append(top, meta, acts);
-    drawer.appendChild(hd);
+    // 筛选段
+    const filters = el('div', 'pp-anno-tray-filters');
+    filters.appendChild(filterSeg());
+    trayEl.appendChild(filters);
 
-    // list
-    listEl = el('div', 'pp-anno-dwlist');
-    listEl.dataset.ppRole = 'list';
+    // 列表
+    const list = el('div', 'pp-anno-traylist');
+    list.dataset.ppRole = 'list';
     const ordered = orderedVisible();
-    if (!ordered.length && !state.draft) {
-      listEl.appendChild(el('div', 'pp-anno-empty', total
-        ? tr('empty.noOpen')
-        : tr('empty.none')));
+    if (!ordered.length) {
+      list.appendChild(el('div', 'pp-anno-tray-empty', total ? tr('empty.noOpen') : tr('empty.none')));
     } else {
-      for (const { t, a } of ordered) listEl.appendChild(threadCard(t, a));
+      for (const { t, a } of ordered) list.appendChild(trayRow(t, a));
     }
-    if (state.draft) listEl.appendChild(draftCard());
-    drawer.appendChild(listEl);
+    trayEl.appendChild(list);
 
-    // hint strip
-    const hint = el('div', 'pp-anno-dwhint');
-    const kp = (k, label) => { const w = el('span', 'pp-anno-kpair'); w.appendChild(el('kbd', null, k)); w.appendChild(document.createTextNode(label)); return w; };
-    hint.append(kp('j/k', tr('hint.move')), kp('c', tr('hint.comment')));
-    if (!isGuest()) hint.append(kp('r', tr('hint.resolve'))); // guest 无 resolve：不提示 r
-    hint.append(kp('\\', tr('hint.hide')));
-    drawer.appendChild(hint);
+    // 脚注快捷键
+    const ft = el('div', 'pp-anno-tray-ft');
+    ft.appendChild(el('span', null, 'j/k ' + tr('hint.move')));
+    if (!isGuest()) ft.appendChild(el('span', null, 'r ' + tr('hint.resolve')));
+    ft.appendChild(el('span', null, '\\ ' + tr('hint.hide')));
+    ft.appendChild(el('span', null, 'Esc ' + tr('hint.close')));
+    trayEl.appendChild(ft);
+  }
 
-    if (state.focusedId) requestAnimationFrame(() => scrollFocusedCardIntoView());
+  // 托盘行（列表项，data-pp-role="card" 但不带 focused）
+  function trayRow(t, a) {
+    const focused = state.focusedId === t.id;
+    const col = kindColor(t);
+    const stale = a.status === 'lost' || a.status === 'changed';
+    const row = el('button', 'pp-anno-trow' + (focused ? ' pp-anno-on' : ''));
+    row.dataset.ppRole = 'card';
+    row.dataset.tid = t.id;
+    row.dataset.ppStatus = a.status;
+    row.dataset.ppNum = isPage(t) ? 'page' : (stale ? 'stale' : (t._num != null ? String(t._num) : ''));
+    if (t.kind) row.dataset.ppKind = t.kind;
+    row.onclick = () => focusThread(t.id, true);
+
+    const n = el('span', 'pp-anno-trow-n');
+    n.style.background = t.resolved ? RESOLVED_COLOR : col;
+    if (isPage(t)) n.textContent = '¶';
+    else if (stale) n.textContent = '!';
+    else if (t.resolved) n.appendChild(svg(ICON.check, 11));
+    else n.textContent = t._num != null ? String(t._num) : '·';
+    row.appendChild(n);
+
+    const bd = el('span', 'pp-anno-trow-bd');
+    const l1 = el('span', 'pp-anno-trow-l1');
+    const lab = el('span', 'pp-anno-trow-lab', isPage(t) ? '@page' : '#' + anchorLabel(t.selector));
+    lab.style.color = t.resolved ? '#9aa1a9' : '#0b6358';
+    l1.appendChild(lab);
+    if (isGuestSub(t.comments[0].author_sub)) l1.appendChild(guestBadge());
+    if (stale) l1.appendChild(el('span', 'pp-anno-badge-lost', tr('badge.lost')));
+    if (t.resolved) {
+      const dn = el('span', 'pp-anno-badge-done');
+      dn.appendChild(svg(ICON.check, 9));
+      dn.appendChild(document.createTextNode(tr('chip.done')));
+      l1.appendChild(dn);
+    }
+    bd.appendChild(l1);
+    bd.appendChild(el('span', 'pp-anno-trow-ex', t.comments[0].text));
+    row.appendChild(bd);
+    return row;
+  }
+
+  /* ---------------- 顶部 strand 潮汐珠链（配置位 CFG.strand） ---------------- */
+  function renderStrand() {
+    if (!strandEl) return;
+    strandEl.style.display = CFG.strand ? '' : 'none';
+    if (!CFG.strand) return;
+    strandEl.textContent = '';
+    strandEl.appendChild(el('div', 'pp-anno-strand-rail'));
+    const docH = Math.max(1, document.documentElement.scrollHeight);
+    const vw = innerWidth;
+    for (const t of visibleThreads()) {
+      const pos = anchorXY(t);
+      if (!pos) continue; // lost/changed/@page 无珠
+      const focused = state.focusedId === t.id;
+      const bead = el('button', 'pp-anno-bead');
+      bead.dataset.ppAnno = '1';
+      bead.dataset.tid = t.id;
+      bead.style.left = Math.max(14, Math.min(vw - 14, (pos.y / docH) * vw)) + 'px';
+      bead.title = isPage(t) ? '@page' : anchorLabel(t.selector);
+      const dot = el('i');
+      const sz = focused ? 12 : 9;
+      dot.style.width = dot.style.height = sz + 'px';
+      dot.style.background = kindColor(t);
+      bead.appendChild(dot);
+      bead.onclick = (e) => { e.stopPropagation(); focusThread(t.id, true); };
+      strandEl.appendChild(bead);
+    }
+  }
+
+  /* ---------------- at-pin 线程卡 popover（详情面） ---------------- */
+  function closeCard() {
+    if (!state.focusedId) return;
+    state.focusedId = null;
+    renderDrawer();
+    render();
+  }
+  function renderPopover() {
+    if (MOBILE) return;
+    const t = state.focusedId ? byId(state.focusedId) : null;
+    if (!t) { if (popEl) { popEl.remove(); popEl = null; } return; }
+    const a = resolveAnchor(t);
+    const stale = a.status === 'lost' || a.status === 'changed';
+    const pop = el('div', 'pp-anno-card pp-anno-pop');
+    pop.dataset.ppAnno = '1';
+    pop.dataset.ppRole = 'card';
+    pop.dataset.ppFocused = '1';
+    pop.dataset.tid = t.id;
+    pop.dataset.ppStatus = a.status;
+    pop.dataset.ppNum = isPage(t) ? 'page' : (stale ? 'stale' : (t._num != null ? String(t._num) : ''));
+    if (t.kind) pop.dataset.ppKind = t.kind;
+
+    // 头部
+    const hd = el('div', 'pp-anno-pop-hd');
+    hd.appendChild(el('span', 'pp-anno-pop-sel', isPage(t) ? '@page' : '#' + anchorLabel(t.selector)));
+    if (stale) hd.appendChild(el('span', 'pp-anno-badge-lost', tr('badge.lost')));
+    const ov = orderedVisible();
+    const okCount = ov.filter((x) => x.a.status === 'ok').length;
+    const posLabel = t._num != null ? tr('card.pos', { n: t._num, total: okCount }) : '—';
+    hd.appendChild(el('span', 'pp-anno-pop-pos', posLabel));
+    const mine = state.viewer && t.comments[0].author_sub === state.viewer.sub;
+    if (mine) { const db = deleteBtn(t); db.className = 'pp-anno-pop-ib pp-anno-del'; hd.appendChild(db); }
+    const copy = el('button', 'pp-anno-pop-ib'); copy.dataset.ppRole = 'copy-link'; copy.title = tr('action.copyLink');
+    copy.appendChild(svg(ICON.link, 13));
+    copy.onclick = (e) => { e.stopPropagation(); copyThreadLink(t); };
+    hd.appendChild(copy);
+    const close = el('button', 'pp-anno-pop-ib'); close.dataset.ppAct = 'close-card'; close.title = tr('action.closeCard');
+    close.appendChild(svg(ICON.x, 13));
+    close.onclick = (e) => { e.stopPropagation(); closeCard(); };
+    hd.appendChild(close);
+    pop.appendChild(hd);
+
+    // 已解决横条
+    if (t.resolved) {
+      const banner = el('div', 'pp-anno-resolved-banner');
+      banner.appendChild(svg(ICON.check, 12));
+      banner.appendChild(document.createTextNode(tr('card.resolvedAt', { v: CFG.version || '' })));
+      if (!isGuest()) {
+        const reopen = el('button', 'pp-anno-pop-reopen'); reopen.dataset.ppRole = 'reopen';
+        reopen.textContent = tr('btn.reopen');
+        reopen.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
+        banner.appendChild(reopen);
+      }
+      pop.appendChild(banner);
+    }
+
+    // 评论流
+    const msgs = el('div', 'pp-anno-pop-msgs');
+    t.comments.forEach((c) => {
+      const m = el('div', 'pp-anno-msg');
+      m.appendChild(avatar(c.author_name, 26));
+      const right = el('div');
+      const line = el('div', 'pp-anno-msg-line');
+      line.appendChild(el('span', 'pp-anno-who', c.author_name));
+      if (isGuestSub(c.author_sub)) line.appendChild(guestBadge());
+      line.appendChild(el('span', 'pp-anno-when', fmtTime(c.created_at)));
+      right.append(line, el('div', 'pp-anno-txt', c.text));
+      m.appendChild(right);
+      msgs.appendChild(m);
+    });
+    pop.appendChild(msgs);
+
+    // kind chips（未解决 && 非 guest）
+    if (!t.resolved && !isGuest()) { const kc = kindChipsFor(t); kc.style.padding = '0 12px 2px'; pop.appendChild(kc); }
+
+    // 回复 + 标记解决
+    const ft = el('div', 'pp-anno-pop-ft');
+    ft.appendChild(replyArea(t, true));
+    if (!t.resolved && !isGuest()) {
+      const rb = el('button', 'pp-anno-pop-resolve'); rb.dataset.ppRole = 'resolve'; rb.title = tr('action.resolveNext');
+      rb.appendChild(svg(ICON.check, 13));
+      rb.appendChild(document.createTextNode(tr('action.resolve')));
+      rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
+      ft.appendChild(rb);
+    }
+    pop.appendChild(ft);
+
+    if (popEl) popEl.remove();
+    popEl = pop;
+    layer.appendChild(popEl);
+    positionFloating();
+  }
+
+  /* ---------------- 就地草稿气泡 ---------------- */
+  function renderDraftBubble() {
+    if (MOBILE) return;
+    if (!state.draft) { if (draftEl) { draftEl.remove(); draftEl = null; } return; }
+    const d = state.draft;
+    const bubble = el('div', 'pp-anno-dbubble');
+    bubble.dataset.ppAnno = '1';
+    bubble.dataset.ppRole = 'draft';
+    bubble.dataset.ppSelector = d.selector;
+
+    const nameInp = isGuest() ? guestNameInput() : null;
+    if (nameInp) bubble.appendChild(nameInp);
+
+    const row = el('div', 'pp-anno-dbubble-row');
+    row.appendChild(avatar(state.viewer ? (state.viewer.name || loadGuestName() || '?') : '?', 26));
+    const ta = document.createElement('textarea');
+    ta.rows = 2;
+    ta.placeholder = d.selector === PAGE_SELECTOR ? tr('placeholder.pageNote') : tr('placeholder.comment');
+    ta.value = d.text || '';
+    ta.oninput = () => { d.text = ta.value; syncFlags(); };
+    if (nameInp) nameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); ta.focus(); } };
+    row.appendChild(ta);
+    bubble.appendChild(row);
+
+    // kind chips（草稿态本地选择）
+    const chips = el('div', 'pp-anno-chips');
+    for (const k of KIND_KEYS) {
+      const m = KIND[k];
+      const b = el('button', 'pp-anno-chip2' + (d.kind === k ? ' pp-anno-on' : ''));
+      b.dataset.ppKind = k;
+      const dot = el('i'); dot.style.background = m.color;
+      b.append(dot, document.createTextNode(m.label));
+      if (d.kind === k) b.style.background = m.color;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        d.kind = d.kind === k ? null : k;
+        chips.querySelectorAll('.pp-anno-chip2').forEach((x) => { x.classList.remove('pp-anno-on'); x.style.background = ''; });
+        if (d.kind) { b.classList.add('pp-anno-on'); b.style.background = KIND[d.kind].color; }
+      };
+      chips.appendChild(b);
+    }
+    bubble.appendChild(chips);
+
+    // 脚：选择器标签 · 版本 + 取消 / 发布
+    const foot = el('div', 'pp-anno-dbubble-foot');
+    const selTxt = (d.selector === PAGE_SELECTOR ? '@page' : d.selector) + (CFG.version ? ' · ' + CFG.version : '');
+    foot.appendChild(el('span', 'pp-anno-dbubble-sel', selTxt));
+    const acts = el('div', 'pp-anno-dbubble-acts');
+    const cancel = el('button', 'pp-anno-dbubble-cancel', tr('btn.cancel'));
+    cancel.onclick = (e) => { e.stopPropagation(); clearDraft(true); renderDrawer(); render(); syncFlags(); };
+    const pub = el('button', 'pp-anno-dbubble-pub'); pub.dataset.ppRole = 'send';
+    pub.appendChild(document.createTextNode(tr('draft.publish')));
+    pub.appendChild(svg(ICON.arrowR, 12));
+    acts.append(cancel, pub);
+    foot.appendChild(acts);
+    bubble.appendChild(foot);
+
+    const submit = async () => {
+      const text = ta.value.trim();
+      if (!text) { ta.focus(); return; }
+      pub.disabled = true;
+      try {
+        let node = null;
+        if (d.selector !== PAGE_SELECTOR) { try { node = document.querySelector(d.selector); } catch (e) { node = null; } }
+        const anchor_text = node ? (fingerprint(node) || null) : null;
+        const payload = {
+          path: CFG.path, selector: d.selector, rx: d.rx, ry: d.ry,
+          rw: d.box ? d.box.rw : null, rh: d.box ? d.box.rh : null, kind: d.kind, anchor_text, text,
+        };
+        if (nameInp) { const nm = nameInp.value.trim(); saveGuestName(nm); payload.author_name = nm || null; }
+        const created = await createThread(payload);
+        state.threads.push(created);
+        if (state.draft && state.draft._cleanup) state.draft._cleanup();
+        state.draft = null;
+        state.focusedId = created.id;
+        renderDrawer();
+        render();
+        const pin = layer.querySelector(`.pp-anno-pin[data-tid="${created.id}"]`);
+        if (pin) pin.classList.add('pp-anno-pulse');
+        else if (d.selector === PAGE_SELECTOR) toast(tr('toast.pageRecorded'));
+        syncFlags();
+      } catch (err) { toast(err.message || tr('toast.failed')); pub.disabled = false; }
+    };
+    pub.onclick = (e) => { e.stopPropagation(); void submit(); };
+    ta.onkeydown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submit(); }
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); clearDraft(true); renderDrawer(); render(); syncFlags(); }
+    };
+
+    if (draftEl) draftEl.remove();
+    draftEl = bubble;
+    layer.appendChild(draftEl);
+    positionFloating();
+  }
+
+  /* ---------------- Lumen 桌面装饰件（reduced-motion 跳过） ---------------- */
+  function spawnHalo(t) {
+    if (REDUCE() || !layer) return;
+    const p = anchorXY(t);
+    if (!p) return;
+    const h = el('div', 'pp-anno-halo');
+    h.dataset.ppAnno = '1';
+    h.style.left = p.x + 'px';
+    h.style.top = (p.y - 14) + 'px';
+    h.style.borderColor = kindColor(t);
+    layer.appendChild(h);
+    setTimeout(() => h.remove(), 700);
+  }
+  function spawnRiser(t) {
+    if (REDUCE() || !layer) return;
+    const p = anchorXY(t);
+    if (!p) return;
+    const r = el('div', 'pp-anno-riser');
+    r.dataset.ppAnno = '1';
+    r.style.left = p.x + 'px';
+    r.style.top = p.y + 'px';
+    r.style.background = '#3dafa4';
+    layer.appendChild(r);
+    setTimeout(() => r.remove(), 720);
+  }
+  function spawnSweep() {
+    if (REDUCE() || !root) return;
+    const s = el('div', 'pp-anno-sweep'); s.dataset.ppAnno = '1';
+    s.appendChild(el('i'));
+    root.appendChild(s);
+    setTimeout(() => s.remove(), 1200);
   }
 
   /* ---------------- Tideline：sheet 渲染 ---------------- */
@@ -1061,22 +1559,26 @@
     if (so) so.textContent = tr('filter.open', { open });
   }
 
+  // 计数轻量同步（render() 每帧调用；就地补文字，不重建 DOM）
   function syncDrawerCounts() {
     if (MOBILE) { syncSheetCounts(); return; }
     const open = openCount();
-    if (drawer && state.railOpen) {
-      const sub = drawer.querySelector('.pp-anno-dwh-sub');
-      const total = state.threads.length;
-      if (sub) sub.textContent = total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments');
-      const so = drawer.querySelector('[data-pp-filter="open"]');
-      if (so) so.textContent = tr('filter.open', { open });
+    if (dockEl) {
+      const arm = dockEl.querySelector('.pp-anno-dock-arm');
+      if (arm) arm.classList.toggle('pp-anno-on', state.mode === 'comment');
+      const c = dockEl.querySelector('[data-pp-role="dock-count"]');
+      if (c) {
+        while (c.childNodes.length > 1) c.removeChild(c.lastChild); // 保留绿点，重写计数
+        if (open > 0) c.appendChild(document.createTextNode(String(open)));
+        c.setAttribute('aria-label', open > 0 ? tr('aria.openDrawerUnresolved', { open }) : tr('aria.openDrawerResolved'));
+      }
     }
-    if (tabEl && !state.railOpen) {
-      tabEl.textContent = '';
-      tabEl.appendChild(svg(ICON.cmd, 14));
-      tabEl.appendChild(document.createTextNode(tr('brand.review')));
-      if (open > 0) { const d = el('span', 'pp-anno-tabdot', String(open)); d.dataset.ppRole = 'tab-count'; tabEl.appendChild(d); }
-      tabEl.setAttribute('aria-label', open > 0 ? tr('aria.openDrawerUnresolved', { open }) : tr('aria.openDrawerResolved'));
+    if (trayEl && state.railOpen) {
+      const total = state.threads.length;
+      const o = trayEl.querySelector('.pp-anno-tray-open');
+      if (o) o.textContent = total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments');
+      const so = trayEl.querySelector('[data-pp-filter="open"]');
+      if (so) so.textContent = tr('filter.open', { open });
     }
   }
 
@@ -1324,6 +1826,8 @@
           Object.assign(t, updated);
           applySel();
           render(); // pin/accent 重新上色
+          renderTray(); // 托盘行序号点同步 kind 色
+          renderStrand(); // strand 珠同步 kind 色
           const railEl = wrap.closest('.pp-anno-card')?.querySelector('.pp-anno-card-rail');
           if (railEl) railEl.style.background = kindColor(t);
         } catch (err) { toast(err.message || tr('toast.failed')); }
@@ -1334,13 +1838,13 @@
     return wrap;
   }
 
-  function replyArea(t) {
+  function replyArea(t, compact) {
     const wrap = el('div', 'pp-anno-replyarea');
     const taWrap = el('div', 'pp-anno-ta-wrap');
     const nameInp = isGuest() ? guestNameInput() : null;
     if (nameInp) taWrap.appendChild(nameInp);
     const ta = document.createElement('textarea');
-    ta.rows = 2;
+    ta.rows = compact ? 1 : 2;
     ta.dataset.ppRole = 'reply';
     ta.placeholder = t.resolved ? tr('placeholder.addNote') : tr('placeholder.reply');
     const stash = state.replyStash.get(t.id);
@@ -1349,15 +1853,25 @@
     ta.onfocus = syncFlags;
     ta.onblur = syncFlags;
     if (nameInp) nameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); ta.focus(); } };
-    const row = el('div', 'pp-anno-ta-row');
-    row.appendChild(el('span', 'pp-anno-hint', tr('hint.enterReply')));
-    const send = el('button', 'pp-anno-send');
+    const send = el('button', 'pp-anno-send' + (compact ? ' pp-anno-send-lum' : ''));
     send.dataset.ppRole = 'send';
-    send.appendChild(svg(ICON.enter, 13));
-    send.appendChild(document.createTextNode(tr('btn.reply')));
-    row.appendChild(send);
-    taWrap.append(ta, row);
-    wrap.appendChild(taWrap);
+    if (compact) {
+      // Lumen popover：单行输入 + 36×36 纸飞机钮并排（设计稿 E4d），↵ 提示挪进 title
+      send.title = tr('hint.enterReply');
+      send.appendChild(svg(ICON.send, 14));
+      taWrap.appendChild(ta);
+      const row = el('div', 'pp-anno-ta-row-lum');
+      row.append(taWrap, send);
+      wrap.appendChild(row);
+    } else {
+      const row = el('div', 'pp-anno-ta-row');
+      row.appendChild(el('span', 'pp-anno-hint', tr('hint.enterReply')));
+      send.appendChild(svg(ICON.enter, 13));
+      send.appendChild(document.createTextNode(tr('btn.reply')));
+      row.appendChild(send);
+      taWrap.append(ta, row);
+      wrap.appendChild(taWrap);
+    }
 
     const submit = async () => {
       const txt = ta.value.trim();
@@ -1383,7 +1897,7 @@
     return wrap;
   }
 
-  /* ---------------- 聚焦 + 发光相机 ---------------- */
+  /* ---------------- 聚焦（桌面=弹 popover + halo + 相机；移动=sheet 内联） ---------------- */
   function focusThread(id, scroll) {
     const t = byId(id);
     if (!t) return;
@@ -1392,9 +1906,12 @@
       // 选中线程时 sheet 至少抬到 HALF（peek 只够扫一眼）；已在 half/full 保持不动
       if (state.detent === 'peek') setDetent('half');
       renderDrawer();
-    } else if (!state.railOpen) setRail(true);
-    else renderDrawer();
+    } else {
+      state.draft = null; // 聚焦时收掉空草稿气泡（有稿也让位给 popover）
+      renderDrawer(); // 弹 popover + 托盘行高亮（不强制展开托盘）
+    }
     render();
+    if (!MOBILE) spawnHalo(t); // 焦点 halo（reduced-motion 跳过）
     if (scroll) {
       const a = resolveAnchor(t);
       if (a.el) {
@@ -1414,9 +1931,21 @@
   }
 
   function scrollFocusedCardIntoView() {
-    if (!listEl || !state.focusedId) return;
-    const card = listEl.querySelector('[data-pp-focused="1"]');
-    if (card) card.scrollIntoView({ block: 'nearest' });
+    if (!state.focusedId) return;
+    if (MOBILE) {
+      if (!listEl) return;
+      const card = listEl.querySelector('[data-pp-focused="1"]');
+      if (card) card.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    // 桌面：把聚焦线程的托盘行居中滚进托盘列表（托盘开时）
+    if (!trayEl || !state.railOpen) return;
+    const list = trayEl.querySelector('.pp-anno-traylist');
+    const row = trayEl.querySelector('[data-pp-role="card"][data-tid="' + state.focusedId + '"]');
+    if (list && row) {
+      const top = row.offsetTop - list.clientHeight / 2 + row.offsetHeight / 2;
+      list.scrollTo({ top: Math.max(0, top), behavior: REDUCE() ? 'auto' : 'smooth' });
+    }
   }
 
   function move(delta) {
@@ -1442,6 +1971,7 @@
       Object.assign(t, updated);
     } catch (e) { toast(e.message || tr('toast.failed')); resolveInFlight = false; return; }
     resolveInFlight = false;
+    if (!wasResolved && !MOBILE) spawnRiser(t); // resolve 泪滴升腾（reduced-motion 跳过）
     if (!wasResolved) { try { await momentStamp(id); } catch (e) { /* 仪式失败不阻断 */ } }
     // resolve-and-advance：刚解决且 filter=open（卡会消失）→ 焦点前移到下一张
     if (!wasResolved && state.filter === 'open') {
@@ -1496,7 +2026,7 @@
     state.draft = d;
     state.focusedId = null;
     if (MOBILE) { setDetent('half'); renderDrawer(); }
-    else if (!state.railOpen) setRail(true); else renderDrawer();
+    else renderDrawer(); // 桌面：草稿气泡浮在锚点旁（不强制展开托盘）
     render();
     if (MOBILE && selector !== PAGE_SELECTOR) {
       let node = null;
@@ -1549,6 +2079,7 @@
   }
   function momentBanner(toV) {
     if (moments.banner) moments.banner.remove();
+    if (!MOBILE) spawnSweep(); // E9 \u53d1\u5e03\u5149\u5e26\u5e76\u53d1\u626b\u8fc7\uff08reduced-motion \u8df3\u8fc7\uff09
     const bn = el('div', 'pp-anno-mtbanner');
     bn.dataset.ppAnno = '1';
     bn.setAttribute('role', 'status');
@@ -1609,6 +2140,8 @@
   function momentMaybeFinale() {
     if (openCount() > 0) { moments.finaleShown = false; return; }
     if (moments.finaleShown || moments.stats.n === 0) return;
+    if (!MOBILE) { moments.finaleShown = true; showSeal(); return; } // 桌面：全屏封印 seal
+    // 移动端：抽屉空态里的小卡（就地）
     const empty = panel() && panel().querySelector('.pp-anno-empty');
     if (!empty) return;
     moments.finaleShown = true;
@@ -1625,6 +2158,29 @@
     fin.appendChild(st);
     empty.replaceChildren(fin);
     empty.style.padding = '0';
+  }
+  // 桌面全屏封印 seal（保留 .pp-anno-mfinale + <b> 钩子；点击任意处 dismiss）
+  function showSeal() {
+    if (state.seal || !root) return;
+    const seal = el('div', 'pp-anno-seal');
+    seal.dataset.ppAnno = '1';
+    seal.dataset.ppRole = 'seal';
+    const inn = el('div', 'pp-anno-seal-in');
+    const mark = el('span', 'pp-anno-seal-mark'); mark.appendChild(svg(ICON.seal, 30)); inn.appendChild(mark);
+    const fin = el('div', 'pp-anno-mfinale'); // 钩子保留（moments M4）
+    const b = document.createElement('b'); b.className = 'pp-anno-seal-title'; b.textContent = tr('seal.title'); fin.appendChild(b);
+    fin.appendChild(el('div', 'pp-anno-seal-body', tr('seal.body', { n: state.threads.length })));
+    inn.appendChild(fin);
+    inn.appendChild(el('div', 'pp-anno-seal-hint', tr('seal.continue')));
+    seal.appendChild(inn);
+    seal.onclick = () => dismissSeal();
+    root.appendChild(seal);
+    state.seal = seal;
+  }
+  function dismissSeal() {
+    if (!state.seal) return;
+    state.seal.remove();
+    state.seal = null;
   }
 
   function draftCard() {
@@ -1860,7 +2416,7 @@
   let vignetteEl = null;
   function enterComment() {
     if (MOBILE) { enterAim(); return; }
-    state.mode = 'comment'; if (!state.railOpen) setRail(true); else renderDrawer(); syncFlags();
+    state.mode = 'comment'; renderDrawer(); syncFlags(); // 坞画笔点亮（不强制展开托盘）
     if (!vignetteEl) { vignetteEl = el('div', 'pp-anno-vignette'); vignetteEl.dataset.ppAnno = '1'; document.body.appendChild(vignetteEl); }
   }
   function exitComment() {
@@ -1997,9 +2553,15 @@
     const typing = /INPUT|TEXTAREA|SELECT/.test(ae.tagName || '') || (ae && ae.isContentEditable);
     if (e.key === 'Escape') {
       if (typing) return; // textarea 自己的 onkeydown 处理 Esc
-      // 草稿优先放弃（即使同时处于评论模式），再退出评论模式
-      if (state.draft) { clearDraft(true); renderDrawer(); render(); }
-      if (state.mode === 'comment') exitComment();
+      // Esc 级联（桌面）：草稿 → popover → seal → 横幅 → 托盘 → 退评论模式；命中一层即消费
+      if (state.draft) { clearDraft(true); renderDrawer(); render(); syncFlags(); return; }
+      if (!MOBILE) {
+        if (state.focusedId) { closeCard(); return; }
+        if (state.seal) { dismissSeal(); return; }
+        if (moments.banner) { moments.banner.remove(); moments.banner = null; return; }
+        if (state.railOpen) { setRail(false); return; }
+      }
+      if (state.mode === 'comment') { exitComment(); syncFlags(); return; }
       syncFlags();
       return; // 无草稿/非评论模式时为 no-op：不消费 Esc（让图片壳关闭预览）
     }
@@ -2012,34 +2574,16 @@
       case '\\':
         e.preventDefault();
         if (MOBILE) setDetent(state.detent === 'peek' ? 'half' : 'peek'); // 硬键盘：\ 开合 sheet
-        else setRail(!state.railOpen, { refocusTab: !state.railOpen ? false : true });
+        else setRail(!state.railOpen); // 桌面：\ 开合托盘
         break;
       default: break;
     }
   });
 
-  /* ---------------- 宽度感知自动收起 ---------------- */
-  function onResizeWidth() {
-    const b = widthBucket(innerWidth);
-    if (b === lastBucket) return;
-    lastBucket = b;
-    if (b === 'narrow' && state.railOpen) {
-      setRail(false, { auto: true, discard: false, force: true });
-      state.autoHint = true;
-      const h = el('div', 'pp-anno-aimhint', tr('hint.narrow'));
-      h.dataset.ppAnno = '1'; h.dataset.ppRole = 'auto-hint';
-      h.style.top = '50%'; h.style.left = 'auto'; h.style.right = '54px'; h.style.transform = 'translateY(-50%)';
-      root.appendChild(h);
-      setTimeout(() => h.remove(), 2600);
-    } else if (b === 'wide' && !state.railOpen) {
-      setRail(true, { auto: true });
-    }
-  }
-
   addEventListener('resize', () => {
     render();
     if (MOBILE) applyDetent(); // 转屏/工具栏收放：half/full 档高度按新视口重算（形态本身不切换）
-    else onResizeWidth();
+    else { renderStrand(); } // 桌面：珠链按新视口宽/文档高重排
   });
   addEventListener('load', () => render());
 
@@ -2107,16 +2651,17 @@
   });
 
   /* ---------------- 深链 #pp-comment-<id>（id 形态宽匹配；长度不设下限——find 兜底） ---------------- */
-  /* guest 首访一次性提示:挂在抽屉「+ 评论」按钮下方,8s 或任意点击后消失,只出现一次 */
+  /* guest 首访一次性提示:挂在坞画笔按钮下方,8s 或任意点击后消失,只出现一次 */
   function firstOpenHint() {
     if (MOBILE || !isGuest()) return; // 移动端 FAB 自带自我教学(peek-bounce + 文字钮)
     try { if (localStorage.getItem('pp-hint-v1')) return; } catch (e) { return; }
-    const btn = drawer && drawer.querySelector('.pp-anno-cbtn');
-    if (!btn || !state.railOpen) return;
+    const btn = dockEl && dockEl.querySelector('.pp-anno-dock-arm');
+    if (!btn) return;
     const r = btn.getBoundingClientRect();
-    const tip = el('div', 'pp-anno-firsthint', tr('hint.firstOpen'));
+    const tip = el('div', 'pp-anno-firsthint pp-anno-hint-up', tr('hint.firstOpen'));
     tip.dataset.ppAnno = '1';
-    tip.style.top = (r.bottom + 10) + 'px';
+    // 坞在右下角：提示挂在画笔钮上方
+    tip.style.bottom = (innerHeight - r.top + 10) + 'px';
     tip.style.right = Math.max(8, innerWidth - r.right) + 'px';
     document.body.appendChild(tip);
     requestAnimationFrame(() => tip.classList.add('pp-anno-min'));

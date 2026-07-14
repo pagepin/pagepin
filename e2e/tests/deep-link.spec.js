@@ -76,7 +76,7 @@ test('短 id 的深链(<8 位)也能定位聚焦', async ({ page }) => {
 test('已打开页改 hash → hashchange 定位聚焦该卡', async ({ page }) => {
   await setup(page, { threads: [mkThread(1, '#t1'), mkThread(2, '#t2', { id: 'xyz-42' })] });
   await page.goto('http://pagepin.test/');
-  await page.locator('[data-pp-role="drawer"]').waitFor();
+  await page.locator('[data-pp-role="tray"]').waitFor();
   await page.evaluate(() => { location.hash = '#pp-comment-xyz-42'; });
   await expect(focusedCard(page)).toHaveAttribute('data-tid', 'xyz-42');
 });

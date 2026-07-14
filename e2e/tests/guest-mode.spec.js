@@ -147,8 +147,8 @@ test('guest 可删自己创建的线程；别人的线程无删除入口', async
   await del.click(); // 一次点击 = 武装确认
   await del.click(); // 二次点击 = 真删
   await expect(page.locator('[data-pp-role="card"][data-tid="thread-1"]')).toHaveCount(0);
-  // 别人的：无删除入口
-  await page.locator('[data-pp-role="card"][data-tid="thread-2"]').click();
+  // 别人的：无删除入口（删除后焦点自动前移到 thread-2，故点其托盘行即可，避开 popover 双匹配）
+  await page.locator('[data-pp-role="card"][data-tid="thread-2"]:not([data-pp-focused="1"])').click();
   await expect(focusedCard(page)).toHaveAttribute('data-tid', 'thread-2');
   await expect(focusedCard(page).locator('[data-pp-role="delete"]')).toHaveCount(0);
 });

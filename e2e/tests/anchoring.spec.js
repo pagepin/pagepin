@@ -30,6 +30,6 @@ test('抽屉列出降级项并标注状态（四条都不丢）', async ({ page 
   await expect(page.locator('[data-pp-role="card"][data-pp-status="page"]')).toHaveCount(1);
   await expect(page.locator('[data-pp-role="card"][data-pp-status="lost"]')).toHaveCount(1);
   await expect(page.locator('[data-pp-role="card"][data-pp-status="changed"]')).toHaveCount(1);
-  // 降级项给出「锚点丢失」恢复提示
-  await expect(drawer(page)).toContainText('Anchor lost');
+  // 降级项给出「锚点丢失」徽章（Lumen 托盘行 badge.lost）
+  await expect(drawer(page)).toContainText(/anchor lost/i);
 });

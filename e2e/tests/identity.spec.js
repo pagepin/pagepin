@@ -18,7 +18,7 @@ test('站点已关评论（线程列表 403）：注入后自我移除', async (
   await expect(page.locator('.pp-anno-root')).toHaveCount(0);
 });
 
-test('已登录访客：注入右侧抽屉 + pin', async ({ page }) => {
+test('已登录访客：注入托盘（列表面）+ pin', async ({ page }) => {
   await setup(page, { threads: [mkThread(1, '#t1')] });
   await goto(page);
   await expect(drawer(page)).toBeVisible();

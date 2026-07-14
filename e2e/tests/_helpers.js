@@ -6,13 +6,18 @@
 // comments.js 从自身 <script data-*> 读配置、从 /api/viewer 取身份、从
 // /api/comments/{handle}/{slug} 取线程，全部可拦截。
 //
-// v3 交互模型（右侧浮动抽屉 + 常驻 j/k + 发光相机）：
-//   - 唯一全局 chrome = 右侧抽屉 [data-pp-role="drawer"]，默认展开（评审者一进来就看到评论）；
-//     收起为右缘 tab [data-pp-role="tab"]。
-//   - 读与改都在抽屉里的线程卡 [data-pp-role="card"]（data-tid / data-pp-num / data-pp-status /
-//     聚焦时 data-pp-focused="1" 就地展开）；不再有 at-pin 弹层。
-//   - 新建草稿落在抽屉里 [data-pp-role="draft"]。
-//   - 锚点遮挡：抽屉占右侧 ~320px，落在其下的元素 pin 会被盖住 —— 测试锚点统一放抽屉左侧。
+// Lumen 桌面交互模型（右下 pill 坞 + 托盘列表面 + at-pin popover 详情面 + 就地草稿气泡）：
+//   - 常驻右下 pill 坞 [data-pp-role="dock"]：画笔 [data-pp-act="comment"] = arm 评论模式；
+//     计数钮 [data-pp-role="dock-count"]（[data-pp-act="collapse"]）= 开合托盘 + 未解决徽标。
+//   - 列表面 = 右下托盘 [data-pp-role="tray"]，默认展开（评审者一进来就看到评论）；收起为
+//     仅剩 pill 坞（托盘 display:none + .pp-anno-tray-closed）。托盘行 = [data-pp-role="card"]
+//     （data-tid / data-pp-num / data-pp-status / data-pp-kind），但**不带** data-pp-focused。
+//   - 详情面 = 浮在 pin 旁的 at-pin popover [data-pp-role="card"][data-pp-focused="1"]，承载
+//     评论流（.pp-anno-msg/.pp-anno-txt）/回复框/resolve/reopen/kind chips/copy-link/删除。
+//   - 新建草稿 = 浮在锚点旁的气泡 [data-pp-role="draft"]。
+//   - 历史兼容：`drawer(page)` 别名指向托盘 [data-pp-role="tray"]，`tab(page)` 指向坞。
+//   - focusedCard 只匹配 popover（托盘行永不带 focused）；card(n) 用 :not([data-pp-focused])
+//     限定托盘行，避免「同 num 两个 card」破坏计数断言。
 const path = require('path');
 const fs = require('fs');
 
@@ -145,26 +150,31 @@ const DEFAULT_BOXES = [
   { id: 't3', left: 80, top: 380 }, { id: 't4', left: 340, top: 380 },
 ];
 
-// 常用定位器（与 v3 抽屉模型的稳定 data-pp-* 钩子对齐）
+// 常用定位器（与 Lumen 桌面模型的稳定 data-pp-* 钩子对齐）
 const pin = (page, n) =>
   page.locator('.pp-anno-pin').filter({ hasText: new RegExp(`^\\s*${n}\\s*$`) });
-const drawer = (page) => page.locator('[data-pp-role="drawer"]');
-const tab = (page) => page.locator('[data-pp-role="tab"]');
+// drawer 别名 → 托盘（列表面）；tab 别名 → 坞（收起态入口）；dockCount → 坞计数钮
+const drawer = (page) => page.locator('[data-pp-role="tray"]');
+const tray = (page) => page.locator('[data-pp-role="tray"]');
+const tab = (page) => page.locator('[data-pp-role="dock"]');
+const dock = (page) => page.locator('[data-pp-role="dock"]');
+const dockCount = (page) => page.locator('[data-pp-role="dock-count"]');
 const act = (page, name) => page.locator(`[data-pp-act="${name}"]`);
-// 线程卡：全部 / 按编号 / 当前聚焦展开的那张
-const cards = (page) => page.locator('[data-pp-role="card"]');
-const card = (page, n) => page.locator(`[data-pp-role="card"][data-pp-num="${n}"]`);
+// 线程卡：托盘行（全部 / 按编号，均排除 popover）/ 当前聚焦的 at-pin popover
+const cards = (page) => page.locator('[data-pp-role="card"]:not([data-pp-focused="1"])');
+const card = (page, n) =>
+  page.locator(`[data-pp-role="card"][data-pp-num="${n}"]:not([data-pp-focused="1"])`);
 const focusedCard = (page) => page.locator('[data-pp-role="card"][data-pp-focused="1"]');
 const draft = (page) => page.locator('[data-pp-role="draft"]');
 
 async function goto(page) {
   await page.goto('http://pagepin.test/');
 }
-// 抽屉可见 = 评论层就绪门
-const ready = async (page) => { await drawer(page).waitFor(); };
+// 托盘可见 = 评论层就绪门（桌面默认展开）
+const ready = async (page) => { await tray(page).waitFor(); };
 
 module.exports = {
   COMMENTS_JS, NOW, VIEWER, DEFAULT_BOXES,
   mkThread, fixtureHtml, setup, goto,
-  pin, drawer, tab, act, cards, card, focusedCard, draft, ready,
+  pin, drawer, tray, tab, dock, dockCount, act, cards, card, focusedCard, draft, ready,
 };
