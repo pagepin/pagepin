@@ -219,48 +219,59 @@
     }
   }
 
-  /* ---------------- 左栏 TOC + scroll-spy(≥1240px 由 CSS 决定显隐) ---------------- */
+  /* ---------------- 目录:左缘迷你条码 + hover 展开面板(≥1160px 由 CSS 决定显隐) ----------------
+   * 两层同一份锚点:rail(每节一根小横线,h3 更短)常驻、panel(标题列表)hover/聚焦才浮出。
+   * 正文版心不参与布局 —— 目录是 overlay,阅读视线始终在屏幕中线。 */
   function buildToc(root) {
     var hs = root.querySelectorAll('h2,h3');
     if (hs.length < 2) return;
     var nav = document.createElement('nav');
     nav.className = 'pp-md-toc';
+    var rail = document.createElement('div');
+    rail.className = 'pp-md-toc-rail';
+    var panel = document.createElement('div');
+    panel.className = 'pp-md-toc-panel';
     var title = document.createElement('div');
     title.className = 'pp-md-toc-t';
     title.textContent = str('toc', 'Contents');
-    nav.appendChild(title);
+    panel.appendChild(title);
     var ol = document.createElement('ol');
-    var links = [];
+    var links = []; // [heading, panelA, railA]
     for (var i = 0; i < hs.length; i++) {
+      var lv = 'pp-md-toc-' + hs[i].tagName.toLowerCase();
+      var href = '#' + encodeURIComponent(hs[i].id);
+      var text = (hs[i].textContent || '').replace(/#$/, '');
       var li = document.createElement('li');
-      li.className = 'pp-md-toc-' + hs[i].tagName.toLowerCase();
+      li.className = lv;
       var a = document.createElement('a');
-      a.href = '#' + encodeURIComponent(hs[i].id);
-      a.textContent = (hs[i].textContent || '').replace(/#$/, '');
+      a.href = href;
+      a.textContent = text;
       li.appendChild(a);
       ol.appendChild(li);
-      links.push([hs[i], a]);
+      var bar = document.createElement('a');
+      bar.className = lv;
+      bar.href = href;
+      bar.title = text;
+      rail.appendChild(bar);
+      links.push([hs[i], a, bar]);
     }
-    nav.appendChild(ol);
-    var layout = root.closest('.pp-md-layout');
-    if (layout) {
-      layout.classList.add('pp-md-hastoc');
-      layout.insertBefore(nav, layout.firstChild);
-    } else {
-      document.body.appendChild(nav);
-    }
+    panel.appendChild(ol);
+    nav.appendChild(rail);
+    nav.appendChild(panel);
+    document.body.appendChild(nav);
 
     var active = null;
     var spy = function () {
       var cur = null;
       for (var i = 0; i < links.length; i++) {
-        if (links[i][0].getBoundingClientRect().top <= 96) cur = links[i][1];
+        if (links[i][0].getBoundingClientRect().top <= 96) cur = links[i];
         else break;
       }
-      cur = cur || links[0][1];
+      cur = cur || links[0];
       if (cur !== active) {
-        if (active) active.classList.remove('pp-on');
-        cur.classList.add('pp-on');
+        if (active) { active[1].classList.remove('pp-on'); active[2].classList.remove('pp-on'); }
+        cur[1].classList.add('pp-on');
+        cur[2].classList.add('pp-on');
         active = cur;
       }
     };

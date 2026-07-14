@@ -57,7 +57,7 @@ body { margin: 0; font-family: 'Hanken Grotesk', system-ui, sans-serif; color: v
 .pp-md-raw { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; border: 1px solid var(--pp-line-2); border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 600; color: var(--pp-fg); }
 .pp-md-raw:hover { border-color: var(--pp-tide); color: var(--pp-tide); }
 
-/* ── 阅读列:.pp-md-layout 管宽度与居中;TOC 出现时(宽屏)变两栏网格,目录占左栏 ── */
+/* ── 阅读列:严格视口居中;目录是左缘迷你条码,不占版心 ── */
 .pp-md-layout { max-width: 940px; margin: 0 auto; padding: 38px 30px 110px; }
 main { line-height: 1.75; font-size: 16px; }
 h1, h2, h3, h4 { line-height: 1.3; margin: 1.7em 0 .6em; font-weight: 700; color: var(--pp-head); scroll-margin-top: 24px; position: relative; }
@@ -143,18 +143,24 @@ li.pp-md-task > input[type="checkbox"] { accent-color: var(--pp-tide); width: 15
 .pp-md-mermaid { margin: 1.2em 0; padding: 14px; border: 1px solid var(--pp-line-2); border-radius: 11px; background: var(--pp-bg-soft); overflow-x: auto; text-align: center; }
 .pp-md-mermaid svg { max-width: 100%; height: auto; }
 
-/* ── 左栏 TOC(宽屏出现;右侧留给评论抽屉) ── */
+/* ── 目录:左缘迷你条码(collapsed)+ hover 展开面板(overlay,不动版心) ── */
 .pp-md-toc { display: none; }
-@media (min-width: 1240px) {
-  .pp-md-layout.pp-md-hastoc { max-width: 1240px; display: grid; grid-template-columns: 224px minmax(0, 880px); justify-content: center; column-gap: 56px; }
-  .pp-md-toc { display: block; position: sticky; top: 40px; align-self: start; max-height: calc(100vh - 80px); overflow-y: auto; font-size: 12.5px; }
+@media (min-width: 1160px) {
+  .pp-md-toc { display: block; position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 900; padding: 12px 20px 12px 18px; }
+  .pp-md-toc-rail { display: flex; flex-direction: column; gap: 7px; transition: opacity .14s ease; }
+  .pp-md-toc-rail a { display: block; width: 16px; height: 3px; border-radius: 99px; background: var(--pp-line-2); }
+  .pp-md-toc-rail a.pp-md-toc-h3 { width: 10px; }
+  .pp-md-toc-rail a.pp-on { background: var(--pp-tide); }
+  .pp-md-toc:hover .pp-md-toc-rail, .pp-md-toc:focus-within .pp-md-toc-rail { opacity: 0; }
+  .pp-md-toc-panel { position: absolute; left: 10px; top: 50%; width: 252px; max-height: 72vh; overflow-y: auto; padding: 14px 16px; border: 1px solid var(--pp-line-2); border-radius: 12px; background: var(--pp-bg); box-shadow: 0 14px 44px -14px rgba(17, 22, 27, .28); opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-50%) translateX(-6px); transition: opacity .16s ease, transform .16s ease, visibility .16s; font-size: 12.5px; }
+  .pp-md-toc:hover .pp-md-toc-panel, .pp-md-toc:focus-within .pp-md-toc-panel { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(-50%); }
   .pp-md-toc-t { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--pp-muted); margin-bottom: 8px; }
-  .pp-md-toc ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--pp-line-2); }
-  .pp-md-toc li { margin: 0; }
-  .pp-md-toc a { display: block; padding: 3.5px 12px; color: var(--pp-faint); text-decoration: none; border-left: 2px solid transparent; margin-left: -1.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
-  .pp-md-toc-h3 a { padding-left: 26px; }
-  .pp-md-toc a:hover { color: var(--pp-head); }
-  .pp-md-toc a.pp-on { color: var(--pp-tide); border-left-color: var(--pp-tide); font-weight: 600; }
+  .pp-md-toc-panel ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--pp-line-2); }
+  .pp-md-toc-panel li { margin: 0; }
+  .pp-md-toc-panel a { display: block; padding: 3.5px 12px; color: var(--pp-faint); text-decoration: none; border-left: 2px solid transparent; margin-left: -1.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
+  .pp-md-toc-panel li.pp-md-toc-h3 a { padding-left: 26px; }
+  .pp-md-toc-panel a:hover { color: var(--pp-head); }
+  .pp-md-toc-panel a.pp-on { color: var(--pp-tide); border-left-color: var(--pp-tide); font-weight: 600; }
 }
 
 @media print {
