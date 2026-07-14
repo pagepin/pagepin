@@ -242,7 +242,13 @@
       links.push([hs[i], a]);
     }
     nav.appendChild(ol);
-    document.body.appendChild(nav);
+    var layout = root.closest('.pp-md-layout');
+    if (layout) {
+      layout.classList.add('pp-md-hastoc');
+      layout.insertBefore(nav, layout.firstChild);
+    } else {
+      document.body.appendChild(nav);
+    }
 
     var active = null;
     var spy = function () {

@@ -377,7 +377,7 @@ ${inject}</head>
   <span><span class="pp-md-name">${fname}</span><span class="pp-md-sub">${t(locale, 'viewer.md.meta', { size: fmtBytes(sizeBytes) })}</span></span>
   <a class="pp-md-raw" href="?raw=1">${CODE_ICON} ${t(locale, 'viewer.md.viewRaw')}</a>
 </header>
-<main id="pp-md-content">${t(locale, 'viewer.md.rendering')}</main>
+<div class="pp-md-layout"><main id="pp-md-content">${t(locale, 'viewer.md.rendering')}</main></div>
 <script src="/_pagepin/marked.min.js"></script>
 <script src="/_pagepin/hljs.min.js"></script>
 <script src="/_pagepin/md-viewer.js"></script>

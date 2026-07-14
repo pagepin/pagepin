@@ -63,7 +63,7 @@ function shell(md) {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <link rel="stylesheet" href="/md-viewer.css"></head>
 <body style="height:2400px">
-<main id="pp-md-content">渲染中…</main>
+<div class="pp-md-layout"><main id="pp-md-content">渲染中…</main></div>
 <script src="/marked.min.js"></script>
 <script src="/hljs.min.js"></script>
 <script src="/md-viewer.js"></script>
