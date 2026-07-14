@@ -2,7 +2,7 @@
 // 图片框选(bbox 评论):评论模式下拖动出框 → 区域评论(草稿落在抽屉);轻点仍是点评论;
 // 预置 bbox 线程渲染区域框;区域预览随图片滚动重摆;评论模式两步式 + ⌥/⌘ 直接弹。
 const { test, expect } = require('@playwright/test');
-const { setup, goto, mkThread, composer: draft, ready } = require('./_helpers'); // 元素草稿已就地气泡化
+const { setup, goto, mkThread, draft, ready } = require('./_helpers');
 
 const SVG = encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#9ab"/></svg>',
@@ -25,8 +25,8 @@ const IMG_HTML = `<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <script src="/comments.js" data-handle="alice" data-slug="demo" data-path="/" data-version="v1"></script>
 </body></html>`;
 
-const draftTa = (page) => page.locator('[data-pp-role="composer"] textarea');
-const draftSend = (page) => page.locator('[data-pp-role="composer"] [data-pp-role="send"]');
+const draftTa = (page) => page.locator('[data-pp-role="draft"] textarea');
+const draftSend = (page) => page.locator('[data-pp-role="draft"] [data-pp-role="send"]');
 
 test('评论模式下在图片上拖动 → 区域评论,rw/rh 随请求提交且区域框渲染', async ({ page }) => {
   let created = null;

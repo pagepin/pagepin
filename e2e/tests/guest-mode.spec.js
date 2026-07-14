@@ -1,13 +1,13 @@
 // @ts-check
 // 分享会话访客（guest）模式：/api/viewer 带 ?handle=&slug= 探测，返回 guest:true 时 ——
 //   - resolve / reopen / kind 修改控件一律不渲染（服务端对 guest PATCH 401），r 快捷键失效；
-//   - composer（建线程草稿 + 回复框）带署名输入，发送时 author_name 进 POST body 并存 localStorage；
+//   - 草稿卡 + 回复框带署名输入，发送时 author_name 进 POST body 并存 localStorage；
 //   - author_sub 以 'guest:' 开头的评论在名字旁渲染低调 guest 徽标；
 //   - guest 可删自己创建的线程（author_sub 匹配），别人的没有删除入口。
 const { test, expect } = require('@playwright/test');
 const {
   setup, goto, mkThread, NOW,
-  pin, focusedCard, act, cards, composer: draft, ready,
+  pin, focusedCard, act, cards, draft, ready,
 } = require('./_helpers');
 
 const GUEST = { sub: 'guest:g-abc123', name: null, handle: null, guest: true };

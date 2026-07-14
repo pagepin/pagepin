@@ -575,51 +575,6 @@
   .pp-anno-stepbtn{width:44px;height:40px;display:grid;place-items:center;border:1px solid #e1e4e6;background:#fff;color:#5c636b;border-radius:10px;cursor:pointer}
   .pp-anno-stepbtn:active{background:#f1f3f4}
   .pp-anno-steppos{font:600 11.5px/1 'JetBrains Mono',monospace;color:#8a929b}
-  /* ── 就地气泡 composer(桌面默认评论流):pin 即头像,胶囊从它长出,单一表面两行 ── */
-  .pp-anno-composer{position:absolute;z-index:2147482900;width:300px;transform:scale(.4);opacity:0;
-    transition:transform .26s cubic-bezier(.2,1.5,.4,1),opacity .16s ease}
-  .pp-anno-composer.pp-anno-composer-in{transform:scale(1);opacity:1}
-  .pp-anno-composer.pp-anno-composer-seal{transform:scale(.05);opacity:0;
-    transition:transform .22s cubic-bezier(.55,0,.85,.25),opacity .18s ease}
-  .pp-anno-cpill{background:#fff;border-radius:8px 22px 22px 22px;padding:8px 8px 7px 12px;
-    box-shadow:0 12px 36px -10px rgba(17,22,27,.32),0 2px 8px rgba(17,22,27,.1),0 0 0 1px rgba(17,22,27,.045);
-    transition:border-radius .18s ease}
-  .pp-anno-cpill.pp-anno-cpill-multi{border-radius:8px 16px 16px 16px}
-  .pp-anno-cflip .pp-anno-cpill{border-radius:22px 8px 22px 22px}
-  .pp-anno-cflip .pp-anno-cpill.pp-anno-cpill-multi{border-radius:16px 8px 16px 16px}
-  .pp-anno-cmain{display:flex;align-items:flex-end;gap:8px}
-  .pp-anno-cmain textarea{flex:1;min-width:0;border:none;outline:none;background:transparent;resize:none;
-    padding:5px 0 5px;height:30px;max-height:120px;
-    font:500 13.5px/1.5 'Hanken Grotesk',-apple-system,system-ui,sans-serif;color:#11161b}
-  .pp-anno-cmain textarea::placeholder{color:#a6b0ae}
-  .pp-anno-csend{flex:none;border:none;cursor:pointer;display:grid;place-items:center;
-    width:32px;height:32px;border-radius:50%;background:#0f7c72;color:#fff;
-    transition:transform .12s cubic-bezier(.2,.8,.3,1),background .14s,opacity .14s}
-  .pp-anno-csend:hover{background:#0b6358}
-  .pp-anno-csend:active{transform:scale(.92)}
-  .pp-anno-csend:disabled{opacity:.5;cursor:default}
-  .pp-anno-csub{display:flex;align-items:center;gap:2px;margin:1px 0 0 -4px;min-height:22px}
-  .pp-anno-ckind{display:inline-flex;align-items:center;gap:5px;border:none;cursor:pointer;
-    background:transparent;border-radius:999px;padding:4px 6px;
-    font:600 10.5px/1 'Hanken Grotesk',sans-serif;color:#57606a;transition:background .12s ease}
-  .pp-anno-ckind i{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 1px rgba(17,22,27,.06)}
-  .pp-anno-ckind span{max-width:0;overflow:hidden;opacity:0;transition:max-width .18s ease,opacity .14s ease}
-  .pp-anno-ckind:hover span,.pp-anno-ckind.pp-anno-on span{max-width:48px;opacity:1}
-  .pp-anno-ckind:hover{background:#f1f4f3}
-  .pp-anno-ckind.pp-anno-on{background:#e6f4f2;color:#0b6358;box-shadow:inset 0 0 0 1px rgba(15,124,114,.35)}
-  .pp-anno-cname{flex:1;min-width:0}
-  .pp-anno-cname input{width:100%;border:none;outline:none;background:transparent;padding:3px 0;
-    font:600 11.5px/1.3 'Hanken Grotesk',-apple-system,system-ui,sans-serif;color:#11161b;
-    border-bottom:1px solid transparent}
-  .pp-anno-cname input::placeholder{color:#b3bcba;font-weight:500}
-  .pp-anno-cname input:focus{border-bottom-color:rgba(15,124,114,.4)}
-  .pp-anno-livepin{position:absolute;z-index:2147482590;width:28px;height:28px;border-radius:50% 50% 50% 4px;
-    background:#0f7c72;border:2.5px solid #fff;box-shadow:0 3px 10px rgba(11,99,88,.4);
-    display:grid;place-items:center;color:#fff;font:700 12px/1 'Hanken Grotesk',-apple-system,system-ui,sans-serif;
-    transform:translate(-4px,-24px) scale(0);
-    animation:ppLivePop .22s cubic-bezier(.2,1.6,.4,1) forwards,ppBreath 2.2s ease-in-out .3s infinite}
-  @keyframes ppLivePop{to{transform:translate(-4px,-24px) scale(1)}}
-  @keyframes ppBreath{0%,100%{box-shadow:0 3px 10px rgba(11,99,88,.4)}50%{box-shadow:0 3px 16px rgba(11,99,88,.55),0 0 0 5px rgba(61,175,164,.14)}}
   /* ── 评论模式晕影(真实节点,避免与宿主页 html::after 冲突) ── */
   .pp-anno-vignette{position:fixed;inset:0;pointer-events:none;z-index:2147481700;
     box-shadow:inset 0 0 170px 24px rgba(11,99,88,.09);animation:ppVig .7s cubic-bezier(.2,.8,.3,1) both}
@@ -683,10 +638,9 @@
     background:#11161b;transform:rotate(45deg)}
   /* ── 新增件的静态降级 ── */
   @media (prefers-reduced-motion:reduce){
-    .pp-anno-composer,.pp-anno-mtbanner,.pp-anno-mreceipt,.pp-anno-firsthint{transition:none;transform:none;opacity:1}
-    .pp-anno-composer.pp-anno-composer-seal,.pp-anno-mreceipt.pp-anno-mout{opacity:0}
+    .pp-anno-mtbanner,.pp-anno-mreceipt,.pp-anno-firsthint{transition:none;transform:none;opacity:1}
+    .pp-anno-mreceipt.pp-anno-mout{opacity:0}
     .pp-anno-mtbanner{transform:translate(-50%,0)}
-    .pp-anno-livepin{animation:none;transform:translate(-4px,-24px) scale(1)}
     .pp-anno-mripple,.pp-anno-pin.pp-anno-pulse::after{display:none}
     .pp-anno-mstamp,.pp-anno-mfinale .pp-anno-mfc{animation:none;transform:translate(-50%,-50%) scale(1)}
     .pp-anno-mfinale .pp-anno-mfc{transform:scale(1)}
@@ -1008,7 +962,7 @@
     } else {
       for (const { t, a } of ordered) listEl.appendChild(threadCard(t, a));
     }
-    if (state.draft && !state.draft._inline) listEl.appendChild(draftCard());
+    if (state.draft) listEl.appendChild(draftCard());
     drawer.appendChild(listEl);
 
     // hint strip
@@ -1093,7 +1047,7 @@
     } else {
       for (const { t, a } of ordered) sheetListEl.appendChild(threadCard(t, a));
     }
-    if (state.draft && !state.draft._inline) sheetListEl.appendChild(draftCard());
+    if (state.draft) sheetListEl.appendChild(draftCard());
     if (state.focusedId) requestAnimationFrame(() => scrollFocusedCardIntoView());
   }
 
@@ -1151,7 +1105,7 @@
     return b;
   }
 
-  // 访客署名输入（composer 顶部一行；localStorage 预填，发送时存回）
+  // 访客署名输入（草稿卡/回复框顶部一行；localStorage 预填，发送时存回）
   function guestNameInput() {
     const inp = document.createElement('input');
     inp.type = 'text';
@@ -1541,10 +1495,7 @@
     }
     state.draft = d;
     state.focusedId = null;
-    // 桌面元素草稿默认「就地气泡」:点哪儿写哪儿;@page 与锚点节点缺失时回落抽屉草稿
-    const inlineOK = !MOBILE && selector !== PAGE_SELECTOR && mountInlineComposer(d);
-    if (inlineOK) renderDrawer();
-    else if (MOBILE) { setDetent('half'); renderDrawer(); }
+    if (MOBILE) { setDetent('half'); renderDrawer(); }
     else if (!state.railOpen) setRail(true); else renderDrawer();
     render();
     if (MOBILE && selector !== PAGE_SELECTOR) {
@@ -1563,123 +1514,6 @@
     syncFlags();
   }
   const openDraftForPage = () => { if (state.mode === 'comment') exitComment(); openDraftFor(PAGE_SELECTOR, 0, 0); };
-
-  /* ---------------- 就地气泡 composer(桌面默认评论流) ----------------
-   * pin 即头像(首字+头像配色,呼吸待写态),胶囊贴着 pin 生长(朝 pin 侧圆角收小,右缘翻转镜像);
-   * 单一表面两行:主行=输入+圆形发送,次行=kind 彩点(owner)或署名(guest)。发送时胶囊缩回落点,
-   * 真 pin 原位接棒(pulse+环纹)。@page 与节点缺失回落抽屉草稿。 */
-  function mountInlineComposer(d) {
-    let node = null;
-    try { node = document.querySelector(d.selector); } catch (e) { node = null; }
-    if (!node || !layer) return false;
-    const r0 = node.getBoundingClientRect();
-    const ax = r0.left + scrollX + r0.width * d.rx;
-    const ay = r0.top + scrollY + r0.height * d.ry;
-    const whoName = state.viewer ? (state.viewer.name || loadGuestName() || (isGuest() ? tr('badge.guest') : '?')) : '?';
-    const ghost = el('span', 'pp-anno-livepin', initialOf(whoName));
-    ghost.dataset.ppAnno = '1';
-    ghost.style.background = avatarColor(whoName);
-    ghost.style.left = ax + 'px'; ghost.style.top = ay + 'px';
-    layer.appendChild(ghost);
-
-    const box = el('div', 'pp-anno-composer');
-    box.dataset.ppAnno = '1'; box.dataset.ppRole = 'composer';
-    const BW = 300, BH = 84;
-    let bx = ax + 30, by = ay - 33;
-    if (bx + BW > scrollX + innerWidth - 12) { bx = ax - BW - 34; box.classList.add('pp-anno-cflip'); }
-    by = Math.min(Math.max(scrollY + 8, by), scrollY + innerHeight - BH - 12);
-    bx = Math.max(scrollX + 8, bx);
-    box.style.left = bx + 'px'; box.style.top = by + 'px';
-    box.style.transformOrigin = (ax - bx) + 'px ' + (ay - by) + 'px';
-
-    const pill = el('div', 'pp-anno-cpill');
-    const main = el('div', 'pp-anno-cmain');
-    const ta = document.createElement('textarea');
-    ta.rows = 1;
-    ta.placeholder = tr('placeholder.elementNote');
-    const grow = () => {
-      ta.style.height = 'auto';
-      const h = Math.min(120, ta.scrollHeight);
-      ta.style.height = h + 'px';
-      pill.classList.toggle('pp-anno-cpill-multi', h > 30);
-    };
-    ta.oninput = () => { d.text = ta.value; grow(); syncFlags(); };
-    main.appendChild(ta);
-    const send = el('button', 'pp-anno-csend'); send.dataset.ppRole = 'send';
-    send.title = tr('btn.comment');
-    send.appendChild(svg(ICON.arrowR, 14));
-    main.appendChild(send);
-    pill.appendChild(main);
-
-    const sub = el('div', 'pp-anno-csub');
-    let nameInp = null;
-    if (isGuest()) {
-      nameInp = guestNameInput();
-      const nameWrap = el('span', 'pp-anno-cname');
-      nameWrap.appendChild(nameInp);
-      sub.appendChild(nameWrap);
-      nameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); ta.focus(); } };
-    } else {
-      for (const k of KIND_KEYS) {
-        const m = KIND[k];
-        const bch = el('button', 'pp-anno-ckind');
-        bch.dataset.ppKind = k;
-        bch.title = m.label;
-        const dot = el('i'); dot.style.background = m.color;
-        bch.appendChild(dot);
-        bch.appendChild(el('span', '', m.label));
-        bch.onclick = (e) => {
-          e.stopPropagation();
-          d.kind = d.kind === k ? null : k;
-          sub.querySelectorAll('.pp-anno-ckind').forEach((cx) => cx.classList.remove('pp-anno-on'));
-          if (d.kind) bch.classList.add('pp-anno-on');
-        };
-        sub.appendChild(bch);
-      }
-    }
-    pill.appendChild(sub);
-    box.appendChild(pill);
-    layer.appendChild(box);
-    requestAnimationFrame(() => { box.classList.add('pp-anno-composer-in'); ta.focus(); });
-
-    d._inline = true;
-    const prevCleanup = d._cleanup;
-    d._cleanup = () => { if (prevCleanup) prevCleanup(); box.remove(); ghost.remove(); };
-
-    const submit = async () => {
-      const text = ta.value.trim();
-      if (!text) { ta.focus(); return; }
-      send.disabled = true;
-      const anchor_text = fingerprint(node) || null;
-      const payload = {
-        path: CFG.path, selector: d.selector, rx: d.rx, ry: d.ry,
-        rw: d.box ? d.box.rw : null, rh: d.box ? d.box.rh : null, kind: d.kind, anchor_text, text,
-      };
-      if (nameInp) { const nm = nameInp.value.trim(); saveGuestName(nm); payload.author_name = nm || null; }
-      try {
-        const created = await createThread(payload);
-        d._cleanup = prevCleanup || null; // 密封动画期间 box/ghost 自行退场
-        box.classList.add('pp-anno-composer-seal');
-        setTimeout(() => { box.remove(); ghost.remove(); }, 240);
-        state.threads.push(created);
-        if (state.draft && state.draft._cleanup) state.draft._cleanup();
-        state.draft = null;
-        state.focusedId = created.id;
-        renderDrawer();
-        render();
-        const pin = layer.querySelector('.pp-anno-pin[data-tid="' + created.id + '"]');
-        if (pin) pin.classList.add('pp-anno-pulse');
-        syncFlags();
-      } catch (err) { toast(err.message || tr('toast.failed')); send.disabled = false; }
-    };
-    send.onclick = (e) => { e.stopPropagation(); void submit(); };
-    ta.onkeydown = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submit(); }
-      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
-      else if (e.key === 'Escape') { e.preventDefault(); clearDraft(true); renderDrawer(); render(); syncFlags(); }
-    };
-    return true;
-  }
 
   /* ---------------- 循环时刻(克制档):反馈环在眼前闭合 ----------------
    * M1 新版本横幅:轮询发现 site_version 变化(agent 重新部署了);
