@@ -357,6 +357,8 @@ const mdShell = (
   // md-viewer.js 里的本地化文案(TOC 标题 / 复制按钮 / GitHub Alerts 五类标题)
   const strings = JSON.stringify({
     toc: t(locale, 'viewer.md.toc'),
+    pin: t(locale, 'viewer.md.pin'),
+    unpin: t(locale, 'viewer.md.unpin'),
     copy: t(locale, 'viewer.md.copy'),
     copied: t(locale, 'viewer.md.copied'),
     alertNote: t(locale, 'viewer.md.alertNote'),

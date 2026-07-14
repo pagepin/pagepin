@@ -233,7 +233,30 @@
     panel.className = 'pp-md-toc-panel';
     var title = document.createElement('div');
     title.className = 'pp-md-toc-t';
-    title.textContent = str('toc', 'Contents');
+    var tspan = document.createElement('span');
+    tspan.textContent = str('toc', 'Contents');
+    title.appendChild(tspan);
+    // 图钉:固定面板(常驻、条码隐去),localStorage 记偏好,所有 md 页共享
+    var PIN_KEY = 'pp-md-toc-pin';
+    var pinBtn = document.createElement('button');
+    pinBtn.type = 'button';
+    pinBtn.className = 'pp-md-toc-pinbtn';
+    pinBtn.innerHTML =
+      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
+    var setPinned = function (on, save) {
+      nav.classList.toggle('pp-md-pinned', on);
+      pinBtn.title = on ? str('unpin', 'Unpin') : str('pin', 'Pin');
+      pinBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      if (save) { try { localStorage.setItem(PIN_KEY, on ? '1' : ''); } catch (e) { /* 私密模式 */ } }
+    };
+    pinBtn.onclick = function () {
+      var on = !nav.classList.contains('pp-md-pinned');
+      setPinned(on, true);
+      if (!on) pinBtn.blur(); // 取消固定后不让 :focus-within 继续撑住面板
+    };
+    title.appendChild(pinBtn);
     panel.appendChild(title);
     var ol = document.createElement('ol');
     var links = []; // [heading, panelA, railA]
@@ -259,6 +282,9 @@
     nav.appendChild(rail);
     nav.appendChild(panel);
     document.body.appendChild(nav);
+    var pinned = false;
+    try { pinned = localStorage.getItem(PIN_KEY) === '1'; } catch (e) { /* 私密模式 */ }
+    setPinned(pinned, false);
 
     var active = null;
     var spy = function () {

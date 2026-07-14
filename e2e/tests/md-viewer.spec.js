@@ -14,6 +14,8 @@ const CSS = STATIC('md-viewer.css');
 
 const STRINGS = {
   toc: '目录',
+  pin: '固定目录',
+  unpin: '取消固定',
   copy: '复制',
   copied: '已复制',
   alertNote: '注意',
@@ -160,6 +162,24 @@ test('TOC:左缘条码 rail 常驻、面板 hover 才浮出,滚动后 scroll-spy
   });
   await page.waitForTimeout(200);
   await expect(toc.locator('.pp-md-toc-panel a.pp-on')).toHaveText(/第四节/);
+});
+
+test('TOC 图钉:点住常驻(移开不消失)、刷新记住、再点取消', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await setup(page);
+  const toc = page.locator('.pp-md-toc');
+  const panel = toc.locator('.pp-md-toc-panel');
+  await toc.hover();
+  await expect(panel.locator('.pp-md-toc-pinbtn')).toHaveAttribute('title', '固定目录');
+  await panel.locator('.pp-md-toc-pinbtn').click();
+  await page.mouse.move(720, 400); // 移开
+  await expect(panel).toBeVisible(); // 固定后常驻
+  await page.reload(); // localStorage 记住偏好
+  await expect(page.locator('.pp-md-toc-panel')).toBeVisible();
+  await expect(page.locator('.pp-md-toc-pinbtn')).toHaveAttribute('title', '取消固定');
+  await page.locator('.pp-md-toc-pinbtn').click(); // 取消固定
+  await page.mouse.move(720, 400);
+  await expect(page.locator('.pp-md-toc-panel')).not.toBeVisible();
 });
 
 test('TOC:标题不足时不渲染;深色模式:背景切到深色变量', async ({ browser }) => {
