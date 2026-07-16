@@ -143,6 +143,7 @@ export const commentThreads = sqliteTable(
     rh: real('rh'),
     kind: text('kind'), // copy/style/question/bug;null = 普通评论
     anchorText: text('anchor_text'), // 创建时目标元素文本指纹(SPA 换数据降级判定)
+    quote: text('quote'), // 文本选区锚点:选中的原文(≤200);非空 = 文本评论,前端在 selector 元素内检索并高亮
     resolved: integer('resolved', { mode: 'boolean' }).notNull().default(false),
     comments: text('comments', { mode: 'json' }).$type<ThreadComment[]>().notNull(),
     createdAt: text('created_at').notNull(),

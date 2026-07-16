@@ -803,6 +803,7 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         rh: t.rh,
         kind: t.kind,
         anchor_text: t.anchorText,
+        quote: t.quote,
         resolved: t.resolved,
         stale: t.versionId !== site.currentVersionId,
         comments: t.comments.map((cm) => ({

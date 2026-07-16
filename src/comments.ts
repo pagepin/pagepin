@@ -86,6 +86,7 @@ function threadOut(t: CommentThreadRow) {
     rh: t.rh,
     kind: t.kind,
     anchor_text: t.anchorText,
+    quote: t.quote,
     resolved: t.resolved,
     comments: t.comments.map(commentOut),
     created_at: t.createdAt,
@@ -116,6 +117,7 @@ interface ThreadCreateIn {
   rh: number | null;
   kind: string | null;
   anchor_text: string | null;
+  quote: string | null; // 文本选区锚点:选中原文;非空 = 文本评论(高亮/pin 由前端按 quote 检索)
   text: string;
   author_name: string | null; // 仅分享会话访客生效(登录用户一律用账号显示名)
 }
@@ -156,6 +158,12 @@ function parseThreadCreate(raw: unknown): ThreadCreateIn {
   }
   if (anchor !== null && cpLen(anchor) > 200)
     throw new ApiError(422, 'comment.anchorText.tooLong', { max: 200 });
+  const quote = b.quote === undefined || b.quote === null ? null : b.quote;
+  if (quote !== null && typeof quote !== 'string') {
+    throw new ApiError(422, 'comment.quote.notString');
+  }
+  if (quote !== null && (cpLen(quote.trim()) < 2 || cpLen(quote) > 200))
+    throw new ApiError(422, 'comment.quote.length', { min: 2, max: 200 });
   if (typeof b.text !== 'string') throw new ApiError(422, 'comment.text.notString');
   const authorName = b.author_name === undefined || b.author_name === null ? null : b.author_name;
   if (authorName !== null && typeof authorName !== 'string') {
@@ -170,6 +178,7 @@ function parseThreadCreate(raw: unknown): ThreadCreateIn {
     rh: hasRw ? (b.rh as number) : null,
     kind,
     anchor_text: anchor,
+    quote: quote ? quote.trim() : null,
     text: b.text,
     author_name: authorName,
   };
@@ -380,7 +389,13 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         .orderBy(asc(commentThreads.createdAt));
       // site_version:当前版本指针。overlay 轮询据此感知「agent 发布了新版本」(横幅时刻),
       // 也为后续版本级 stale 徽标预留;字段只增不改,老客户端无感。
-      return c.json({ threads: threads.map(threadOut), site_version: site.currentVersionId });
+      // site_version_n:版本序数(1 起),overlay 展示用(site_version 是 UUID,只做变化比对)
+      const vi = site.versions.findIndex((v) => v.id === site.currentVersionId);
+      return c.json({
+        threads: threads.map(threadOut),
+        site_version: site.currentVersionId,
+        site_version_n: vi === -1 ? site.versions.length : vi + 1,
+      });
     }),
   );
 
@@ -420,6 +435,7 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
         rh: body.rh,
         kind: body.kind,
         anchorText: body.anchor_text ? body.anchor_text.trim() : null,
+        quote: body.quote,
         resolved: false,
         comments: [first],
         createdAt: now,

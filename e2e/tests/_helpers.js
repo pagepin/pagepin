@@ -31,7 +31,7 @@ const VIEWER = { sub: 'u-tester', name: '测试者', handle: 'tester' };
 function mkThread(n, selector, extra = {}) {
   return {
     id: `thread-${n}`, page_path: '/', version_id: 'v1',
-    selector, rx: 0.5, ry: 0.5, kind: null, anchor_text: null, resolved: false,
+    selector, rx: 0.5, ry: 0.5, kind: null, anchor_text: null, quote: null, resolved: false,
     comments: [{
       id: `c${n}`, author_sub: 'u-author', author_name: `作者${n}`,
       text: `这是第 ${n} 条评论的内容`, created_at: NOW,
@@ -43,7 +43,7 @@ function mkThread(n, selector, extra = {}) {
 
 /** boxes: [{id,left,top,text?}] → 绝对定位的锚点元素 + 注入脚本的整页 HTML。
  *  height 可选（移动端深链相机测试需要更长的页面才有滚动余量）。 */
-function fixtureHtml(boxes, height = 1300) {
+function fixtureHtml(boxes, height = 1300, versionN = null) {
   const style = boxes.map((b) => `#${b.id}{left:${b.left}px;top:${b.top}px}`).join('');
   const divs = boxes.map((b) => `<div class="box" id="${b.id}">${b.text || b.id}</div>`).join('\n  ');
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8">
@@ -56,7 +56,7 @@ function fixtureHtml(boxes, height = 1300) {
 </style></head><body>
   ${divs}
   <script src="/comments.js" data-handle="alice" data-slug="demo"
-          data-path="/" data-version="v1"></script>
+          data-path="/" data-version="v1"${versionN ? ` data-version-n="${versionN}"` : ''}></script>
 </body></html>`;
 }
 
@@ -120,7 +120,7 @@ async function setup(page, opts = {}) {
       return route.fulfill({
         json: mkThread(n, body.selector, {
           rx: body.rx, ry: body.ry, rw: body.rw ?? null, rh: body.rh ?? null,
-          kind: body.kind, anchor_text: body.anchor_text,
+          kind: body.kind, anchor_text: body.anchor_text, quote: body.quote ?? null,
           comments: [{
             id: `cnew${n}`, author_sub: VIEWER.sub, author_name: VIEWER.name,
             text: body.text, created_at: NOW,
@@ -141,7 +141,7 @@ async function setup(page, opts = {}) {
   await page.route('**/comments.js', (route) =>
     route.fulfill({ contentType: 'application/javascript; charset=utf-8', body: COMMENTS_JS }));
   await page.route('http://pagepin.test/', (route) =>
-    route.fulfill({ contentType: 'text/html; charset=utf-8', body: html || fixtureHtml(boxes) }));
+    route.fulfill({ contentType: 'text/html; charset=utf-8', body: html || fixtureHtml(boxes, opts.height || 1300, opts.versionN || null) }));
 }
 
 // 默认布局：四个锚点都在抽屉左侧（x≤510，不被右侧 320px 抽屉遮挡）、都在首屏内（top≤450）、互不重叠。
@@ -151,8 +151,8 @@ const DEFAULT_BOXES = [
 ];
 
 // 常用定位器（与 Lumen 桌面模型的稳定 data-pp-* 钩子对齐）
-const pin = (page, n) =>
-  page.locator('.pp-anno-pin').filter({ hasText: new RegExp(`^\\s*${n}\\s*$`) });
+// pin 文本是首评作者缩写(设计稿 p.label),编号走 data-pp-num 钩子
+const pin = (page, n) => page.locator(`.pp-anno-pin[data-pp-num="${n}"]`);
 // drawer 别名 → 托盘（列表面）；tab 别名 → 坞（收起态入口）；dockCount → 坞计数钮
 const drawer = (page) => page.locator('[data-pp-role="tray"]');
 const tray = (page) => page.locator('[data-pp-role="tray"]');

@@ -19,7 +19,8 @@ test.beforeEach(async ({ page }) => {
 
 test('只有 ok 锚点渲染 pin（@page / lost / changed 都不渲染）', async ({ page }) => {
   await expect(page.locator('.pp-anno-pin')).toHaveCount(1);
-  await expect(page.locator('.pp-anno-pin')).toHaveText('1');
+  await expect(page.locator('.pp-anno-pin')).toHaveAttribute('data-pp-num', '1');
+  await expect(page.locator('.pp-anno-pin')).toHaveText('作'); // 首评作者缩写(设计稿 p.label)
 });
 
 test('抽屉列出降级项并标注状态（四条都不丢）', async ({ page }) => {

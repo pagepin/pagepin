@@ -106,6 +106,7 @@ export function buildSchema(kit: ColumnKit) {
       rh: real('rh'),
       kind: str('kind', 16),
       anchorText: longStr('anchor_text'),
+      quote: longStr('quote'),
       resolved: bool('resolved').notNull().default(false),
       comments: json('comments').notNull(),
       createdAt: str('created_at', 40).notNull(),

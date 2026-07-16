@@ -58,6 +58,7 @@
     slug: script.dataset.slug,
     path: script.dataset.path,
     version: script.dataset.version,
+    versionN: parseInt(script.dataset.versionN || '', 10) || null, // 版本序数(1 起,展示用;version 是 UUID 只做比对)
     lang: script.dataset.lang,
     // Lumen 配置位（部署可通过 script data-* 覆盖；默认见下）
     glass: script.dataset.glass !== 'false', // 玻璃面（false=纯色降级，X5 WebView）
@@ -65,6 +66,8 @@
     armed: script.dataset.armed === 'true', // 默认进入评论模式
   };
   if (!CFG.handle || !CFG.slug || !CFG.path) return;
+  let versionN = CFG.versionN; // 轮询响应 site_version_n 会刷新(发布后横幅要显示新序数)
+  const verLabel = () => (versionN ? 'v' + versionN : '');
 
   /* ---------------- i18n（en 默认；data-lang 或 navigator.language 选 zh） ---------------- */
   const LANG = CFG.lang === 'zh' ? 'zh'
@@ -89,7 +92,7 @@
       'action.deleteConfirm': 'Delete?',
       'meta.openTotal': '{open} open · {total} total',
       'meta.noComments': 'No comments yet',
-      'filter.open': 'Open {open}',
+      'filter.open': 'Open',
       'filter.all': 'All',
       'btn.comment': 'Comment',
       'moment.verTitle': '{v} published',
@@ -114,7 +117,7 @@
       'hint.resolve': 'resolve',
       'hint.hide': 'hide',
       'hint.enterReply': 'Enter to reply',
-      'hint.aim': 'Click an element to comment · drag on an image to box a region · Esc to exit',
+      'hint.aim': 'Click an element or select text to comment · drag on an image to box a region · Esc to exit',
       'aria.openDrawerUnresolved': 'Open review drawer ({open} unresolved)',
       'aria.openDrawerResolved': 'Open review drawer (all resolved)',
       'banner.resolved': 'Resolved',
@@ -144,6 +147,7 @@
       'card.lostKept': 'anchor lost · comment kept',
       'badge.lost': 'anchor lost',
       'card.resolvedAt': 'Resolved · at {v}',
+      'card.resolved': 'Resolved',
       'hint.close': 'close',
       'banner.staleReview': 'Review stale comments',
       'banner.later': 'Later',
@@ -152,6 +156,7 @@
       'seal.body': 'all {n} comments this round are resolved',
       'seal.continue': 'Click anywhere to continue',
       'draft.publish': 'Publish',
+      'draft.textAnchor': 'Text anchor',
       'placeholder.comment': 'comment here…',
       'placeholder.guestName': 'Your name (optional)',
       'fab.note': 'Note',
@@ -180,7 +185,7 @@
       'action.deleteConfirm': '确认删除？',
       'meta.openTotal': '{open} 条未解决 · 共 {total} 条',
       'meta.noComments': '暂无评论',
-      'filter.open': '未解决 {open}',
+      'filter.open': '未解决',
       'filter.all': '全部',
       'btn.comment': '评论',
       'moment.verTitle': '{v} 已发布',
@@ -205,7 +210,7 @@
       'hint.resolve': '解决',
       'hint.hide': '隐藏',
       'hint.enterReply': '回车发送回复',
-      'hint.aim': '点击一个元素来评论 · 在图片上拖拽框选区域 · 按 Esc 退出',
+      'hint.aim': '点击元素或选中文字来评论 · 在图片上拖拽框选区域 · 按 Esc 退出',
       'aria.openDrawerUnresolved': '打开评审抽屉（{open} 条未解决）',
       'aria.openDrawerResolved': '打开评审抽屉（全部已解决）',
       'banner.resolved': '已解决',
@@ -235,6 +240,7 @@
       'card.lostKept': '锚点丢失 · 评论仍保留',
       'badge.lost': '锚点丢失',
       'card.resolvedAt': '已解决 · 于 {v}',
+      'card.resolved': '已解决',
       'hint.close': '关闭',
       'banner.staleReview': '巡检过期评论',
       'banner.later': '稍后',
@@ -243,6 +249,7 @@
       'seal.body': '本轮评审的 {n} 条评论已全部解决',
       'seal.continue': '点击任意处继续',
       'draft.publish': '发布',
+      'draft.textAnchor': '文本锚点',
       'placeholder.comment': '评论这里…',
       'placeholder.guestName': '你的名字（可选）',
       'fab.note': '留言',
@@ -450,6 +457,9 @@
   .pp-anno-pin.pp-anno-current{transform:translate(-4px,-24px) scale(1.16);z-index:2147482650;box-shadow:0 0 0 4px rgba(20,149,138,.2),0 3px 8px rgba(0,0,0,.28)}
   .pp-anno-pin.pp-anno-current:hover{transform:translate(-4px,-24px) scale(1.16)}
   .pp-anno-region{position:absolute;z-index:2147481900;border:2px solid;border-radius:5px;pointer-events:none;box-sizing:border-box}
+  /* 文本锚点高亮条(quote 命中行;桌面 render 内联开 pointer-events) */
+  .pp-anno-hlrect{position:absolute;z-index:2147481900;border-radius:2px;pointer-events:none;box-sizing:border-box;transition:background .18s}
+  .pp-anno-hlrect.pp-anno-resolved{opacity:.6}
   .pp-anno-region.pp-anno-resolved{opacity:.35;filter:saturate(.3)}
   /* 桌面 box 区域 = Lumen highlight（底部 2px line；可点=聚焦线程）——移动端保持原全框，勿改 */
   .pp-anno-root:not(.pp-anno-mobile) .pp-anno-region{border:none;border-bottom:2px solid;border-radius:2px;transition:background .18s}
@@ -563,7 +573,7 @@
   .pp-anno-aimbox{position:absolute;z-index:2147482400;pointer-events:none;border:1.5px dashed #14958a;border-radius:8px;background:rgba(20,149,138,.08);box-sizing:border-box}
   .pp-anno-aimchip{position:fixed;left:50%;transform:translateX(-50%);z-index:2147482950;display:flex;align-items:center;gap:8px;background:rgba(17,22,27,.95);color:#fff;border-radius:12px;padding:8px 8px 8px 14px;font:600 12.5px/1.35 ${LUM_SANS};box-shadow:0 12px 30px -10px rgba(17,22,27,.6);animation:ppPop .2s;max-width:calc(100vw - 24px)}
   .pp-anno-aimchip button{flex:none;border:none;cursor:pointer;border-radius:9px;background:rgba(255,255,255,.16);color:#fff;font:700 11.5px/1 ${LUM_SANS};padding:0 12px;min-height:40px}
-  .pp-anno-aim .pp-anno-pin,.pp-anno-aim .pp-anno-region,.pp-anno-aim .pp-anno-glow{display:none}
+  .pp-anno-aim .pp-anno-pin,.pp-anno-aim .pp-anno-region,.pp-anno-aim .pp-anno-hlrect,.pp-anno-aim .pp-anno-glow{display:none}
   /* 移动端触控目标放大（≥40px）+ iOS 聚焦输入不自动缩放（字号 ≥16px） */
   .pp-anno-mobile .pp-anno-pin::after{content:"";position:absolute;left:-8px;top:-8px;right:-8px;bottom:-8px;border-radius:50%}
   .pp-anno-mobile .pp-anno-card-bd{padding:11px 12px 11px 14px}
@@ -728,6 +738,9 @@
   .pp-anno-pop .pp-anno-resolved-banner{display:flex;align-items:center;gap:6px;margin:8px 14px 0;border-radius:10px;background:rgba(230,244,242,.85);padding:6px 10px;font:700 11.5px/1 ${LUM_SANS};text-transform:none;letter-spacing:0;color:#0b6358}
   .pp-anno-pop-reopen{margin-left:auto;border:1px solid #bfe5df;background:rgba(255,255,255,.85);border-radius:999px;padding:2px 10px;font:600 10.5px/1 ${LUM_SANS};color:#0b6358;cursor:pointer}
   .pp-anno-pop-resolve{display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid rgba(17,22,27,.12);background:rgba(255,255,255,.7);border-radius:10px;padding:8px 0;font:600 12px/1 ${LUM_SANS};color:#4b535c;cursor:pointer;width:100%}
+  .pp-anno-pop-delbtn{display:flex;align-items:center;justify-content:center;gap:6px;border:none;background:transparent;border-radius:10px;padding:5px 0;font:600 11px/1 ${LUM_SANS};color:#b3b9bf;cursor:pointer}
+  .pp-anno-pop-delbtn:hover{color:#b3423a;background:rgba(179,66,58,.06)}
+  .pp-anno-pop-delbtn.pp-anno-armed{color:#b3423a}
   .pp-anno-pop-resolve:hover{border-color:#0f7c72;color:#0f7c72}
   /* popover 内回复框：把共享 .pp-anno-replyarea/.pp-anno-ta-wrap 收进 Lumen 皮 */
   .pp-anno-pop .pp-anno-replyarea{margin:0}
@@ -743,6 +756,7 @@
   .pp-anno-dbubble-row{display:flex;align-items:flex-start;gap:8px}
   .pp-anno-dbubble textarea{flex:1;resize:none;border:none;background:transparent;font:400 13.5px/1.55 ${LUM_SANS};color:#11161b;outline:none;max-height:140px;overflow-y:auto;min-height:38px}
   .pp-anno-dbubble-foot{display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px}
+  .pp-anno-dbubble-quote{font-size:11.5px;color:#0b6358;background:rgba(230,244,242,.8);border-radius:8px;padding:5px 9px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pp-anno-dbubble-sel{font:400 10.5px/1.3 ${LUM_MONO};color:#9aa1a9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pp-anno-dbubble-acts{display:flex;align-items:center;gap:6px;flex:none}
   .pp-anno-dbubble-cancel{border:none;background:transparent;font-size:12px;color:#9aa1a9;cursor:pointer;padding:6px 8px}
@@ -927,6 +941,28 @@
   const isPage = (t) => t.selector === PAGE_SELECTOR;
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
   const fingerprint = (node) => norm(node.textContent).slice(0, 80);
+  // 文本选区锚点(设计稿 _findQuote 移植):在宿主元素文本流里检索 quote 原文,返回 Range;找不到 → null
+  function findQuoteRange(rootEl, quote) {
+    const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT);
+    const nodes = []; let all = '';
+    let nd;
+    while ((nd = walker.nextNode())) { nodes.push({ node: nd, start: all.length }); all += nd.nodeValue; }
+    const i = all.indexOf(quote);
+    if (i < 0) return null;
+    const locate = (pos) => {
+      for (let k = nodes.length - 1; k >= 0; k--) if (nodes[k].start <= pos) return { node: nodes[k].node, off: pos - nodes[k].start };
+      return null;
+    };
+    const qs = locate(i), qe = locate(i + quote.length);
+    if (!qs || !qe) return null;
+    const r = document.createRange();
+    try { r.setStart(qs.node, qs.off); r.setEnd(qe.node, qe.off); } catch (err) { return null; }
+    return r;
+  }
+  const quoteClientRects = (rootEl, quote) => {
+    const r = findQuoteRange(rootEl, quote);
+    return r ? Array.prototype.slice.call(r.getClientRects()).filter((x) => x.width > 0) : null;
+  };
   function pointVisible(node, cx, cy) {
     let n = node.parentElement;
     while (n && n !== document.body) {
@@ -944,6 +980,16 @@
     let node = null;
     try { node = document.querySelector(t.selector); } catch (e) { /* 非法选择器 */ }
     if (!node) return { status: 'lost', el: null, pos: null };
+    if (t.quote) {
+      // 文本锚点:quote 在宿主内检索;找不到 = 原文已改(锚点丢失口径),不再看元素指纹
+      const rects = quoteClientRects(node, t.quote);
+      if (!rects || !rects.length) return { status: 'changed', el: node, pos: null };
+      const last = rects[rects.length - 1];
+      const vx = last.right + 12, vy = last.top - 2; // pin 挂在最后一行末尾(设计稿 pinPos)
+      const qpos = { x: vx + scrollX, y: vy + scrollY };
+      if (!pointVisible(node, vx, vy)) return { status: 'clipped', el: node, pos: qpos, rects };
+      return { status: 'ok', el: node, pos: qpos, rects };
+    }
     if (t.anchor_text && fingerprint(node) !== t.anchor_text) return { status: 'changed', el: node, pos: null };
     const r = node.getBoundingClientRect();
     const vx = r.left + r.width * t.rx, vy = r.top + r.height * t.ry;
@@ -972,7 +1018,7 @@
   /* ---------------- 渲染 pin / region / 发光环（保留几何） ---------------- */
   function render() {
     if (!layer) return;
-    layer.querySelectorAll('.pp-anno-pin, .pp-anno-region, .pp-anno-glow').forEach((n) => n.remove());
+    layer.querySelectorAll('.pp-anno-pin, .pp-anno-region, .pp-anno-hlrect, .pp-anno-glow').forEach((n) => n.remove());
     const ordered = orderedVisible();
     let n = 0;
     let focusedRect = null;
@@ -1001,6 +1047,23 @@
         if (!MOBILE) { reg.style.pointerEvents = 'auto'; reg.style.cursor = 'pointer'; reg.onclick = (e) => { e.stopPropagation(); focusThread(t.id, true); }; }
         layer.appendChild(reg);
       }
+      // 文本锚点:quote 命中行画高亮条(底 2px line;桌面可点聚焦)
+      if (t.quote && a.rects) {
+        const mix = t.resolved ? 13 : (focused ? 22 : 12);
+        for (const hr of a.rects) {
+          const hl = el('span', 'pp-anno-hlrect' + (t.resolved ? ' pp-anno-resolved' : ''));
+          hl.dataset.ppAnno = '1';
+          hl.dataset.tid = t.id;
+          hl.style.background = 'color-mix(in srgb, ' + col + ' ' + mix + '%, transparent)';
+          hl.style.borderBottom = '2px solid ' + (t.resolved ? '#c9cdd2' : col);
+          hl.style.left = (hr.left + scrollX) + 'px';
+          hl.style.top = (hr.top + scrollY) + 'px';
+          hl.style.width = hr.width + 'px';
+          hl.style.height = hr.height + 'px';
+          if (!MOBILE) { hl.style.pointerEvents = 'auto'; hl.style.cursor = 'pointer'; hl.onclick = (e) => { e.stopPropagation(); focusThread(t.id, true); }; }
+          layer.appendChild(hl);
+        }
+      }
       const pin = el('div', 'pp-anno-pin' + (t.resolved ? ' pp-anno-resolved' : '')
         + (state.focusedId === t.id ? ' pp-anno-current' : ''));
       pin.dataset.ppAnno = '1';
@@ -1010,8 +1073,10 @@
       pin.style.top = pos.y + 'px';
       pin.style.background = col;
       if (focused) pin.style.setProperty('--pp-ring', col); // 呼吸环取 kindColor
+      pin.dataset.ppNum = String(n);
+      pin.title = t.quote ? '\u201c' + t.quote + '\u201d' : t.selector;
       if (t.resolved) { pin.textContent = ''; pin.appendChild(svg(ICON.check, 13)); }
-      else pin.textContent = String(n);
+      else pin.textContent = initialOf(t.comments[0] && t.comments[0].author_name); // 首评作者缩写(设计稿 p.label)
       pin.onclick = (e) => { e.stopPropagation(); focusThread(t.id, true); };
       layer.appendChild(pin);
       if (state.focusedId === t.id && !t.resolved && a.el) focusedRect = a.el.getBoundingClientRect();
@@ -1150,7 +1215,7 @@
     brand.appendChild(el('span', 'pp-anno-dock-dot'));
     brand.appendChild(document.createTextNode('pagepin'));
     hd.appendChild(brand);
-    if (CFG.version) hd.appendChild(el('span', 'pp-anno-tray-ver', CFG.version));
+    if (verLabel()) hd.appendChild(el('span', 'pp-anno-tray-ver', verLabel()));
     hd.appendChild(el('span', 'pp-anno-tray-open', total ? tr('meta.openTotal', { open, total }) : tr('meta.noComments')));
     const wbtn = el('button', 'pp-anno-wbtn'); wbtn.dataset.ppAct = 'whole'; wbtn.title = tr('action.notePage');
     wbtn.style.marginLeft = 'auto';
@@ -1202,12 +1267,14 @@
     if (isPage(t)) n.textContent = '¶';
     else if (stale) n.textContent = '!';
     else if (t.resolved) n.appendChild(svg(ICON.check, 11));
-    else n.textContent = t._num != null ? String(t._num) : '·';
+    else n.textContent = initialOf(t.comments[0] && t.comments[0].author_name); // 首评作者缩写(设计稿 ti.n)
     row.appendChild(n);
 
     const bd = el('span', 'pp-anno-trow-bd');
     const l1 = el('span', 'pp-anno-trow-l1');
-    const lab = el('span', 'pp-anno-trow-lab', isPage(t) ? '@page' : '#' + anchorLabel(t.selector));
+    const lab = el('span', 'pp-anno-trow-lab', isPage(t) ? '@page'
+      : t.quote ? '\u201c' + (t.quote.length > 22 ? t.quote.slice(0, 22) + '\u2026' : t.quote) + '\u201d'
+      : '#' + anchorLabel(t.selector));
     lab.style.color = t.resolved ? '#9aa1a9' : '#0b6358';
     l1.appendChild(lab);
     if (isGuestSub(t.comments[0].author_sub)) l1.appendChild(guestBadge());
@@ -1276,14 +1343,14 @@
 
     // 头部
     const hd = el('div', 'pp-anno-pop-hd');
-    hd.appendChild(el('span', 'pp-anno-pop-sel', isPage(t) ? '@page' : '#' + anchorLabel(t.selector)));
+    hd.appendChild(el('span', 'pp-anno-pop-sel', isPage(t) ? '@page'
+      : t.quote ? '\u201c' + t.quote + '\u201d' : '#' + anchorLabel(t.selector)));
     if (stale) hd.appendChild(el('span', 'pp-anno-badge-lost', tr('badge.lost')));
-    const ov = orderedVisible();
-    const okCount = ov.filter((x) => x.a.status === 'ok').length;
-    const posLabel = t._num != null ? tr('card.pos', { n: t._num, total: okCount }) : '—';
+    // x/x 按文档序实时算(不依赖 render() 的 _num,新建线程立即有编号)
+    const oks = orderedVisible().filter((x) => x.a.status === 'ok');
+    const oi = oks.findIndex((x) => x.t.id === t.id);
+    const posLabel = oi !== -1 ? tr('card.pos', { n: oi + 1, total: oks.length }) : '\u2014';
     hd.appendChild(el('span', 'pp-anno-pop-pos', posLabel));
-    const mine = state.viewer && t.comments[0].author_sub === state.viewer.sub;
-    if (mine) { const db = deleteBtn(t); db.className = 'pp-anno-pop-ib pp-anno-del'; hd.appendChild(db); }
     const copy = el('button', 'pp-anno-pop-ib'); copy.dataset.ppRole = 'copy-link'; copy.title = tr('action.copyLink');
     copy.appendChild(svg(ICON.link, 13));
     copy.onclick = (e) => { e.stopPropagation(); copyThreadLink(t); };
@@ -1298,7 +1365,7 @@
     if (t.resolved) {
       const banner = el('div', 'pp-anno-resolved-banner');
       banner.appendChild(svg(ICON.check, 12));
-      banner.appendChild(document.createTextNode(tr('card.resolvedAt', { v: CFG.version || '' })));
+      banner.appendChild(document.createTextNode(verLabel() ? tr('card.resolvedAt', { v: verLabel() }) : tr('card.resolved')));
       if (!isGuest()) {
         const reopen = el('button', 'pp-anno-pop-reopen'); reopen.dataset.ppRole = 'reopen';
         reopen.textContent = tr('btn.reopen');
@@ -1337,6 +1404,9 @@
       rb.onclick = (e) => { e.stopPropagation(); void doResolve(t.id); };
       ft.appendChild(rb);
     }
+    // 删除(仅自己的线程):安静地放在底部,不占头部(设计稿头部只有 选择器/徽章/x-x/复制/关闭)
+    const mine = state.viewer && t.comments[0].author_sub === state.viewer.sub;
+    if (mine) { const db = deleteBtn(t); db.className = 'pp-anno-pop-delbtn'; ft.appendChild(db); }
     pop.appendChild(ft);
 
     if (popEl) popEl.remove();
@@ -1357,6 +1427,12 @@
 
     const nameInp = isGuest() ? guestNameInput() : null;
     if (nameInp) bubble.appendChild(nameInp);
+
+    // 文本锚点:引文条(设计稿 draftQuote,34 字截断)
+    if (d.quote) {
+      const q = d.quote.length > 34 ? d.quote.slice(0, 34) + '\u2026' : d.quote;
+      bubble.appendChild(el('div', 'pp-anno-dbubble-quote', '\u201c' + q + '\u201d'));
+    }
 
     const row = el('div', 'pp-anno-dbubble-row');
     row.appendChild(avatar(state.viewer ? (state.viewer.name || loadGuestName() || '?') : '?', 26));
@@ -1390,7 +1466,8 @@
 
     // 脚：选择器标签 · 版本 + 取消 / 发布
     const foot = el('div', 'pp-anno-dbubble-foot');
-    const selTxt = (d.selector === PAGE_SELECTOR ? '@page' : d.selector) + (CFG.version ? ' · ' + CFG.version : '');
+    const selBase = d.selector === PAGE_SELECTOR ? '@page' : (d.quote ? tr('draft.textAnchor') : d.selector);
+    const selTxt = selBase + (verLabel() ? ' · ' + verLabel() : '');
     foot.appendChild(el('span', 'pp-anno-dbubble-sel', selTxt));
     const acts = el('div', 'pp-anno-dbubble-acts');
     const cancel = el('button', 'pp-anno-dbubble-cancel', tr('btn.cancel'));
@@ -1412,7 +1489,8 @@
         const anchor_text = node ? (fingerprint(node) || null) : null;
         const payload = {
           path: CFG.path, selector: d.selector, rx: d.rx, ry: d.ry,
-          rw: d.box ? d.box.rw : null, rh: d.box ? d.box.rh : null, kind: d.kind, anchor_text, text,
+          rw: d.box ? d.box.rw : null, rh: d.box ? d.box.rh : null, kind: d.kind, anchor_text,
+          quote: d.quote || null, text,
         };
         if (nameInp) { const nm = nameInp.value.trim(); saveGuestName(nm); payload.author_name = nm || null; }
         const created = await createThread(payload);
@@ -1448,8 +1526,8 @@
     if (!p) return;
     const h = el('div', 'pp-anno-halo');
     h.dataset.ppAnno = '1';
-    h.style.left = p.x + 'px';
-    h.style.top = (p.y - 14) + 'px';
+    h.style.left = (p.x + 10) + 'px'; // pin 盒 translate(-4,-24) 28px → 视觉中心 (x+10, y-10)
+    h.style.top = (p.y - 10) + 'px';
     h.style.borderColor = kindColor(t);
     layer.appendChild(h);
     setTimeout(() => h.remove(), 700);
@@ -2004,12 +2082,12 @@
     state.draft = null;
     return true;
   }
-  function openDraftFor(selector, rx, ry, box) {
+  function openDraftFor(selector, rx, ry, box, quote) {
     if (!clearDraft()) return; // 已有未发草稿：拦截
     // 桌面：不退出评论模式 —— 保留十字光标以便连续打点，并让评论模式下的「点空白关空草稿」两步式继续生效。
     // 移动（Tideline）：打完点即退出 AIM（压暗/点亮框/指令条撤掉），草稿落进 sheet。
     if (MOBILE && state.mode === 'comment') { state.mode = 'rest'; teardownAim(); }
-    const d = { selector, rx: rx == null ? 0.5 : rx, ry: ry == null ? 0.5 : ry, box: box || null, kind: null, text: '' };
+    const d = { selector, rx: rx == null ? 0.5 : rx, ry: ry == null ? 0.5 : ry, box: box || null, quote: quote || null, kind: null, text: '' };
     // box-select：在页面上画持久预览框 + 提供随滚动重摆的几何
     if (box && selector !== PAGE_SELECTOR) {
       let node = null;
@@ -2054,7 +2132,10 @@
   function momentSeed(v) { if (v) moments.lastVersion = v; }
   function momentOnFetch(data, oldThreads) {
     if (data && data.site_version) {
-      if (moments.lastVersion && data.site_version !== moments.lastVersion) momentBanner(data.site_version);
+      if (data.site_version_n) versionN = data.site_version_n; // 先刷序数,横幅显示新版本号
+      if (moments.lastVersion && data.site_version !== moments.lastVersion) {
+        momentBanner(verLabel() || data.site_version.slice(0, 7));
+      }
       moments.lastVersion = data.site_version;
     }
     moments.pendingFixed = (data.threads || [])
@@ -2455,7 +2536,7 @@
     state.mode === 'comment' && !state.draft &&
     !(e.target.closest && e.target.closest('[data-pp-anno]'));
   document.addEventListener('dragstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
-  document.addEventListener('selectstart', (e) => { if (modeArmed(e)) e.preventDefault(); }, true);
+  // (设计稿 onPageMouseUp)评论模式允许选字 —— 选区在 click(mouseup 后)被 quoteSelectionDraft 消费
 
   /* ---------------- 图片框选（Pointer Events：鼠标/触屏/笔同一路径，几何保留；GROWTH-PLAN A4） ----------------
    * 触屏前提：评论/AIM 模式下 img 的 touch-action:none（见 STYLE），拖动才走 pointermove 而不是滚页。
@@ -2517,6 +2598,28 @@
     addEventListener('pointercancel', onCancel);
   }, true);
 
+  // 评论模式 click 带着未塌缩选区 → 文本锚点草稿(设计稿 onPageMouseUp 移植);消费了返回 true
+  function quoteSelectionDraft() {
+    let sel = null;
+    try { sel = window.getSelection(); } catch (e) { return false; }
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+    const quote = sel.toString().trim();
+    if (quote.length < 2 || quote.length > 200) return false;
+    const range = sel.getRangeAt(0);
+    let host = range.commonAncestorContainer;
+    host = host.nodeType === 1 ? host : host.parentElement;
+    if (!host || (host.closest && host.closest('[data-pp-anno]'))) return false;
+    if (!findQuoteRange(host, quote)) return false; // 跨块选区拼不回连续原文 → 退回点评论
+    const rects = range.getClientRects();
+    const last = rects[rects.length - 1];
+    const hr = host.getBoundingClientRect();
+    if (!last || !hr.width || !hr.height) return false;
+    const cl = (v) => Math.min(1, Math.max(0, v));
+    sel.removeAllRanges();
+    openDraftFor(cssPath(host), cl((last.right - hr.left) / hr.width), cl((last.top - hr.top) / hr.height), null, quote);
+    return true;
+  }
+
   function composeAt(e) {
     const node = e.target;
     const r = node.getBoundingClientRect();
@@ -2541,6 +2644,7 @@
       e.stopPropagation();
       // 已有草稿开着：⌥/⌘ 是明确意图直接换锚点；否则这次点击只收掉草稿
       // （空稿关；有稿则 clearDraft 抖动并返回 false → 不重建，保住 textarea 焦点与光标）
+      if (quoteSelectionDraft()) return; // 带着选区的 mouseup → 文本锚点草稿
       if (state.draft && !e.altKey && !e.metaKey) { if (clearDraft()) { renderDrawer(); render(); syncFlags(); } return; }
       composeAt(e);
       return;

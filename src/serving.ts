@@ -93,11 +93,18 @@ const FAVICON_ICO = decodeB64(FAVICON_ICO_B64);
 const OG_CARD_EN = decodeB64(OG_CARD_EN_B64);
 const OG_CARD_ZH = decodeB64(OG_CARD_ZH_B64);
 
+/** 版本序数(1 起):当前版本在 versions 追加数组中的位置。找不到时(理论不该发生)按最新算。 */
+function versionOrdinal(site: { versions: { id: string }[] }, versionId: string): number {
+  const i = site.versions.findIndex((v) => v.id === versionId);
+  return i === -1 ? site.versions.length : i + 1;
+}
+
 function injectTag(
   handle: string,
   slug: string,
   rel: string,
   versionId: string,
+  versionN: number, // 当前版本在 versions 数组中的序数(1 起);展示用,比对仍用 version id
   locale: Locale,
 ): string {
   const attrs = (
@@ -106,6 +113,7 @@ function injectTag(
       ['slug', slug],
       ['path', rel],
       ['version', versionId],
+      ['version-n', String(versionN)],
       ['lang', locale],
     ] as const
   )
@@ -926,7 +934,9 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     const acceptHtml = (c.req.header('accept') ?? '').includes('text/html');
     const fname = rel.split('/').pop() ?? rel;
     const ext = fname.includes('.') ? '.' + fname.split('.').pop()!.toLowerCase() : '';
-    const injectHtml = canInject ? injectTag(handle, slug, rel, cur.id, locale) : '';
+    const injectHtml = canInject
+      ? injectTag(handle, slug, rel, cur.id, versionOrdinal(site, cur.id), locale)
+      : '';
     // 查看器壳(md/图片)同样带试用缎带:试用 drop 的 .md 页也要倒计时 + 引导注册
     const shellInject = isTrial
       ? trialRibbonHtml(locale, site.expiresAt!, `${consoleBase(cfg)}/signup`, now) + injectHtml
@@ -1046,7 +1056,8 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     if (htmlHit && isTrial) {
       tag += trialRibbonHtml(locale, site.expiresAt!, `${consoleBase(cfg)}/signup`, now);
     }
-    if (htmlHit && canInject) tag += injectTag(handle, slug, hit, cur.id, locale);
+    if (htmlHit && canInject)
+      tag += injectTag(handle, slug, hit, cur.id, versionOrdinal(site, cur.id), locale);
     const smallHtml = htmlHit && (meta.contentLength ?? 0) <= INJECT_MAX_BYTES;
     // ≤5MB HTML:整读 + 字节级注入(插到 </head> 前,跨运行时一致,保非 UTF-8/BOM 原样)。
     // 公开站即使没有评论/试用注入,也补一段 og 卡图 meta(缩略图),让分享有卡片;
