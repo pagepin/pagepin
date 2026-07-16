@@ -75,10 +75,52 @@
     // 匿名试用(官网 drop-zone 的后端)。硬前提:双域(本文件已是)+ Turnstile 两把 key 都配齐,
     // 否则 loadConfig 抛错、Worker 起不来(见 config.ts 守卫)——单域下匿名 HTML 同源可接管账号。
     "PAGEPIN_TRIAL": "true"
-  }
+  },
 
   // secrets(wrangler secret put):PAGEPIN_SECRET、PAGEPIN_ADMIN_EMAIL、PAGEPIN_ADMIN_PASSWORD、PAGEPIN_OIDC_CLIENT_SECRET、
   //   PAGEPIN_OAUTH_GOOGLE_CLIENT_SECRET、PAGEPIN_OAUTH_GITHUB_CLIENT_SECRET、
   //   PAGEPIN_TURNSTILE_SITE_KEY、PAGEPIN_TURNSTILE_SECRET_KEY(PAGEPIN_TRIAL=true 时必需)
   // custom domains:pagepin.ai(控制台/API)、pagepin.page(内容)绑同一 Worker(dashboard 或 routes)。
+
+  // ---- beta 测试环境(pagepin-beta):独立 D1/R2/域名,与生产零共享 ----
+  // 部署:pnpm cf:deploy:beta(迁移打在 pagepin-beta 库上,生产不动)。
+  // 登录仅 password(社交回调没配 beta 域);试用/邮件均关;朋友测试走 share link 免注册。
+  // secrets(--env beta 独立一套):PAGEPIN_SECRET、PAGEPIN_ADMIN_EMAIL、PAGEPIN_ADMIN_PASSWORD。
+  "env": {
+    "beta": {
+      "workers_dev": false,
+      "observability": {
+        "logs": { "enabled": true, "head_sampling_rate": 1 },
+        "traces": { "enabled": true, "head_sampling_rate": 1 }
+      },
+      "upload_source_maps": true,
+      "assets": {
+        "directory": "./console/dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": true
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "pagepin-beta",
+          "database_id": "9cff9d05-8c79-4423-9f09-b1cc1c522808",
+          "migrations_dir": "drizzle"
+        }
+      ],
+      "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "pagepin-beta" }],
+      "routes": [
+        { "pattern": "beta.pagepin.ai", "custom_domain": true },
+        { "pattern": "beta.pagepin.page", "custom_domain": true }
+      ],
+      "vars": {
+        "PAGEPIN_BASE_URL": "https://beta.pagepin.ai",
+        "PAGEPIN_CONSOLE_HOST": "beta.pagepin.ai",
+        "PAGEPIN_CONTENT_HOST": "beta.pagepin.page",
+        "PAGEPIN_EXTERNAL_SCHEME": "https",
+        "PAGEPIN_AUTH_MODE": "password",
+        "PAGEPIN_ALLOW_SIGNUP": "false"
+      }
+    }
+  }
 }

@@ -27,6 +27,8 @@
     "gen:migrations:mysql": "node --import tsx ./node_modules/drizzle-kit/bin.cjs generate --config drizzle.config.mysql.ts",
     "cf:dev": "pnpm gen:assets && wrangler dev",
     "cf:deploy": "pnpm gen:assets && wrangler d1 migrations apply pagepin --remote && wrangler deploy",
+
+    "cf:deploy:beta": "pnpm gen:assets && wrangler d1 migrations apply pagepin-beta --env beta --remote && wrangler deploy --env beta",
     "lint": "eslint . && prettier --check \"{src,test,scripts}/**/*.{ts,mjs}\"",
     "format": "prettier --write \"{src,test,scripts}/**/*.{ts,mjs}\"",
     "test": "pnpm test:unit && pnpm test:e2e",
