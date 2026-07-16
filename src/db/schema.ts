@@ -156,6 +156,24 @@ export const commentThreads = sqliteTable(
   ],
 );
 
+/** 落库分享链接 —— 短码进 URL(/s/<id>),替代旧的无状态 ?key= JWT(旧 key 兼容到自然过期)。
+ *
+ * expires_at 只挡「新访客兑换」;已兑换的浏览器会话(cookie 内嵌 lnk=短码)靠滑动续期活着,
+ * 踢人只有两条路:单条 revoked_at(该链接的兑换与既有会话都拒)/ 全站 share_key_version 自增
+ * (会话内嵌 skv 不再相等,所有分享会话即刻失效;同时批量 revoke 本表行)。 */
+export const shareLinks = sqliteTable(
+  'share_links',
+  {
+    id: text('id').primaryKey(), // 10 位 base62 短码,即分享 URL 的 /s/<id>
+    siteId: text('site_id').notNull(),
+    label: text('label'), // 站长备注("发给老王的"),仅控制台展示
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at'), // null = 永不过期(默认;撤销是主要管控手段)
+    revokedAt: text('revoked_at'), // 非空 = 单条撤销
+  },
+  (t) => [index('share_links_site_idx').on(t.siteId)],
+);
+
 export const apiTokens = sqliteTable(
   'api_tokens',
   {
@@ -287,6 +305,7 @@ export type AccountMergeRow = typeof accountMerges.$inferSelect;
 export type SiteRow = typeof sites.$inferSelect;
 export type CommentThreadRow = typeof commentThreads.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;
+export type ShareLinkRow = typeof shareLinks.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
 export type DeviceAuthRow = typeof deviceAuths.$inferSelect;
 export type HandoffCodeRow = typeof handoffCodes.$inferSelect;

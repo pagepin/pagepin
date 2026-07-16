@@ -11,12 +11,13 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 import { galleryIndexHtml, redirectIndexHtml } from '../autoindex.js';
-import { siteUrl } from '../config.js';
+import { contentBase, siteUrl } from '../config.js';
 import type { Config } from '../config.js';
 import {
   commentThreads,
   currentVersion,
   deploySessions,
+  shareLinks,
   sites,
   type Db,
   type DeploySessionRow,
@@ -29,11 +30,10 @@ import {
 import { writtenCount } from '../db/ops.js';
 import { errorBody, t, type Locale } from '../i18n/index.js';
 import { jsonError, localeOf } from '../i18n/locale.js';
-import { mintShareKey } from '../share.js';
 import { purgeSiteStorage, type Storage } from '../storage/index.js';
 import { guessContentType } from '../storage/mime.js';
 import type { AppDeps, AppEnv } from '../types.js';
-import { normalizeSitePath, nowIso, tombstoneSlug, uuid, validSlug } from '../util.js';
+import { normalizeSitePath, nowIso, shortId, tombstoneSlug, uuid, validSlug } from '../util.js';
 import type { AuthMiddleware } from './deps.js';
 
 /** 409 handle 未设置:错误体附机器可读 hint(英文,面向 agent 非人)。
@@ -710,31 +710,88 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     return c.json(siteOut(deps, updated, await unresolvedCount(db, updated.id)));
   });
 
-  // ---- 签名分享链接:无账号者凭链接可看(guest_comments 开着还可评论) ----
-  // 无状态 HS256 key,绑定 (site_id, share_key_version);默认 72h,上限 cfg.shareMaxHours。
+  // ---- 分享链接:无账号者凭链接可看(guest_comments 开着还可评论) ----
+  // 落库短码(/s/<code>),默认永不过期(撤销是主要管控);hours 可选限时,上限 cfg.shareMaxHours。
+  // 旧的 ?key= JWT 不再新铸,已发出的兼容到自然过期(serving 侧兑换逻辑保留)。
+  const MAX_SHARE_LABEL = 120;
   r.post('/:slug/share-link', mw.mutatingUser, async (c) => {
     const user = c.get('user');
-    const body = (await readJson<{ hours?: unknown }>(c)) ?? {};
+    const body = (await readJson<{ hours?: unknown; label?: unknown }>(c)) ?? {};
     const raw = body.hours;
     if (raw != null && (typeof raw !== 'number' || !Number.isInteger(raw))) {
       return jsonError(c, 422, 'site.shareHours.notInteger');
     }
-    // ?? 而非 ||:hours=0 应 422 tooSmall,不能静默落到默认值
-    const hours0 = (raw as number | null | undefined) ?? 72;
-    if (hours0 < 1) return jsonError(c, 422, 'site.shareHours.tooSmall');
-    const hours = Math.min(hours0, cfg.shareMaxHours);
+    // null/缺省 = 永不过期;hours=0 仍 422 tooSmall(0 不是「用默认」的意思)
+    const hours0 = raw as number | null | undefined;
+    if (hours0 != null && hours0 < 1) return jsonError(c, 422, 'site.shareHours.tooSmall');
+    const hours = hours0 == null ? null : Math.min(hours0, cfg.shareMaxHours);
+    let label: string | null = null;
+    if (body.label != null) {
+      if (typeof body.label !== 'string') return jsonError(c, 422, 'site.shareLabel.notString');
+      label = body.label.trim() || null;
+      if (label && label.length > MAX_SHARE_LABEL) {
+        return jsonError(c, 422, 'site.shareLabel.tooLong', { max: MAX_SHARE_LABEL });
+      }
+    }
     const site = await ownedSite(db, user.id, c.req.param('slug'));
     if (!site) return jsonError(c, 404, 'site.notFound');
-    const { token, expiresAt } = await mintShareKey(cfg, site.id, site.shareKeyVersion, hours);
+    const expiresAt =
+      hours === null ? null : new Date(Date.now() + hours * 3600 * 1000).toISOString();
+    const code = shortId(10);
+    await db.insert(shareLinks).values({
+      id: code,
+      siteId: site.id,
+      label,
+      createdAt: nowIso(),
+      expiresAt,
+      revokedAt: null,
+    });
     return c.json({
-      url: `${siteUrl(cfg, site.ownerHandle, site.slug)}?key=${token}`,
-      expires_at: expiresAt,
+      url: `${contentBase(cfg)}/s/${code}`,
+      code,
+      label,
+      expires_at: expiresAt, // null = 永不过期
       hours,
       guest_comments: site.guestComments,
     });
   });
 
-  // ---- 撤销全部分享链接(share_key_version 自增,旧 key 与旧访客会话同时失效) ----
+  // ---- 分享链接列表(未撤销的;expires_at 过线的仍列出,由调用方标注「已过期」) ----
+  r.get('/:slug/share-links', mw.currentUser, async (c) => {
+    const user = c.get('user');
+    const site = await ownedSite(db, user.id, c.req.param('slug'));
+    if (!site) return jsonError(c, 404, 'site.notFound');
+    const rows = await db
+      .select()
+      .from(shareLinks)
+      .where(and(eq(shareLinks.siteId, site.id), isNull(shareLinks.revokedAt)))
+      .orderBy(desc(shareLinks.createdAt));
+    return c.json({
+      links: rows.map((l) => ({
+        code: l.id,
+        url: `${contentBase(cfg)}/s/${l.id}`,
+        label: l.label,
+        created_at: l.createdAt,
+        expires_at: l.expiresAt,
+      })),
+    });
+  });
+
+  // ---- 单条撤销:该链接的新兑换与已进来的浏览器会话(内嵌 lnk)一并即拒 ----
+  r.delete('/:slug/share-links/:code', mw.mutatingUser, async (c) => {
+    const user = c.get('user');
+    const site = await ownedSite(db, user.id, c.req.param('slug'));
+    if (!site) return jsonError(c, 404, 'site.notFound');
+    const code = c.req.param('code');
+    const link = (await db.select().from(shareLinks).where(eq(shareLinks.id, code)))[0];
+    if (!link || link.siteId !== site.id || link.revokedAt !== null) {
+      return jsonError(c, 404, 'site.shareLink.notFound');
+    }
+    await db.update(shareLinks).set({ revokedAt: nowIso() }).where(eq(shareLinks.id, code));
+    return c.json({ ok: true });
+  });
+
+  // ---- 撤销全部分享链接:skv 自增(短码/旧 JWT 的所有访客会话零查库即拒)+ 批量 revoke 短码行 ----
   r.delete('/:slug/share-link', mw.mutatingUser, async (c) => {
     const user = c.get('user');
     const site = await ownedSite(db, user.id, c.req.param('slug'));
@@ -743,6 +800,10 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
       .update(sites)
       .set({ shareKeyVersion: site.shareKeyVersion + 1, updatedAt: nowIso() })
       .where(eq(sites.id, site.id));
+    await db
+      .update(shareLinks)
+      .set({ revokedAt: nowIso() })
+      .where(and(eq(shareLinks.siteId, site.id), isNull(shareLinks.revokedAt)));
     return c.json({ ok: true });
   });
 

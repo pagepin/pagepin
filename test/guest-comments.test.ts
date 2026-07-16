@@ -160,16 +160,16 @@ function getPage(app: Hono<AppEnv>, path: string, cookie?: string): Promise<Resp
   return Promise.resolve(app.fetch(new Request(`http://localhost${path}`, { headers })));
 }
 
-/** 走一次完整的 ?key= 兑换,拿到该「浏览器」的分享会话 Cookie(每次调用 = 新 guest 身份)。 */
+/** 走一次完整的短码(/s/<code>)兑换,拿到该「浏览器」的分享会话 Cookie(每次调用 = 新 guest 身份)。 */
 async function guestSession(app: Hono<AppEnv>, ownerCookie: string): Promise<string> {
   const minted = await api(app, 'POST', '/api/sites/demo/share-link', {
-    body: { hours: 24 },
+    body: {},
     cookie: ownerCookie,
   });
   assert.equal(minted.status, 200);
-  const key = new URL(((await minted.json()) as { url: string }).url).searchParams.get('key');
-  assert.ok(key);
-  const redeem = await getPage(app, `/p/alice/demo/?key=${key}`);
+  const { pathname } = new URL(((await minted.json()) as { url: string }).url);
+  assert.match(pathname, /^\/p\/s\//, 'mint returns a /s/<code> short link');
+  const redeem = await getPage(app, pathname);
   assert.equal(redeem.status, 303);
   const sc = redeem.headers.getSetCookie().find((v) => v.startsWith('pp_share_'));
   assert.ok(sc, 'redeem sets a pp_share_* cookie');

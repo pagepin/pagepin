@@ -119,6 +119,19 @@ export function buildSchema(kit: ColumnKit) {
     ],
   );
 
+  const shareLinks = table(
+    'share_links',
+    {
+      id: str('id', 16).primaryKey(),
+      siteId: str('site_id', 64).notNull(),
+      label: str('label', 255),
+      createdAt: str('created_at', 40).notNull(),
+      expiresAt: str('expires_at', 40),
+      revokedAt: str('revoked_at', 40),
+    },
+    (t: any) => [index('share_links_site_idx').on(t.siteId)],
+  );
+
   const apiTokens = table(
     'api_tokens',
     {
@@ -227,6 +240,7 @@ export function buildSchema(kit: ColumnKit) {
     identities,
     sites,
     commentThreads,
+    shareLinks,
     apiTokens,
     invites,
     instanceSettings,

@@ -45,6 +45,9 @@ export const site: Record<Locale, Record<string, string>> = {
     // —— 分享链接 ——
     'site.shareHours.notInteger': 'hours must be an integer',
     'site.shareHours.tooSmall': 'Share link duration must be at least 1 hour',
+    'site.shareLabel.notString': 'label must be a string',
+    'site.shareLabel.tooLong': 'Label too long (≤{max} chars)',
+    'site.shareLink.notFound': 'Share link not found',
 
     // —— 回复 ——
     'site.reply.empty': 'Reply cannot be empty',
@@ -91,6 +94,9 @@ export const site: Record<Locale, Record<string, string>> = {
     // —— 分享链接 ——
     'site.shareHours.notInteger': 'hours 必须是整数',
     'site.shareHours.tooSmall': '分享链接时长至少 1 小时',
+    'site.shareLabel.notString': 'label 必须是字符串',
+    'site.shareLabel.tooLong': '备注过长（≤{max} 字）',
+    'site.shareLink.notFound': '分享链接不存在',
 
     // —— 回复 ——
     'site.reply.empty': '回复内容不能为空',

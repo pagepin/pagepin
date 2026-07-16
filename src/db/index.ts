@@ -22,6 +22,7 @@ export type {
   IdentityRow,
   InviteRow,
   PendingFile,
+  ShareLinkRow,
   SiteRow,
   SiteVersion,
   ThreadComment,
@@ -51,6 +52,7 @@ export const users = t.users as typeof sqliteSchema.users;
 export const identities = t.identities as typeof sqliteSchema.identities;
 export const sites = t.sites as typeof sqliteSchema.sites;
 export const commentThreads = t.commentThreads as typeof sqliteSchema.commentThreads;
+export const shareLinks = t.shareLinks as typeof sqliteSchema.shareLinks;
 export const apiTokens = t.apiTokens as typeof sqliteSchema.apiTokens;
 export const invites = t.invites as typeof sqliteSchema.invites;
 export const instanceSettings = t.instanceSettings as typeof sqliteSchema.instanceSettings;

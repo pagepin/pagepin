@@ -1,23 +1,36 @@
-/** 签名分享链接 —— 无状态、可撤销的「凭链接可看」访问層(edge-safe,零 I/O)。
+/** 分享链接的「凭链接可看」访问层(edge-safe)。
  *
- * 两种令牌,同一 HS256 秘钥(cfg.secret),plane 隔离防跨用:
- *   share  —— URL 里的 ?key=,站长签发、可转发给任意评审者;绑定 (sid, skv)。
- *   shares —— 首次验 key 后种给「单个浏览器」的会话 Cookie,内嵌本浏览器专属 guest 身份。
- *     key 是群发的,guest 身份必须 per-浏览器,故不能放进 key 本身。
+ * 两代链接、同一套浏览器会话:
+ *   短码(现行)—— /s/<code>,落库 share_links 表;默认永不过期,撤销是主要管控。
+ *   ?key= JWT(旧)—— 无状态 HS256,绑定 (sid, skv);已发出的链接兼容到自然过期,不再新铸。
  *
- * 撤销:sites.share_key_version 自增 → 旧 key/旧会话的 skv 不再相等,全部立即失效。
+ * 会话令牌(plane 'shares',同一 HS256 秘钥,plane 隔离防跨用):
+ *   验链接后种给「单个浏览器」的会话 Cookie,内嵌本浏览器专属 guest 身份
+ *   (链接是群发的,guest 身份必须 per-浏览器,不能放进链接本身)。
+ *   短码兑换的会话另嵌 lnk=短码,固定 TTL 滑动续期,与链接的 expires_at 解耦
+ *   (链接过期只挡新访客,不踢已进来的人);旧 JWT 兑换的会话仍继承 key 的绝对到期。
+ *
+ * 撤销两级,都即时踢会话:
+ *   单条 —— share_links.revoked_at 非空 → 兑换与既有会话(readActiveShareSession 查库)都拒;
+ *   全站 —— sites.share_key_version 自增 → 所有会话/旧 key 的 skv 不再相等,零查库即拒。
  * Cookie 名按站点区分(pp_share_<siteId 前缀>),Path=/:评论 API(/api/comments/*)
  * 与站点路径不同前缀,path-scoped cookie 到不了,只能全路径 + 名字隔离。
  */
 
+import { eq } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { setCookie } from 'hono/cookie';
 import { sign, verify as jwtVerify } from 'hono/jwt';
 
 import type { Config } from './config.js';
+import { shareLinks, type Db, type ShareLinkRow } from './db/index.js';
 import { shortId } from './util.js';
 
 export const SHARE_COOKIE_PREFIX = 'pp_share_';
+
+/** 短码兑换的会话 TTL(滑动):每次访问剩余不足一半就续满,常来常新;
+ *  两周不来才需要重点一次链接(链接默认永久,重点即重进)。 */
+export const SHARE_SESSION_TTL_S = 14 * 24 * 3600;
 
 /** URL 里的分享 key(群发,无个体身份)。 */
 export interface ShareKeyClaims {
@@ -29,12 +42,13 @@ export interface ShareKeyClaims {
   [k: string]: unknown; // hono/jwt JWTPayload 兼容
 }
 
-/** 验 key 后种下的浏览器会话(个体 guest 身份在此)。 */
+/** 验链接后种下的浏览器会话(个体 guest 身份在此)。 */
 export interface ShareSessionClaims {
   pln: 'shares';
   sid: string;
   skv: number;
   gst: string; // 'guest:<id>' —— 本浏览器在本站点的稳定访客身份
+  lnk?: string; // 短码兑换的会话记来源链接;单条撤销时据此查库踢会话。旧 JWT 会话无此字段
   iat: number;
   exp: number;
   [k: string]: unknown;
@@ -77,15 +91,17 @@ export async function verifyShareKey(cfg: Config, token: string): Promise<ShareK
   }
 }
 
-/** 会话继承 key 的到期时刻(链接失效,进来的人同刻失效)。
- *  gst 可选:重复兑换同一有效 key 时传入既有 gst 以保持「本浏览器稳定访客身份」不变
- *  (否则每次点链接都换新身份,旧评论作者权/限频桶全丢)。不传则新铸一个。 */
+/** 铸浏览器会话。旧 JWT 兑换:exp 传 key 的绝对到期、lnk 不传;
+ *  短码兑换/续期:exp 传 now+SHARE_SESSION_TTL_S、lnk 传短码。
+ *  gst 可选:重复兑换/续期时传入既有 gst 以保持「本浏览器稳定访客身份」不变
+ *  (否则每次都换新身份,旧评论作者权/限频桶全丢)。不传则新铸一个。 */
 export async function mintShareSession(
   cfg: Config,
   siteId: string,
   keyVersion: number,
   exp: number,
   gst?: string,
+  lnk?: string,
 ): Promise<string> {
   const claims: ShareSessionClaims = {
     pln: 'shares',
@@ -95,6 +111,7 @@ export async function mintShareSession(
     iat: Math.floor(Date.now() / 1000),
     exp,
   };
+  if (lnk) claims.lnk = lnk;
   return sign(claims, cfg.secret, 'HS256');
 }
 
@@ -142,6 +159,33 @@ export async function readShareSession(
   return claims;
 }
 
+/** readShareSession + 单条撤销判定:lnk 会话查 share_links 一行(pk),链接被单条撤销即拒。
+ *  链接的 expires_at 在此**不**看 —— 过期只挡新兑换,已进来的会话由自身 exp(滑动)管生死。
+ *  serving 与评论 API 的访客鉴权都必须走这里,否则撤销的链接还能评论。 */
+export async function readActiveShareSession(
+  c: Context,
+  cfg: Config,
+  db: Db,
+  site: { id: string; shareKeyVersion: number },
+): Promise<ShareSessionClaims | null> {
+  const claims = await readShareSession(c, cfg, site);
+  if (!claims) return null;
+  if (claims.lnk) {
+    const link = (await db.select().from(shareLinks).where(eq(shareLinks.id, claims.lnk)))[0];
+    if (!link || link.siteId !== site.id || link.revokedAt !== null) return null;
+  }
+  return claims;
+}
+
+/** 短码兑换判定:行存在、属本站可另比对、未撤销、未过期(过期只在这一步挡)。 */
+export function shareLinkRedeemable(
+  link: ShareLinkRow | undefined,
+  now: Date,
+): link is ShareLinkRow {
+  if (!link || link.revokedAt !== null) return false;
+  return link.expiresAt === null || link.expiresAt > now.toISOString();
+}
+
 export function setShareCookie(
   c: Context,
   cfg: Config,
@@ -156,4 +200,14 @@ export function setShareCookie(
     maxAge: Math.max(1, exp - Math.floor(Date.now() / 1000)),
     path: '/',
   });
+}
+
+/** 与 setShareCookie 同一属性口径的序列化值 —— 给「响应已成品后补头」的路径用
+ *  (serve() 直接 new Response 返回,hono 的 setCookie 预备头会被丢弃)。 */
+export function shareCookieHeader(cfg: Config, siteId: string, token: string, exp: number): string {
+  const maxAge = Math.max(1, exp - Math.floor(Date.now() / 1000));
+  return (
+    `${shareCookieName(siteId)}=${token}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax` +
+    (cfg.secureCookies ? '; Secure' : '')
+  );
 }

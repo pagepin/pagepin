@@ -93,12 +93,23 @@ export interface SiteOut {
   updated_at: string;
 }
 
-/** POST /api/sites/{slug}/share-link 的返回。url 无状态、后端不存 —— 关掉对话框就拿不回同一条。 */
+/** POST /api/sites/{slug}/share-link 的返回。落库短码(/s/<code>),之后可在列表里随时找回/撤销。 */
 export interface ShareLinkOut {
   url: string;
-  expires_at: string;
-  hours: number;
+  code: string;
+  label: string | null;
+  expires_at: string | null; // null = 永不过期
+  hours: number | null;
   guest_comments: boolean;
+}
+
+/** GET /api/sites/{slug}/share-links 列表项(只列未撤销的;过期的仍列出由前端标注)。 */
+export interface ShareLinkItem {
+  code: string;
+  url: string;
+  label: string | null;
+  created_at: string;
+  expires_at: string | null;
 }
 
 export interface VersionItem {

@@ -20,7 +20,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Plane, SessionClaims } from './auth/sessions.js';
 import { readSession } from './auth/sessions.js';
-import { readShareSession } from './share.js';
+import { readActiveShareSession } from './share.js';
 import { commentThreads, sites } from './db/index.js';
 import type { CommentThreadRow, SiteRow, ThreadComment, UserRow } from './db/index.js';
 import { users } from './db/index.js';
@@ -266,10 +266,11 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
     );
   }
 
-  /** 站点上分享会话访客成立的前提:未被下架 + 两个开关都开着 + 会话与 (sid, skv) 匹配。 */
+  /** 站点上分享会话访客成立的前提:未被下架 + 两个开关都开着 + 会话与 (sid, skv) 匹配
+   *  + 短码会话的来源链接未被单条撤销(readActiveShareSession 查库)。 */
   async function guestOn(c: Context<AppEnv>, site: SiteRow): Promise<Commenter | null> {
     if (site.suspendedAt !== null || !site.guestComments || !site.commentsEnabled) return null;
-    const sess = await readShareSession(c, cfg, site);
+    const sess = await readActiveShareSession(c, cfg, db, site);
     if (!sess) return null;
     return { sub: sess.gst, name: null, guest: true };
   }

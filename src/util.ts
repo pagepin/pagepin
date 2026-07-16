@@ -19,6 +19,7 @@ export const RESERVED_SEGMENTS = new Set([
   '_pagepin',
   'skill.md',
   'console',
+  's', // 短码分享链接段(/s/<code>);HANDLE_RE 本就禁单字符,列在这里纯作双保险
 ]);
 
 const HANDLE_RE = /^[a-z][a-z0-9-]{1,31}$/;

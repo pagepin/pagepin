@@ -20,24 +20,34 @@ Authoritative quotas always come from `GET /api/me`.
 | `GET /api/sites/{slug}/comments` | Page comments (unresolved by default; `?all=true` includes resolved) |
 | `POST /api/sites/{slug}/comments/{thread_id}/replies` | `{"text":"…"}` — reply to a thread |
 | `PATCH /api/sites/{slug}/comments/{thread_id}` | `{"resolved":true}` / `{"resolved":false}` |
-| `POST /api/sites/{slug}/share-link` | `{"hours":72}` (optional; default 72) → `{url, expires_at}` — signed guest link, see below |
+| `POST /api/sites/{slug}/share-link` | `{"hours":24,"label":"…"}` (both optional; **default: never expires**) → `{url, code, expires_at}` — short guest link, see below |
+| `GET /api/sites/{slug}/share-links` | List active share links → `{links:[{code, url, label, created_at, expires_at}]}` |
+| `DELETE /api/sites/{slug}/share-links/{code}` | Revoke **one** link (kicks its guest sessions too) |
 | `DELETE /api/sites/{slug}/share-link` | Revoke **all** outstanding share links (and their guest sessions) for the site |
 
 ## Share links (review without accounts)
 
-`POST /api/sites/{slug}/share-link` mints a stateless signed URL
-(`…/{slug}/?key=<token>`). Anyone opening it can **view the private site and pin
-comments as a guest** — no account needed. This is the preferred way to collect
-review feedback from people outside the instance:
+`POST /api/sites/{slug}/share-link` mints a short chat-friendly URL
+(`https://<content-host>/s/<code>`). Anyone opening it can **view the private
+site and pin comments as a guest** — no account needed. This is the preferred
+way to collect review feedback from people outside the instance:
 
 - Deploy → create a share link → hand the `url` to reviewers (chat/IM/email).
 - Guests appear in `GET /api/sites/{slug}/comments` with their self-given name;
   their `author_sub` starts with `guest:`. They can comment and reply but never
   resolve — resolving stays with you (the token owner) and logged-in members.
-- Links expire (`hours`, server-capped, default cap 720h) and are revocable in
-  one call; revoking also invalidates guests who already entered.
+- **Links never expire by default**; revocation is the control. Pass `hours`
+  (server-capped, default cap 720h) for a self-expiring link. Expiry only stops
+  *new* visitors; guests already inside stay until their session lapses
+  (sliding ~14 days) — to kick everyone from one link, revoke that link.
+- `label` (≤120 chars, optional) tags the link so you can tell them apart in
+  the list (e.g. `"for the design review"`).
+- Revoke one link (`DELETE …/share-links/{code}`) or all at once
+  (`DELETE …/share-link`); both also invalidate guests who already entered.
 - Guest commenting can be turned off per site: `PATCH /api/sites/{slug}`
   `{"guest_comments":false}` (the link then grants view-only access).
+- Legacy `?key=` JWT links issued before short codes keep working until their
+  original expiry.
 
 ## Deploy details
 

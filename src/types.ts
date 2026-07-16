@@ -25,5 +25,8 @@ export type AppEnv = {
     sessionClaims?: SessionClaims;
     /** 请求 locale,由 makeLocaleMiddleware 解析后注入(见 i18n/locale.ts)。 */
     locale: Locale;
+    /** 短码分享会话的滑动续期 Set-Cookie(序列化好的完整值)。serve() 内多为直接
+     *  new Response 返回,c.header 预备头会被丢弃,故经此变量交给外层中间件补到成品响应上。 */
+    shareRenewCookie?: string;
   };
 };

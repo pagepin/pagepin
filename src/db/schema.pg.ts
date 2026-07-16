@@ -8,6 +8,7 @@ export const {
   identities,
   sites,
   commentThreads,
+  shareLinks,
   apiTokens,
   invites,
   instanceSettings,

@@ -39,8 +39,17 @@ import { t, type Locale } from './i18n/index.js';
 import { jsonError, localeOf } from './i18n/locale.js';
 import type { Plane } from './auth/sessions.js';
 import { readSession, setOauthNonce } from './auth/sessions.js';
-import { mintShareSession, readShareSession, setShareCookie, verifyShareKey } from './share.js';
-import { currentVersion, isPubliclyVisible, sites, users } from './db/index.js';
+import {
+  mintShareSession,
+  readActiveShareSession,
+  readShareSession,
+  setShareCookie,
+  SHARE_SESSION_TTL_S,
+  shareCookieHeader,
+  shareLinkRedeemable,
+  verifyShareKey,
+} from './share.js';
+import { currentVersion, isPubliclyVisible, shareLinks, sites, users } from './db/index.js';
 import type { SiteRow, SiteVersion } from './db/index.js';
 import { NotFoundError, NotModifiedError } from './storage/index.js';
 import type { ObjectMeta } from './storage/index.js';
@@ -850,7 +859,26 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
       }
       staleKey = true; // 签名不对/过期/已撤销:若无其他授权,走专属门页
     }
-    const shareViewer = (await readShareSession(c, cfg, site)) !== null;
+    // 访客会话判活(短码会话另查单条撤销);短码会话在 HTML 导航上滑动续期:
+    // 剩余不足一半才重种 Cookie(限频),静态资源请求不折腾 Set-Cookie。
+    // 续期头经 shareRenewCookie 变量由外层中间件补到成品响应上(serve 内多为裸 Response 返回)。
+    const shareSess = await readActiveShareSession(c, cfg, db, site);
+    if (shareSess?.lnk && (c.req.header('accept') ?? '').includes('text/html')) {
+      const nowS = Math.floor(now.getTime() / 1000);
+      if (shareSess.exp - nowS < SHARE_SESSION_TTL_S / 2) {
+        const exp2 = nowS + SHARE_SESSION_TTL_S;
+        const tok = await mintShareSession(
+          cfg,
+          site.id,
+          site.shareKeyVersion,
+          exp2,
+          shareSess.gst,
+          shareSess.lnk,
+        );
+        c.set('shareRenewCookie', shareCookieHeader(cfg, site.id, tok, exp2));
+      }
+    }
+    const shareViewer = shareSess !== null;
 
     const claims = await readSession(c, cfg, plane);
     // 查库判活:会话用户须存在且未被禁用,否则按未登录处理(私有页不放行、不注入评论层)
@@ -1089,13 +1117,64 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
     return new Response(body, { headers });
   };
 
+  // ---- 短码分享链接兑换:/s/<code> 查库 → 种滑动会话 Cookie → 303 到站点 ----
+  // 顶级段 "s" 天然不撞用户:handle 最少 2 字符(util.HANDLE_RE),单字母段永远轮不到站点路由。
+  // 未知短码/站点已删 → 404;短码存在但已撤销/过期 → 分享失效门页(与旧 ?key= 失效同一页)。
+  app.get(`${prefix}/s/:code`, async (c) => {
+    const code = c.req.param('code');
+    const locale = localeOf(c);
+    const link = (await db.select().from(shareLinks).where(eq(shareLinks.id, code)))[0];
+    const site = link
+      ? (
+          await db
+            .select()
+            .from(sites)
+            .where(and(eq(sites.id, link.siteId), isNull(sites.deletedAt)))
+        )[0]
+      : undefined;
+    if (!site || site.currentVersionId === null) return notFound(c);
+    const sitePath = `${prefix}/${encodeURIComponent(site.ownerHandle)}/${encodeURIComponent(site.slug)}/`;
+    const now = new Date();
+    if (!shareLinkRedeemable(link, now)) {
+      const loginHref = single
+        ? `/auth/login?next=${encodeURIComponent(sitePath)}`
+        : `${consoleBase(cfg)}/auth/handoff?next=${encodeURIComponent(sitePath)}&non=${setOauthNonce(c, cfg)}`;
+      const hint = agentHint(site.slug, consoleBase(cfg), locale);
+      hint.head += ogMetaTags(cfg, siteUrl(cfg, site.ownerHandle, site.slug), locale, 'pagepin');
+      return c.html(shareExpiredHtml(loginHref, locale, hint), 200, {
+        'Cache-Control': 'no-store, private',
+      });
+    }
+    // 重复点同一链接(聊天/书签常态):保持既有 guest 身份,只把 14 天窗口续满
+    const existing = await readShareSession(c, cfg, site);
+    const exp = Math.floor(now.getTime() / 1000) + SHARE_SESSION_TTL_S;
+    const token = await mintShareSession(
+      cfg,
+      site.id,
+      site.shareKeyVersion,
+      exp,
+      existing?.gst,
+      link.id,
+    );
+    setShareCookie(c, cfg, site.id, token, exp);
+    // ?lang= 等查询串带去站点;短码本身在路径里,天然不残留
+    return c.redirect(sitePath + new URL(c.req.url).search, 303);
+  });
+
+  // 滑动续期补头:serve() 直接 new Response 返回时 hono 预备头会丢,统一在这里落到成品响应
+  const applyShareRenew = async (c: Context<AppEnv>, next: () => Promise<void>) => {
+    await next();
+    const renew = c.get('shareRenewCookie');
+    if (renew) c.res.headers.append('Set-Cookie', renew);
+  };
+
   // 无尾斜杠精确路由必须先注册:Hono 的尾部 /* 也会匹配不带斜杠的 /:handle/:slug
   if (single) {
     app.get('/p/:handle/:slug', siteRootNoSlash);
-    app.get('/p/:handle/:slug/*', serve);
+    app.get('/p/:handle/:slug/*', applyShareRenew, serve);
   } else {
     app.get('/:handle/:slug', siteRootNoSlash);
-    app.get('/:handle/:slug/*', serve);
+    app.get('/:handle/:slug/*', applyShareRenew, serve);
   }
 
   return app;

@@ -138,18 +138,21 @@ curl -fsS -X PATCH "$PAGEPIN_BASE/api/sites/my-demo/comments/$TID" \
 For a `question`-type thread you can't judge, **relay it to the user** instead
 of resolving it yourself.
 
-**Inviting reviewers without accounts**: mint a signed share link and hand that
-out instead of the plain URL — anyone opening it can view the private page and
-pin comments as a guest (their feedback shows up in the same comments export):
+**Inviting reviewers without accounts**: mint a share link and hand that out
+instead of the plain URL — anyone opening it can view the private page and pin
+comments as a guest (their feedback shows up in the same comments export):
 
 ```bash
 curl -fsS -X POST "$PAGEPIN_BASE/api/sites/my-demo/share-link" \
   -H "Authorization: Bearer $PP_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"hours":72}'          # → {"url":"…?key=…","expires_at":"…"}
+  -d '{}'                    # → {"url":"https://…/s/<code>","expires_at":null}
 ```
 
-`DELETE` the same path to revoke every outstanding link at once. Details (guest
-permissions, per-site guest toggle) in `references/api.md`.
+The short `url` never expires by default (pass `"hours":24` for a self-expiring
+one, `"label":"…"` to tag it). `GET …/share-links` lists active links,
+`DELETE …/share-links/{code}` revokes one, `DELETE …/share-link` revokes every
+outstanding link at once. Details (guest permissions, per-site guest toggle) in
+`references/api.md`.
 
 ## Step 5 — persist this capability for future sessions
 

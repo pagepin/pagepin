@@ -10,6 +10,7 @@ import type {
   InviteCreated,
   Me,
   RegistrationMode,
+  ShareLinkItem,
   ShareLinkOut,
   SiteOut,
   TokenItem,
@@ -172,12 +173,23 @@ export const api = {
   deleteSite: (slug: string) =>
     request<{ ok: true }>(`/api/sites/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
 
-  /** 签发一条签名分享链接（无状态，后端不存；关掉对话框就拿不回同一条，可再生成新的）。 */
-  createShareLink: (slug: string, hours: number) =>
+  /** 签发一条短码分享链接（落库）。hours=null → 永不过期（默认）。 */
+  createShareLink: (slug: string, hours: number | null, label?: string) =>
     request<ShareLinkOut>(`/api/sites/${encodeURIComponent(slug)}/share-link`, {
       method: 'POST',
-      body: JSON.stringify({ hours }),
+      body: JSON.stringify({ hours, ...(label ? { label } : {}) }),
     }),
+
+  /** 该站点未撤销的分享链接列表。 */
+  listShareLinks: (slug: string) =>
+    request<{ links: ShareLinkItem[] }>(`/api/sites/${encodeURIComponent(slug)}/share-links`),
+
+  /** 撤销单条分享链接（该链接进来的访客会话一并失效）。 */
+  revokeShareLink: (slug: string, code: string) =>
+    request<{ ok: true }>(
+      `/api/sites/${encodeURIComponent(slug)}/share-links/${encodeURIComponent(code)}`,
+      { method: 'DELETE' },
+    ),
 
   /** 撤销该站点所有已发出的分享链接（含已进入的访客会话）。 */
   revokeShareLinks: (slug: string) =>
