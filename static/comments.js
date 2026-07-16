@@ -761,7 +761,7 @@
   .pp-anno-pop .pp-anno-ta-wrap:focus-within{border-color:#0f7c72;background:#fff}
 
   /* ── 就地草稿气泡 ── */
-  .pp-anno-dbubble{position:absolute;width:300px;border:1px solid rgba(17,22,27,.1);border-radius:16px 16px 16px 4px;background:var(--lum-surface);box-shadow:0 4px 12px rgba(17,22,27,.08),0 24px 60px -20px rgba(17,22,27,.3);padding:12px 14px;z-index:2147482520;animation:lumBubbleIn .26s cubic-bezier(.2,.8,.3,1) both;font-family:${LUM_SANS}}
+  .pp-anno-dbubble{position:absolute;width:300px;border:1px solid rgba(17,22,27,.1);border-radius:16px 16px 16px 4px;background:var(--lum-surface);box-shadow:0 4px 12px rgba(17,22,27,.08),0 24px 60px -20px rgba(17,22,27,.3);padding:12px 14px;z-index:2147482700;animation:lumBubbleIn .26s cubic-bezier(.2,.8,.3,1) both;font-family:${LUM_SANS}}
   .pp-anno-dbubble.pp-anno-shaking{animation:ppShake .3s}
   .pp-anno-dbubble-row{display:flex;align-items:flex-start;gap:8px}
   .pp-anno-dbubble textarea{flex:1;resize:none;border:none;background:transparent;font:400 13.5px/1.55 ${LUM_SANS};color:#11161b;outline:none;max-height:140px;overflow-y:auto;min-height:38px}
@@ -2515,6 +2515,7 @@
     if (vignetteEl) { vignetteEl.remove(); vignetteEl = null; }
     if (MOBILE) { teardownAim(); syncFlags(); render(); return; }
     if (hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
+    clearHoverTimer();
     document.documentElement.classList.remove('pp-anno-text-intent');
     renderDrawer();
     syncFlags();
@@ -2563,24 +2564,38 @@
     }
     return false;
   }
-  function setTextIntent(on) {
-    document.documentElement.classList.toggle('pp-anno-text-intent', on);
-    if (on && hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
-  }
+  // 防闪烁:光标(text-intent 类)即时切换 —— I-beam/十字来回是浏览器原生手感;
+  // 元素描边则要在同一目标上驻留 120ms 才亮 —— 扫过页面时描边永远不出现,停稳才亮,
+  // 已亮的描边在切到文字意图/新目标提交前保持不动(不跟手抖)。
+  let hoverTimer = 0;
+  let hoverCand = null;
+  function clearHoverTimer() { if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = 0; } hoverCand = null; }
+  function dropHint() { if (hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; } }
   document.addEventListener('mousemove', (e) => {
     if (state.mode !== 'comment' || state.draft || MOBILE) return;
     if (hoverRaf) return; // rAF 节流:一帧最多测一次字形
-    const cx = e.clientX, cy = e.clientY, target = e.target;
+    const cx = e.clientX, cy = e.clientY, rawTarget = e.target;
     hoverRaf = requestAnimationFrame(() => {
       hoverRaf = 0;
       if (state.mode !== 'comment' || state.draft) return;
       let sel = null;
       try { sel = window.getSelection(); } catch (err) { /* 忽略 */ }
-      if ((sel && !sel.isCollapsed) || overTextGlyph(cx, cy)) { setTextIntent(true); return; }
-      setTextIntent(false);
-      if (hoverHint) hoverHint.classList.remove('pp-anno-hover-hint');
-      hoverHint = target.closest && target.closest('[data-pp-anno]') ? null : target;
-      if (hoverHint && hoverHint !== document.body) hoverHint.classList.add('pp-anno-hover-hint');
+      const text = (sel && !sel.isCollapsed) || overTextGlyph(cx, cy);
+      document.documentElement.classList.toggle('pp-anno-text-intent', text);
+      if (text) { clearHoverTimer(); dropHint(); return; }
+      const target = rawTarget.closest && rawTarget.closest('[data-pp-anno]') ? null : rawTarget;
+      if (!target || target === document.body) { clearHoverTimer(); dropHint(); return; }
+      if (target === hoverHint) { clearHoverTimer(); return; } // 已亮且未移开:稳定
+      if (target === hoverCand) return; // 同一候选驻留中:等计时器
+      hoverCand = target;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => {
+        hoverTimer = 0;
+        if (state.mode !== 'comment' || state.draft || !hoverCand) return;
+        dropHint();
+        hoverHint = hoverCand;
+        hoverHint.classList.add('pp-anno-hover-hint');
+      }, 120);
     });
   }, true);
   const modeArmed = (e) =>
