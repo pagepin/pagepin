@@ -8,10 +8,10 @@ const SENT = '这里有一段可以选中的正文文字，用来验证文本锚
 const BOXES = [{ id: 't1', left: 40, top: 60, text: SENT }];
 const QUOTE = '可以选中的正文文字';
 
-// 选中 #t1 内的 QUOTE 并派发合成 click(真实交互里选区拖拽的 mouseup 自带 click;
-// Playwright 的真实 click 会先 mousedown 把选区塌掉,所以走合成事件)
-async function selectQuote(page) {
-  await page.evaluate((q) => {
+// 在 #t1 内构造 QUOTE 选区;withClick 时补派发合成 click(真实交互里选区拖拽的
+// mouseup 自带 click;Playwright 的真实 click 会先 mousedown 把选区塌掉,所以走合成事件)
+async function selectQuote(page, withClick = true) {
+  await page.evaluate(({ q, wc }) => {
     const host = document.getElementById('t1');
     const textNode = host.firstChild;
     const i = textNode.nodeValue.indexOf(q);
@@ -21,8 +21,8 @@ async function selectQuote(page) {
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(r);
-    host.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  }, QUOTE);
+    if (wc) host.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }, { q: QUOTE, wc: withClick });
 }
 
 test('评论模式选中文字 → 引文草稿 → 发布 POST 带 quote,渲染高亮条 + 行尾 pin', async ({ page }) => {
@@ -77,4 +77,59 @@ test('托盘头部:版本序数徽章 v3(不再显示 UUID);筛选钮无数字',
   await expect(page.locator('.pp-anno-tray-open')).toContainText('1');
   await expect(page.locator('[data-pp-filter="open"]')).toHaveText('Open');
   await expect(page.locator('[data-pp-filter="all"]')).toHaveText('All');
+});
+
+test('意图跟随:悬停文字 I-beam 撤描边,悬停留白亮元素框;脏拖不误打点;模式内无浮钮', async ({ page }) => {
+  await setup(page, { boxes: BOXES, threads: [] });
+  await goto(page);
+  await ready(page);
+  await dock(page).locator('[data-pp-act="comment"]').click();
+  // 指针压在文字字形上 → 文本意图:html 带 text-intent,元素描边撤下
+  const glyph = await page.evaluate(() => {
+    const r = document.createRange();
+    r.selectNodeContents(document.getElementById('t1').firstChild);
+    const rc = r.getClientRects()[0];
+    return { x: rc.left + 8, y: rc.top + rc.height / 2 };
+  });
+  await page.mouse.move(glyph.x, glyph.y);
+  await expect(page.locator('html')).toHaveClass(/pp-anno-text-intent/);
+  await expect(page.locator('.pp-anno-hover-hint')).toHaveCount(0);
+  // 指针落到盒子右下角留白 → 元素意图:描边回来
+  const box = await page.locator('#t1').boundingBox();
+  await page.mouse.move(box.x + box.width - 8, box.y + box.height - 6);
+  await expect(page.locator('html')).not.toHaveClass(/pp-anno-text-intent/);
+  await expect(page.locator('#t1')).toHaveClass(/pp-anno-hover-hint/);
+  // 脏拖(空白处拖了一段但没选到字)→ 不打点、无草稿
+  await page.mouse.move(600, 600);
+  await page.mouse.down();
+  await page.mouse.move(660, 640, { steps: 4 });
+  await page.mouse.up();
+  await expect(draft(page)).toHaveCount(0);
+  // 模式内选字不出浮钮(直通草稿的入口是带选区的 mouseup)
+  await selectQuote(page, false);
+  await page.waitForTimeout(450);
+  await expect(page.locator('[data-pp-role="quote-chip"]')).toHaveCount(0);
+});
+
+test('模式外随选随评:选中文字浮出泪滴钮 → 点击进引文草稿并发布;Esc 撤钮', async ({ page }) => {
+  let created = null;
+  await setup(page, { boxes: BOXES, threads: [], onCreate: (b) => (created = b) });
+  await goto(page);
+  await ready(page);
+  // 普通阅读态(不进评论模式)选字 → 消抖后浮钮出现在选区尾
+  await selectQuote(page, false);
+  const chip = page.locator('[data-pp-role="quote-chip"]');
+  await expect(chip).toBeVisible();
+  await page.keyboard.press('Escape'); // Esc 级联第一层:撤钮
+  await expect(chip).toHaveCount(0);
+  // 再选一次,点钮 → 同一条 quote 草稿管线
+  await selectQuote(page, false);
+  await expect(chip).toBeVisible();
+  await chip.click();
+  await expect(draft(page)).toBeVisible();
+  await expect(draft(page).locator('.pp-anno-dbubble-quote')).toContainText(QUOTE);
+  await draft(page).locator('textarea').fill('模式外随选随评');
+  await draft(page).locator('[data-pp-role="send"]').click();
+  await expect.poll(() => created && created.quote).toBe(QUOTE);
+  await expect(page.locator('.pp-anno-hlrect').first()).toBeVisible();
 });

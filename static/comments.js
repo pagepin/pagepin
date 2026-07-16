@@ -117,11 +117,12 @@
       'hint.resolve': 'resolve',
       'hint.hide': 'hide',
       'hint.enterReply': 'Enter to reply',
-      'hint.aim': 'Click an element or select text to comment · drag on an image to box a region · Esc to exit',
+      'hint.aim': 'Click an element · drag across text · drag on an image to box a region · Esc to exit',
       'aria.openDrawerUnresolved': 'Open review drawer ({open} unresolved)',
       'aria.openDrawerResolved': 'Open review drawer (all resolved)',
       'banner.resolved': 'Resolved',
       'chip.done': 'done',
+      'chip.quote': 'Comment on selection',
       'card.anchorLost': '⚠ Anchor lost — was on {selector}',
       'placeholder.addNote': 'Add a note…',
       'placeholder.reply': 'Reply…',
@@ -210,11 +211,12 @@
       'hint.resolve': '解决',
       'hint.hide': '隐藏',
       'hint.enterReply': '回车发送回复',
-      'hint.aim': '点击元素或选中文字来评论 · 在图片上拖拽框选区域 · 按 Esc 退出',
+      'hint.aim': '点击元素 · 拖选文字 · 图片上拖拽框选 · 按 Esc 退出',
       'aria.openDrawerUnresolved': '打开评审抽屉（{open} 条未解决）',
       'aria.openDrawerResolved': '打开评审抽屉（全部已解决）',
       'banner.resolved': '已解决',
       'chip.done': '已解决',
+      'chip.quote': '评论选中文字',
       'card.anchorLost': '⚠ 锚点丢失 —— 原本位于 {selector}',
       'placeholder.addNote': '添加备注…',
       'placeholder.reply': '回复…',
@@ -436,6 +438,11 @@
   .pp-anno-ic{display:inline-flex}.pp-anno-ic svg{display:block}
   .pp-anno-mode-on:not(.pp-anno-paused){cursor:crosshair}
   .pp-anno-mode-on:not(.pp-anno-paused) *:not(.pp-anno-root, .pp-anno-root *){cursor:crosshair!important}
+  /* 意图跟随:指针压在文字字形上 → I-beam(可选字暗示),盖过十字 */
+  .pp-anno-mode-on.pp-anno-text-intent:not(.pp-anno-paused){cursor:text}
+  .pp-anno-mode-on.pp-anno-text-intent:not(.pp-anno-paused) *:not(.pp-anno-root, .pp-anno-root *){cursor:text!important}
+  /* 评论模式的选区染潮色:选中时看到的 = 发布后高亮条的同一视觉语言 */
+  .pp-anno-mode-on ::selection{background:rgba(20,149,138,.28)}
   /* 评论/AIM 模式下触屏在图片上拖拽 = 框选而非滚页（Pointer Events 框选的触屏前提） */
   .pp-anno-mode-on:not(.pp-anno-paused) img{touch-action:none!important}
   .pp-anno-hover-hint{outline:2px solid #14958a!important;outline-offset:3px!important;
@@ -456,6 +463,9 @@
   .pp-anno-pin.pp-anno-resolved{filter:saturate(.4);box-shadow:0 2px 6px rgba(28,26,23,.2)}
   .pp-anno-pin.pp-anno-current{transform:translate(-4px,-24px) scale(1.16);z-index:2147482650;box-shadow:0 0 0 4px rgba(20,149,138,.2),0 3px 8px rgba(0,0,0,.28)}
   .pp-anno-pin.pp-anno-current:hover{transform:translate(-4px,-24px) scale(1.16)}
+  /* 模式外随选随评浮钮(Docs 式):选区尾浮出,泪滴形与 pin 同语言 */
+  .pp-anno-qchip{position:absolute;z-index:2147482600;margin-top:-14px;width:28px;height:28px;border-radius:999px 999px 999px 4px;border:2px solid #fff;background:#0f7c72;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;box-shadow:0 2px 6px rgba(0,0,0,.25);animation:lumBubbleIn .2s cubic-bezier(.2,.8,.3,1) both}
+  .pp-anno-qchip:hover{background:#0b6358}
   .pp-anno-region{position:absolute;z-index:2147481900;border:2px solid;border-radius:5px;pointer-events:none;box-sizing:border-box}
   /* 文本锚点高亮条(quote 命中行;桌面 render 内联开 pointer-events) */
   .pp-anno-hlrect{position:absolute;z-index:2147481900;border-radius:2px;pointer-events:none;box-sizing:border-box;transition:background .18s}
@@ -797,7 +807,7 @@
   /* Lumen 桌面件的 reduced-motion 静态降级 */
   @media (prefers-reduced-motion:reduce){
     .pp-anno-tray,.pp-anno-card.pp-anno-pop,.pp-anno-dbubble,.pp-anno-seal,.pp-anno-seal-in{animation:none}
-    .pp-anno-pin.pp-anno-current::after,.pp-anno-halo,.pp-anno-riser,.pp-anno-sweep,.pp-anno-bead i,.pp-anno-badge-lost{animation:none}
+    .pp-anno-pin.pp-anno-current::after,.pp-anno-halo,.pp-anno-riser,.pp-anno-sweep,.pp-anno-bead i,.pp-anno-badge-lost,.pp-anno-qchip{animation:none}
     .pp-anno-halo,.pp-anno-riser,.pp-anno-sweep{display:none}
   }
   `;
@@ -2505,6 +2515,7 @@
     if (vignetteEl) { vignetteEl.remove(); vignetteEl = null; }
     if (MOBILE) { teardownAim(); syncFlags(); render(); return; }
     if (hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
+    document.documentElement.classList.remove('pp-anno-text-intent');
     renderDrawer();
     syncFlags();
   }
@@ -2524,13 +2535,53 @@
     } else if (h) h.remove();
   }
 
-  /* ---------------- 评论模式 hover + 打点（保留几何） ---------------- */
+  /* ---------------- 评论模式 hover + 意图跟随(指哪评哪) ----------------
+   * 指针压在文字字形上 = 文本意图:撤元素描边、I-beam(拖一下就能选字);
+   * 落在图片/按钮/留白/段间距上 = 元素意图:teal 描边 + 十字(点一下打点)。
+   * 拖选进行中(选区未塌)一律按文本意图,让位给选区蓝。 */
   let hoverHint = null;
-  document.addEventListener('mouseover', (e) => {
-    if (state.mode !== 'comment' || state.draft) return;
-    if (hoverHint) hoverHint.classList.remove('pp-anno-hover-hint');
-    hoverHint = e.target.closest('[data-pp-anno]') ? null : e.target;
-    if (hoverHint && hoverHint !== document.body) hoverHint.classList.add('pp-anno-hover-hint');
+  let hoverRaf = 0;
+  // 字形命中测试:caret API 找到最近文本节点后,再验证指针真的压在该节点的渲染矩形上
+  function overTextGlyph(x, y) {
+    let node = null;
+    try {
+      if (document.caretPositionFromPoint) {
+        const cp = document.caretPositionFromPoint(x, y);
+        node = cp && cp.offsetNode;
+      } else if (document.caretRangeFromPoint) {
+        const cr = document.caretRangeFromPoint(x, y);
+        node = cr && cr.startContainer;
+      }
+    } catch (e) { return false; }
+    if (!node || node.nodeType !== 3 || !norm(node.nodeValue || '')) return false;
+    const r = document.createRange();
+    r.selectNodeContents(node);
+    const rects = r.getClientRects();
+    for (let i = 0; i < rects.length; i++) {
+      const rc = rects[i];
+      if (x >= rc.left - 2 && x <= rc.right + 2 && y >= rc.top - 1 && y <= rc.bottom + 1) return true;
+    }
+    return false;
+  }
+  function setTextIntent(on) {
+    document.documentElement.classList.toggle('pp-anno-text-intent', on);
+    if (on && hoverHint) { hoverHint.classList.remove('pp-anno-hover-hint'); hoverHint = null; }
+  }
+  document.addEventListener('mousemove', (e) => {
+    if (state.mode !== 'comment' || state.draft || MOBILE) return;
+    if (hoverRaf) return; // rAF 节流:一帧最多测一次字形
+    const cx = e.clientX, cy = e.clientY, target = e.target;
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0;
+      if (state.mode !== 'comment' || state.draft) return;
+      let sel = null;
+      try { sel = window.getSelection(); } catch (err) { /* 忽略 */ }
+      if ((sel && !sel.isCollapsed) || overTextGlyph(cx, cy)) { setTextIntent(true); return; }
+      setTextIntent(false);
+      if (hoverHint) hoverHint.classList.remove('pp-anno-hover-hint');
+      hoverHint = target.closest && target.closest('[data-pp-anno]') ? null : target;
+      if (hoverHint && hoverHint !== document.body) hoverHint.classList.add('pp-anno-hover-hint');
+    });
   }, true);
   const modeArmed = (e) =>
     state.mode === 'comment' && !state.draft &&
@@ -2620,6 +2671,61 @@
     return true;
   }
 
+  /* ---------------- 模式外随选随评(Docs 式) ----------------
+   * 普通阅读态选中一段文字 → 停 300ms 消抖后在选区尾浮出泪滴 💬 钮,点击进同一条
+   * quote 草稿管线。选字复制的人不被打扰:钮不抢焦点(pointerdown preventDefault
+   * 保住选区)、不挡 ⌘C;模式内不出钮(在模式里选完直通草稿)。 */
+  let quoteChip = null;
+  let chipTimer = 0;
+  function removeQuoteChip() { if (quoteChip) { quoteChip.remove(); quoteChip = null; } }
+  function maybeShowQuoteChip() {
+    removeQuoteChip();
+    if (MOBILE || !layer || !state.viewer) return;
+    if (state.mode === 'comment' || state.draft) return;
+    let sel = null;
+    try { sel = window.getSelection(); } catch (e) { return; }
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    const quote = sel.toString().trim();
+    if (quote.length < 2 || quote.length > 200) return;
+    const range = sel.getRangeAt(0);
+    let host = range.commonAncestorContainer;
+    host = host.nodeType === 1 ? host : host.parentElement;
+    if (!host || (host.closest && host.closest('[data-pp-anno]'))) return;
+    const ae = document.activeElement;
+    if (ae && /INPUT|TEXTAREA/.test(ae.tagName || '')) return; // 输入框里的选字不打扰
+    if (!findQuoteRange(host, quote)) return; // 跨块拼不回连续原文 → 不出钮
+    const rects = range.getClientRects();
+    const last = rects[rects.length - 1];
+    const hr = host.getBoundingClientRect();
+    if (!last || !hr.width || !hr.height) return;
+    const cl = (v) => Math.min(1, Math.max(0, v));
+    // mousedown 会塌选区 → 参数在出钮时就锁死,点击时不再读选区
+    const args = [cssPath(host), cl((last.right - hr.left) / hr.width), cl((last.top - hr.top) / hr.height), null, quote];
+    const chip = el('button', 'pp-anno-qchip');
+    chip.dataset.ppAnno = '1';
+    chip.dataset.ppRole = 'quote-chip';
+    chip.title = tr('chip.quote');
+    chip.setAttribute('aria-label', tr('chip.quote'));
+    chip.appendChild(svg(ICON.msg, 13));
+    chip.style.left = (last.right + scrollX + 6) + 'px';
+    chip.style.top = (last.top + scrollY + last.height / 2) + 'px';
+    chip.onpointerdown = (e) => e.preventDefault(); // 保住选区视觉到点击完成
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      removeQuoteChip();
+      try { window.getSelection().removeAllRanges(); } catch (err) { /* 忽略 */ }
+      openDraftFor.apply(null, args);
+    };
+    layer.appendChild(chip);
+    quoteChip = chip;
+  }
+  document.addEventListener('selectionchange', () => {
+    if (MOBILE) return;
+    clearTimeout(chipTimer);
+    removeQuoteChip(); // 选区一动即撤,停稳 300ms 再评估(拖选过程不闪)
+    chipTimer = setTimeout(maybeShowQuoteChip, 300);
+  });
+
   function composeAt(e) {
     const node = e.target;
     const r = node.getBoundingClientRect();
@@ -2628,6 +2734,9 @@
     openDraftFor(cssPath(node), Math.min(1, Math.max(0, rx)), Math.min(1, Math.max(0, ry)));
   }
 
+  // 净点击才打点:pointerdown 记起点,click(=mouseup)位移 >5px 视为脏拖
+  let modeDownAt = null;
+  document.addEventListener('pointerdown', (e) => { if (e.isPrimary) modeDownAt = { x: e.clientX, y: e.clientY }; }, true);
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-pp-anno]')) return; // 自家 UI 的点击永不抑制（触屏拖拽后 400ms 内点「发送」不能被吞）
     if (Date.now() < suppressClickUntil) { suppressClickUntil = 0; e.preventDefault(); e.stopPropagation(); return; }
@@ -2645,6 +2754,8 @@
       // 已有草稿开着：⌥/⌘ 是明确意图直接换锚点；否则这次点击只收掉草稿
       // （空稿关；有稿则 clearDraft 抖动并返回 false → 不重建，保住 textarea 焦点与光标）
       if (quoteSelectionDraft()) return; // 带着选区的 mouseup → 文本锚点草稿
+      // 脏拖(拖了但选区塌了/跨块拼不回连续原文):什么都不发生 —— 不误打点,也不动现有草稿
+      if (modeDownAt && Math.hypot(e.clientX - modeDownAt.x, e.clientY - modeDownAt.y) > 5) return;
       if (state.draft && !e.altKey && !e.metaKey) { if (clearDraft()) { renderDrawer(); render(); syncFlags(); } return; }
       composeAt(e);
       return;
@@ -2657,9 +2768,10 @@
     const typing = /INPUT|TEXTAREA|SELECT/.test(ae.tagName || '') || (ae && ae.isContentEditable);
     if (e.key === 'Escape') {
       if (typing) return; // textarea 自己的 onkeydown 处理 Esc
-      // Esc 级联（桌面）：草稿 → popover → seal → 横幅 → 托盘 → 退评论模式；命中一层即消费
+      // Esc 级联（桌面）：草稿 → 选区浮钮 → popover → seal → 横幅 → 托盘 → 退评论模式；命中一层即消费
       if (state.draft) { clearDraft(true); renderDrawer(); render(); syncFlags(); return; }
       if (!MOBILE) {
+        if (quoteChip) { removeQuoteChip(); return; }
         if (state.focusedId) { closeCard(); return; }
         if (state.seal) { dismissSeal(); return; }
         if (moments.banner) { moments.banner.remove(); moments.banner = null; return; }
