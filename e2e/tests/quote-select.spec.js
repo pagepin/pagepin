@@ -147,3 +147,26 @@ test('草稿气泡压在既有 pin 之上(pin 曾嵌进输入框的回归)', asy
   }));
   expect(z.draft).toBeGreaterThan(z.pinMax);
 });
+
+test('Esc 严格剥一层:先收草稿(留在模式),再退模式;回复框 Esc 只清输入不关 popover', async ({ page }) => {
+  await setup(page, { boxes: BOXES, threads: [mkThread(1, '#t1')] });
+  await goto(page);
+  await ready(page);
+  await dock(page).locator('[data-pp-act="collapse"]').click(); // 收托盘(用户环境:无托盘垫背)
+  await page.keyboard.press('c');
+  await page.locator('#t1').click({ position: { x: 150, y: 60 } });
+  await expect(draft(page)).toBeVisible();
+  await page.keyboard.press('Escape'); // 第一层:只收草稿(此前 bug:同键连托盘/模式一起剥)
+  await expect(draft(page)).toHaveCount(0);
+  await expect(page.locator('html')).toHaveClass(/pp-anno-mode-on/);
+  await page.keyboard.press('Escape'); // 第二层:退模式
+  await expect(page.locator('html')).not.toHaveClass(/pp-anno-mode-on/);
+  // 回复框 Esc:清输入、popover 保持展开
+  await pin(page, 1).click();
+  await expect(focusedCard(page)).toBeVisible();
+  const reply = focusedCard(page).locator('[data-pp-role="reply"]');
+  await reply.fill('还没发出去的回复');
+  await reply.press('Escape');
+  await expect(focusedCard(page)).toBeVisible();
+  await expect(reply).toHaveValue('');
+});

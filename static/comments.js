@@ -1520,7 +1520,7 @@
     ta.onkeydown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submit(); }
       else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
-      else if (e.key === 'Escape') { e.preventDefault(); clearDraft(true); renderDrawer(); render(); syncFlags(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); clearDraft(true); renderDrawer(); render(); syncFlags(); }
     };
 
     if (draftEl) draftEl.remove();
@@ -1980,7 +1980,7 @@
     send.onclick = (e) => { e.stopPropagation(); void submit(); };
     ta.onkeydown = (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
-      else if (e.key === 'Escape') { e.preventDefault(); state.replyStash.delete(t.id); ta.value = ''; ta.blur(); syncFlags(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); state.replyStash.delete(t.id); ta.value = ''; ta.blur(); syncFlags(); }
     };
     return wrap;
   }
@@ -2360,7 +2360,7 @@
     ta.onkeydown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submit(); }
       else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
-      else if (e.key === 'Escape') { e.preventDefault(); clearDraft(true); renderDrawer(); render(); syncFlags(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); clearDraft(true); renderDrawer(); render(); syncFlags(); }
     };
     card.appendChild(bd);
     return card;
