@@ -470,6 +470,8 @@
   /* 文本锚点高亮条(quote 命中行;桌面 render 内联开 pointer-events) */
   .pp-anno-hlrect{position:absolute;z-index:2147481900;border-radius:2px;pointer-events:none;box-sizing:border-box;transition:background .18s}
   .pp-anno-hlrect.pp-anno-resolved{opacity:.6}
+  /* 评论模式内高亮条/区域框让路:打点/选字直达底下的页面元素(阅读态仍可点它们聚焦线程) */
+  .pp-anno-mode-on .pp-anno-hlrect,.pp-anno-mode-on .pp-anno-region{pointer-events:none!important}
   .pp-anno-region.pp-anno-resolved{opacity:.35;filter:saturate(.3)}
   /* 桌面 box 区域 = Lumen highlight（底部 2px line；可点=聚焦线程）——移动端保持原全框，勿改 */
   .pp-anno-root:not(.pp-anno-mobile) .pp-anno-region{border:none;border-bottom:2px solid;border-radius:2px;transition:background .18s}
@@ -1989,6 +1991,8 @@
   function focusThread(id, scroll) {
     const t = byId(id);
     if (!t) return;
+    // 有字草稿不被 pin/高亮/托盘点击静默吞掉:抖动示意,先发布或显式取消(桌面;移动端草稿住 sheet 内可共存)
+    if (!MOBILE && state.draft && draftHasText()) { shakeDraft(); return; }
     state.focusedId = id;
     if (MOBILE) {
       // 选中线程时 sheet 至少抬到 HALF（peek 只够扫一眼）；已在 half/full 保持不动
@@ -2093,11 +2097,14 @@
     return true;
   }
   function openDraftFor(selector, rx, ry, box, quote) {
-    if (!clearDraft()) return; // 已有未发草稿：拦截
+    // 草稿搬家:已有草稿时,新的锚定手势把稿(文字+kind)原样搬到新锚点。
+    // 丢字只发生在显式动作(取消钮/Esc)上,所以这里不再拦截/抖动。
+    const carry = state.draft ? { text: state.draft.text || '', kind: state.draft.kind || null } : null;
+    if (carry) clearDraft(true); // 旧稿清场(rubber 等一并清理),内容已带走
     // 桌面：不退出评论模式 —— 保留十字光标以便连续打点，并让评论模式下的「点空白关空草稿」两步式继续生效。
     // 移动（Tideline）：打完点即退出 AIM（压暗/点亮框/指令条撤掉），草稿落进 sheet。
     if (MOBILE && state.mode === 'comment') { state.mode = 'rest'; teardownAim(); }
-    const d = { selector, rx: rx == null ? 0.5 : rx, ry: ry == null ? 0.5 : ry, box: box || null, quote: quote || null, kind: null, text: '' };
+    const d = { selector, rx: rx == null ? 0.5 : rx, ry: ry == null ? 0.5 : ry, box: box || null, quote: quote || null, kind: carry ? carry.kind : null, text: carry ? carry.text : '' };
     // box-select：在页面上画持久预览框 + 提供随滚动重摆的几何
     if (box && selector !== PAGE_SELECTOR) {
       let node = null;
@@ -2125,7 +2132,7 @@
       const p = panel();
       if (!p) return;
       const ta = p.querySelector('[data-pp-role="draft"] textarea');
-      if (ta) ta.focus();
+      if (ta) { ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) { /* 忽略 */ } }
       const card = p.querySelector('[data-pp-role="draft"]');
       if (card) card.scrollIntoView({ block: 'nearest' });
     });
@@ -2771,8 +2778,7 @@
       if (quoteSelectionDraft()) return; // 带着选区的 mouseup → 文本锚点草稿
       // 脏拖(拖了但选区塌了/跨块拼不回连续原文):什么都不发生 —— 不误打点,也不动现有草稿
       if (modeDownAt && Math.hypot(e.clientX - modeDownAt.x, e.clientY - modeDownAt.y) > 5) return;
-      if (state.draft && !e.altKey && !e.metaKey) { if (clearDraft()) { renderDrawer(); render(); syncFlags(); } return; }
-      composeAt(e);
+      composeAt(e); // 已有草稿时 openDraftFor 会连字带 kind 搬家,不需要先清场
       return;
     }
   }, true);

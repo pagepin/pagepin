@@ -170,3 +170,30 @@ test('Esc 严格剥一层:先收草稿(留在模式),再退模式;回复框 Esc 
   await expect(focusedCard(page)).toBeVisible();
   await expect(reply).toHaveValue('');
 });
+
+test('模式内高亮条让路:被高亮的文字可直接打点(搬家);有字稿点 pin 抖动保护不吞稿', async ({ page }) => {
+  const BOXES2 = [...BOXES, { id: 't2', left: 400, top: 60, text: '第二个盒子的内容' }];
+  const t = mkThread(1, '#t1', { quote: QUOTE });
+  await setup(page, { boxes: BOXES2, threads: [t] });
+  await goto(page);
+  await ready(page);
+  await expect(page.locator('.pp-anno-hlrect').first()).toBeVisible();
+  await page.keyboard.press('c');
+  // 点在高亮条上(末行左端,避开悬在行尾上方的 pin):不再被 hlrect 截胡(此前 bug),直达底下元素打点
+  // 进模式会级联重渲染高亮条(节点反复重建但几何稳定):轮询到拿到几何为止
+  let hb = null;
+  await expect
+    .poll(async () => ((hb = await page.locator('.pp-anno-hlrect').last().boundingBox()), !!hb))
+    .toBe(true);
+  await page.mouse.click(hb.x + 10, hb.y + hb.height / 2);
+  await expect(draft(page)).toBeVisible();
+  await expect(page.locator('[data-pp-focused="1"]')).toHaveCount(0); // 没被截胡成聚焦线程
+  // 空稿搬家到 t2,写半段字,再点 pin:抖动保留,不静默吞稿
+  await page.locator('#t2').click({ position: { x: 150, y: 60 } });
+  await expect(draft(page)).toBeVisible();
+  await draft(page).locator('textarea').fill('写了一半');
+  await pin(page, 1).click();
+  await expect(draft(page)).toBeVisible();
+  await expect(draft(page).locator('textarea')).toHaveValue('写了一半');
+  await expect(page.locator('[data-pp-focused="1"]')).toHaveCount(0);
+});
