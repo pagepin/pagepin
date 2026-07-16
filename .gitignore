@@ -38,3 +38,6 @@ brand/
 ds-bundle/
 ds-bundle-v1/
 ds-bundle-comments/
+
+# local-only mise env (dev credentials, never commit)
+mise.local.toml
