@@ -15,6 +15,12 @@ Deploy any HTML report or static site with one `curl`, share the link, and let r
 
 > **Try it without installing** — drop an HTML or Markdown file on [pagepin.ai](https://pagepin.ai) for an instant 1-hour trial link (no account), or [start free on the managed Beta](https://app.pagepin.ai/signup). Export and self-host anytime.
 
+Give your coding agent the skill in one command:
+
+```bash
+npx skills add pagepin/pagepin -g
+```
+
 ## Features
 
 - **One-command deploys** — multipart `POST /api/sites/{slug}/deploy`; redeploying the same slug publishes a new atomic version.
