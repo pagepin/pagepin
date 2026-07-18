@@ -147,6 +147,8 @@
       'card.staleVer': 'written on {v} · may be stale',
       'card.lostKept': 'anchor lost · comment kept',
       'badge.lost': 'anchor lost',
+      'badge.changed': 'content changed',
+      'card.anchorChanged': '⚠ Content changed — still at {selector}',
       'card.resolvedAt': 'Resolved · at {v}',
       'card.resolved': 'Resolved',
       'hint.close': 'close',
@@ -241,6 +243,8 @@
       'card.staleVer': '写于 {v} · 可能过期',
       'card.lostKept': '锚点丢失 · 评论仍保留',
       'badge.lost': '锚点丢失',
+      'badge.changed': '内容已变',
+      'card.anchorChanged': '⚠ 内容已变 —— 仍在 {selector}',
       'card.resolvedAt': '已解决 · 于 {v}',
       'card.resolved': '已解决',
       'hint.close': '关闭',
@@ -1290,7 +1294,7 @@
     lab.style.color = t.resolved ? '#9aa1a9' : '#0b6358';
     l1.appendChild(lab);
     if (isGuestSub(t.comments[0].author_sub)) l1.appendChild(guestBadge());
-    if (stale) l1.appendChild(el('span', 'pp-anno-badge-lost', tr('badge.lost')));
+    if (stale) l1.appendChild(el('span', 'pp-anno-badge-lost', tr(a.status === 'changed' ? 'badge.changed' : 'badge.lost')));
     if (t.resolved) {
       const dn = el('span', 'pp-anno-badge-done');
       dn.appendChild(svg(ICON.check, 9));
@@ -1357,7 +1361,7 @@
     const hd = el('div', 'pp-anno-pop-hd');
     hd.appendChild(el('span', 'pp-anno-pop-sel', isPage(t) ? '@page'
       : t.quote ? '\u201c' + t.quote + '\u201d' : '#' + anchorLabel(t.selector)));
-    if (stale) hd.appendChild(el('span', 'pp-anno-badge-lost', tr('badge.lost')));
+    if (stale) hd.appendChild(el('span', 'pp-anno-badge-lost', tr(a.status === 'changed' ? 'badge.changed' : 'badge.lost')));
     // x/x 按文档序实时算(不依赖 render() 的 _num,新建线程立即有编号)
     const oks = orderedVisible().filter((x) => x.a.status === 'ok');
     const oi = oks.findIndex((x) => x.t.id === t.id);
@@ -1748,7 +1752,7 @@
     if (focused) line1.appendChild(el('span', 'pp-anno-when', '· ' + fmtTime(t.comments[0].created_at)));
     const line2 = el('div'); line2.style.display = 'flex'; line2.style.alignItems = 'center'; line2.style.gap = '6px';
     if (stale) {
-      const sb = el('span', 'pp-anno-stalebadge', tr('card.anchorLost', { selector: t.selector }));
+      const sb = el('span', 'pp-anno-stalebadge', tr(a.status === 'changed' ? 'card.anchorChanged' : 'card.anchorLost', { selector: t.selector }));
       line2.appendChild(sb);
     } else {
       const an = el('span', 'pp-anno-anchor', isPage(t) ? '@page' : `${t._num != null ? t._num + ' · ' : ''}#${anchorLabel(t.selector)}`);
