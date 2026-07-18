@@ -38,7 +38,12 @@ import {
 import { t, type Locale } from './i18n/index.js';
 import { jsonError, localeOf } from './i18n/locale.js';
 import type { Plane } from './auth/sessions.js';
-import { readSession, setOauthNonce } from './auth/sessions.js';
+import {
+  readSession,
+  renewalCookieHeaders,
+  sessionNeedsRenewal,
+  setOauthNonce,
+} from './auth/sessions.js';
 import {
   mintShareSession,
   readActiveShareSession,
@@ -875,7 +880,10 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
           shareSess.gst,
           shareSess.lnk,
         );
-        c.set('shareRenewCookie', shareCookieHeader(cfg, site.id, tok, exp2));
+        c.set('renewCookies', [
+          ...(c.get('renewCookies') ?? []),
+          shareCookieHeader(cfg, site.id, tok, exp2),
+        ]);
       }
     }
     const shareViewer = shareSess !== null;
@@ -891,6 +899,15 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
           .where(eq(users.id, claims.sub))
       )[0];
       viewerActive = u !== undefined && !u.disabled && (claims.epo ?? 0) === u.sessionEpoch;
+      // viewer 会话滑动续期(与分享会话同一补头通道):HTML 导航上剩余不足半个 TTL 才重种
+      if (viewerActive && sessionNeedsRenewal(cfg, claims)) {
+        if ((c.req.header('accept') ?? '').includes('text/html')) {
+          c.set('renewCookies', [
+            ...(c.get('renewCookies') ?? []),
+            ...(await renewalCookieHeaders(cfg, claims)),
+          ]);
+        }
+      }
     }
     // AI agent 发现:X-Pagepin-* 响应头。用户部署的页面字节原样不动(byte-preservation),
     // 响应头是那一侧唯一无侵入的线索通道;门页(pagepin 自己的 HTML)另有页内线索(agentHint)。
@@ -1164,8 +1181,7 @@ export function makeServingRoutes(deps: AppDeps, opts: ServingOptions = {}): Hon
   // 滑动续期补头:serve() 直接 new Response 返回时 hono 预备头会丢,统一在这里落到成品响应
   const applyShareRenew = async (c: Context<AppEnv>, next: () => Promise<void>) => {
     await next();
-    const renew = c.get('shareRenewCookie');
-    if (renew) c.res.headers.append('Set-Cookie', renew);
+    for (const renew of c.get('renewCookies') ?? []) c.res.headers.append('Set-Cookie', renew);
   };
 
   // 无尾斜杠精确路由必须先注册:Hono 的尾部 /* 也会匹配不带斜杠的 /:handle/:slug

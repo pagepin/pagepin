@@ -10,10 +10,12 @@ import { Turnstile } from './Turnstile';
 /** 登录 / 注册页（password 模式）。oidc/none 模式只展示一个 SSO 登录入口。
  *  password 模式 + 配了社交 provider 时,密码表单上方加社交登录按钮。
  *  `?mode=signup` 直落注册态(官网 CTA 用),注册未开放时回落登录态。
- *  本页不调 /api/me，避免 401 跳转死循环。 */
+ *  已登录探测:裸 fetch /api/me（不走 api 层，避免其 401 重定向造成死循环）——
+ *  会话还活着就直接进控制台，不让用户白输一遍密码。 */
 export function Login() {
   const t = useT();
   const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [probing, setProbing] = useState(true);
   const [mode, setMode] = useState<'login' | 'signup'>(() =>
     new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'login',
   );
@@ -38,6 +40,22 @@ export function Login() {
   // 只允许站内相对路径,防 open redirect / javascript: URI(与服务端 safeNext 同规则)
   const rawNext = new URLSearchParams(location.search).get('next') || '/';
   const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/';
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/me', { credentials: 'same-origin' })
+      .then((r) => {
+        if (cancelled) return;
+        if (r.ok) location.replace(next);
+        else setProbing(false);
+      })
+      .catch(() => {
+        if (!cancelled) setProbing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [next]);
   // URL 请求的 signup 态只在注册开放时生效(否则回落登录,避免提交必 403 的表单)
   const wantSignup = mode === 'signup' && !!config?.allow_signup;
 
@@ -73,7 +91,7 @@ export function Login() {
     }
   }
 
-  if (!config) {
+  if (!config || probing) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="flex items-center gap-2 text-ink-400">

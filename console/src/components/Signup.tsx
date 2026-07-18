@@ -11,6 +11,7 @@ import { Turnstile } from './Turnstile';
 export function Signup() {
   const t = useT();
   const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [probing, setProbing] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -29,7 +30,24 @@ export function Signup() {
     };
   }, []);
 
-  if (!config) {
+  // 已登录探测(裸 fetch,避开 api 层 401 重定向):有会话直接进控制台
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/me', { credentials: 'same-origin' })
+      .then((r) => {
+        if (cancelled) return;
+        if (r.ok) location.replace('/');
+        else setProbing(false);
+      })
+      .catch(() => {
+        if (!cancelled) setProbing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!config || probing) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-5 w-5 animate-spin text-ink-400" />

@@ -304,7 +304,8 @@ export function loadConfig(env: Env): Config {
     turnstile,
     mail,
     secret,
-    sessionTtlH: num(env, 'PAGEPIN_SESSION_TTL_H', 8),
+    // 14 天 + 滑动续期(auth/sessions.ts):常用者不掉线,闲置两周才重登;epoch 机制保留主动失效能力
+    sessionTtlH: num(env, 'PAGEPIN_SESSION_TTL_H', 336),
     oidc,
     storage,
     s3,

@@ -10,7 +10,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { and, eq, isNull } from 'drizzle-orm';
 
-import { csrfOk, readSession } from '../auth/sessions.js';
+import { csrfOk, readSession, renewSessionCookies, sessionNeedsRenewal } from '../auth/sessions.js';
 import { apiTokens, identities, users } from '../db/index.js';
 import type { UserRow } from '../db/index.js';
 import { jsonError } from '../i18n/locale.js';
@@ -97,6 +97,9 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     if (user.disabled) return jsonError(c, 403, 'auth.account.disabled');
     // sessionEpoch 比对:断开身份/禁用会 bump epoch,旧会话(epo 不匹配)即失效(?? 0 兼容旧 token)
     if ((claims.epo ?? 0) !== user.sessionEpoch) return jsonError(c, 401, 'auth.sessionExpired');
+    // 滑动续期:认证通过且剩余不足半个 TTL → 重铸重种(csrf 原值,双提交配对不破)。
+    // SPA 每次打开都会打 /api/me,常用者的会话因此永不过期;主动失效仍走 epoch。
+    if (sessionNeedsRenewal(cfg, claims)) await renewSessionCookies(c, cfg, claims);
     c.set('sessionClaims', claims);
     c.set('authVia', 'cookie');
     c.set('user', user);

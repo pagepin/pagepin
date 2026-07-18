@@ -107,6 +107,58 @@ export async function setLoginCookies(
   }
 }
 
+/** 滑动续期判定:会话有效但剩余不足 TTL 一半 → 该重铸了(限频:最多每半个 TTL 重种一次)。 */
+export function sessionNeedsRenewal(cfg: Config, claims: SessionClaims): boolean {
+  return claims.exp - Math.floor(Date.now() / 1000) < ttl(cfg) / 2;
+}
+
+/** 滑动续期:用原 claims 重铸(sub/hdl/epo/csrf 全部原值,csrf Cookie 同步重种保双提交配对)。
+ *  走 hono 预备头,适用于 c.json/c.html 响应路径(API 平面);serving 的裸 Response 路径
+ *  用 renewalCookieHeaders 序列化后经中间件补头。 */
+export async function renewSessionCookies(
+  c: Context,
+  cfg: Config,
+  claims: SessionClaims,
+): Promise<void> {
+  const common = {
+    httpOnly: true,
+    secure: cfg.secureCookies,
+    sameSite: 'Lax' as const,
+    maxAge: ttl(cfg),
+    path: '/',
+  };
+  if (claims.pln === 'view') {
+    setCookie(
+      c,
+      VIEW_COOKIE,
+      await mint(cfg, 'view', claims.sub, claims.hdl, claims.epo ?? 0),
+      common,
+    );
+  } else {
+    setCookie(
+      c,
+      SESSION_COOKIE,
+      await mint(cfg, 'session', claims.sub, claims.hdl, claims.epo ?? 0, claims.csrf),
+      common,
+    );
+    if (claims.csrf) setCookie(c, CSRF_COOKIE, claims.csrf, { ...common, httpOnly: false });
+  }
+}
+
+/** 与 renewSessionCookies 同口径的序列化 Set-Cookie 值(裸 Response 补头用)。 */
+export async function renewalCookieHeaders(cfg: Config, claims: SessionClaims): Promise<string[]> {
+  const attrs =
+    `; Max-Age=${ttl(cfg)}; Path=/; SameSite=Lax` + (cfg.secureCookies ? '; Secure' : '');
+  if (claims.pln === 'view') {
+    const tok = await mint(cfg, 'view', claims.sub, claims.hdl, claims.epo ?? 0);
+    return [`${VIEW_COOKIE}=${tok}${attrs}; HttpOnly`];
+  }
+  const tok = await mint(cfg, 'session', claims.sub, claims.hdl, claims.epo ?? 0, claims.csrf);
+  const out = [`${SESSION_COOKIE}=${tok}${attrs}; HttpOnly`];
+  if (claims.csrf) out.push(`${CSRF_COOKIE}=${claims.csrf}${attrs}`);
+  return out;
+}
+
 export function clearLoginCookies(c: Context, plane: Plane): void {
   if (plane === 'view') {
     deleteCookie(c, VIEW_COOKIE, { path: '/' });
