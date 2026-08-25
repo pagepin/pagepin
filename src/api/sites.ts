@@ -416,6 +416,7 @@ function parseLaxBool(v: unknown): boolean | null {
 interface SitePatchBody {
   visibility?: string | null;
   public_hours?: number | null;
+  public_forever?: boolean | null;
   title?: string | null;
   spa_fallback?: boolean | null;
   comments_enabled?: boolean | null;
@@ -664,11 +665,21 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
     if (!site) return jsonError(c, 404, 'site.notFound');
 
     const set: Partial<typeof sites.$inferInsert> = {};
+    // 永久公开:publicExpiresAt=null(与 public_hours 互斥,forever 优先且不受 publicMaxHours 约束)。
+    // 只有同一请求把站点设为 public 才有意义,否则 422 —— 免得静默无效。
+    let publicForever = false;
+    if (body.public_forever != null) {
+      const b = parseLaxBool(body.public_forever);
+      if (b === null) return jsonError(c, 422, 'site.publicForever.notBool');
+      publicForever = b;
+    }
     if (body.visibility != null) {
       if (body.visibility !== 'private' && body.visibility !== 'public') {
         return jsonError(c, 422, 'site.visibility.invalid');
       }
-      if (body.visibility === 'public') {
+      if (body.visibility === 'public' && publicForever) {
+        set.publicExpiresAt = null; // 永久:public_hours 一并忽略,不报错
+      } else if (body.visibility === 'public') {
         // 对齐 pydantic int|None:非整数(含 bool/字符串/小数)一律 422,而非 NaN 落库或 500
         const raw = body.public_hours;
         if (raw != null && (typeof raw !== 'number' || !Number.isInteger(raw))) {
@@ -682,6 +693,9 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
         set.publicExpiresAt = null;
       }
       set.visibility = body.visibility;
+    }
+    if (publicForever && body.visibility !== 'public') {
+      return jsonError(c, 422, 'site.publicForever.requiresPublic');
     }
     if (body.title != null) {
       if (typeof body.title !== 'string') return jsonError(c, 422, 'site.title.notString');

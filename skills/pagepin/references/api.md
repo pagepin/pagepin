@@ -13,7 +13,7 @@ Authoritative quotas always come from `GET /api/me`.
 | `GET /api/me/usage` | Current storage usage against the instance limits |
 | `GET /api/sites` | List my sites |
 | `POST /api/sites/{slug}/deploy` | Deploy/update (multipart; one atomic version). See below |
-| `PATCH /api/sites/{slug}` | Set `{"visibility":"public","public_hours":72}` / `{"visibility":"private"}`; also `{"title":"…"}`, `{"spa_fallback":true}` |
+| `PATCH /api/sites/{slug}` | Set `{"visibility":"public","public_hours":72}` / `{"visibility":"public","public_forever":true}` / `{"visibility":"private"}`; also `{"title":"…"}`, `{"spa_fallback":true}` |
 | `GET /api/sites/{slug}/versions` | Version list (incl. current) |
 | `POST /api/sites/{slug}/rollback` | `{"version_id":"…"}` — point current version backward |
 | `DELETE /api/sites/{slug}` | Delete the site |
@@ -104,7 +104,11 @@ thread you can't judge, relay it to the user rather than resolving it yourself.
   (the `free_user_mb` field, default 1GB across all your sites/versions; `0` =
   unlimited). **Always defer to the `limits` returned by `GET /api/me`.**
 - The `public_hours` upper bound follows server config (default 168 hours =
-  7 days); anything beyond is hard-clamped.
+  7 days); anything beyond is hard-clamped. `{"public_forever":true}` opts out of
+  the window entirely (no cap, `public_expires_at` comes back `null`, and any
+  `public_hours` in the same request is ignored); it requires
+  `"visibility":"public"` in that same request, otherwise `422`
+  `site.publicForever.requiresPublic`.
 - `401` invalid or revoked token · `404` site not found · `409` set a handle in
   the console first · `413` size limit exceeded · `422` invalid slug/path.
 - **Recovering from first-run 4xx** (fresh accounts hit these; don't give up):

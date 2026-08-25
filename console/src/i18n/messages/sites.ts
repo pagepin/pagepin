@@ -33,6 +33,8 @@ export const sites: Record<Locale, Record<string, string>> = {
     'sites.badge.disabledTitle': 'Disabled by an administrator — returns 451 to everyone',
     'sites.badge.disabled': 'Disabled',
     'sites.badge.public': 'Public · {remaining}',
+    'sites.badge.publicForever': 'Public · forever',
+    'sites.badge.publicForeverTitle': 'Public with no expiry — stays public until you revert it',
     'sites.badge.revertedTitle': 'Public window ended — reverted to private',
     'sites.badge.reverted': 'Reverted',
     'sites.badge.private': 'Private',
@@ -63,11 +65,14 @@ export const sites: Record<Locale, Record<string, string>> = {
     'sites.share.extend': 'Extend window (restarts the clock)',
     'sites.share.publicFor': 'Public for (auto-reverts to private)',
     'sites.share.revertNow': 'Revert to private now',
+    'sites.share.foreverOn': 'Public forever — until you revert it',
+    'sites.share.foreverTitle': 'No expiry — the page stays public until you revert it',
     'sites.window.1h': '1 hour',
     'sites.window.6h': '6 hours',
     'sites.window.24h': '24 hours',
     'sites.window.72h': '3 days',
     'sites.window.168h': '7 days',
+    'sites.window.forever': 'Forever',
 
     // —— 分享链接弹窗(ShareLinkDialog) ——
     'sites.shareLink.title': 'Share “{slug}”',
@@ -121,6 +126,7 @@ export const sites: Record<Locale, Record<string, string>> = {
     // —— 站点卡片:toast / 确认 ——
     'sites.toast.loadVersionsFailed': 'Failed to load versions',
     'sites.toast.public': 'Public now — auto-reverts to private in {window}',
+    'sites.toast.publicForever': 'Public forever — stays public until you revert it',
     'sites.toast.private': 'Switched to private',
     'sites.toast.spaOn': 'SPA fallback enabled',
     'sites.toast.spaOff': 'SPA fallback disabled',
@@ -165,6 +171,8 @@ export const sites: Record<Locale, Record<string, string>> = {
     'sites.badge.disabledTitle': '已被管理员停用——对所有人返回 451',
     'sites.badge.disabled': '已停用',
     'sites.badge.public': '公开 · {remaining}',
+    'sites.badge.publicForever': '公开 · 永久',
+    'sites.badge.publicForeverTitle': '永久公开——在你手动恢复私有前一直可见',
     'sites.badge.revertedTitle': '公开窗口已结束——已恢复为私有',
     'sites.badge.reverted': '已恢复',
     'sites.badge.private': '私有',
@@ -195,11 +203,14 @@ export const sites: Record<Locale, Record<string, string>> = {
     'sites.share.extend': '延长窗口（重新计时）',
     'sites.share.publicFor': '公开时长（到期自动恢复私有）',
     'sites.share.revertNow': '立即恢复为私有',
+    'sites.share.foreverOn': '已永久公开——直到你手动恢复私有',
+    'sites.share.foreverTitle': '不设到期——在你手动恢复私有前一直公开',
     'sites.window.1h': '1 小时',
     'sites.window.6h': '6 小时',
     'sites.window.24h': '24 小时',
     'sites.window.72h': '3 天',
     'sites.window.168h': '7 天',
+    'sites.window.forever': '永久',
 
     // —— 分享链接弹窗(ShareLinkDialog) ——
     'sites.shareLink.title': '分享“{slug}”',
@@ -250,6 +261,7 @@ export const sites: Record<Locale, Record<string, string>> = {
     // —— 站点卡片:toast / 确认 ——
     'sites.toast.loadVersionsFailed': '加载版本失败',
     'sites.toast.public': '已公开——将在 {window}后自动恢复为私有',
+    'sites.toast.publicForever': '已永久公开——在你手动恢复私有前一直可见',
     'sites.toast.private': '已切换为私有',
     'sites.toast.spaOn': '已启用 SPA 回退',
     'sites.toast.spaOff': '已禁用 SPA 回退',

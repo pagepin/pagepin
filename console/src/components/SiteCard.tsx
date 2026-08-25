@@ -60,8 +60,10 @@ export function SiteCard({
     site.visibility === 'public' && site.public_expires_at
       ? formatRemaining(site.public_expires_at, now)
       : null;
-  const isPublicLive = site.visibility === 'public' && remaining !== null;
-  const isExpired = site.visibility === 'public' && remaining === null;
+  // public + public_expires_at=null 是永久公开(无窗口、不会自动恢复私有)
+  const isForever = site.visibility === 'public' && site.public_expires_at === null;
+  const isPublicLive = site.visibility === 'public' && (isForever || remaining !== null);
+  const isExpired = site.visibility === 'public' && !isForever && remaining === null;
 
   const shareOptions = me
     ? SHARE_HOURS.filter((h) => h <= me.limits.public_max_hours)
@@ -98,6 +100,17 @@ export function SiteCard({
         upsertSite(updated);
         setPanel(null);
         toast(t('sites.toast.public', { window: windowLabel(hours) }));
+      },
+    );
+  }
+
+  function makePublicForever() {
+    void run(
+      () => api.patchSite(site.slug, { visibility: 'public', public_forever: true }),
+      (updated) => {
+        upsertSite(updated);
+        setPanel(null);
+        toast(t('sites.toast.publicForever'));
       },
     );
   }
@@ -204,9 +217,14 @@ export function SiteCard({
             {t('sites.badge.disabled')}
           </span>
         ) : isPublicLive ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-tide-50 px-2.5 py-1 text-xs font-semibold text-tide-700 ring-1 ring-tide-200">
+          <span
+            title={isForever ? t('sites.badge.publicForeverTitle') : undefined}
+            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-tide-50 px-2.5 py-1 text-xs font-semibold text-tide-700 ring-1 ring-tide-200"
+          >
             <Globe2 className="h-3 w-3" />
-            {t('sites.badge.public', { remaining: remaining ?? '' })}
+            {isForever
+              ? t('sites.badge.publicForever')
+              : t('sites.badge.public', { remaining: remaining ?? '' })}
           </span>
         ) : isExpired ? (
           <span
@@ -367,7 +385,11 @@ export function SiteCard({
           {panel === 'share' && (
             <div className="mt-3 rounded-panel border border-ink-200 bg-ink-50 p-3 animate-fade-up">
               <div className="text-xs font-semibold text-ink-500">
-                {isPublicLive ? t('sites.share.extend') : t('sites.share.publicFor')}
+                {isForever
+                  ? t('sites.share.foreverOn')
+                  : isPublicLive
+                    ? t('sites.share.extend')
+                    : t('sites.share.publicFor')}
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {shareOptions.map((h) => (
@@ -381,6 +403,20 @@ export function SiteCard({
                     {windowLabel(h)}
                   </button>
                 ))}
+                {/* 永久公开:不设窗口,故不受 public_max_hours 约束,始终可选 */}
+                <button
+                  type="button"
+                  title={t('sites.share.foreverTitle')}
+                  className={`rounded-field border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                    isForever
+                      ? 'border-tide-300 bg-tide-50 text-tide-700'
+                      : 'border-ink-200 bg-white text-ink-600 hover:border-tide-300 hover:text-tide-700'
+                  }`}
+                  disabled={busy || isForever}
+                  onClick={makePublicForever}
+                >
+                  {t('sites.window.forever')}
+                </button>
               </div>
               {isPublicLive && (
                 <button

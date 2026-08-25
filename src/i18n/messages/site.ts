@@ -37,6 +37,9 @@ export const site: Record<Locale, Record<string, string>> = {
     'site.visibility.invalid': 'visibility must be private or public',
     'site.publicHours.notInteger': 'public_hours must be an integer',
     'site.publicHours.tooSmall': 'Public duration must be at least 1 hour',
+    'site.publicForever.notBool': 'public_forever must be a boolean',
+    'site.publicForever.requiresPublic':
+      'public_forever requires "visibility":"public" in the same request',
     'site.title.notString': 'title must be a string',
     'site.spaFallback.notBool': 'spa_fallback must be a boolean',
     'site.commentsEnabled.notBool': 'comments_enabled must be a boolean',
@@ -86,6 +89,8 @@ export const site: Record<Locale, Record<string, string>> = {
     'site.visibility.invalid': 'visibility 只能是 private/public',
     'site.publicHours.notInteger': 'public_hours 必须是整数',
     'site.publicHours.tooSmall': '公开时长至少 1 小时',
+    'site.publicForever.notBool': 'public_forever 必须是布尔值',
+    'site.publicForever.requiresPublic': 'public_forever 需同一请求带 "visibility":"public"',
     'site.title.notString': 'title 必须是字符串',
     'site.spaFallback.notBool': 'spa_fallback 必须是布尔值',
     'site.commentsEnabled.notBool': 'comments_enabled 必须是布尔值',

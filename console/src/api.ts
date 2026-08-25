@@ -159,6 +159,7 @@ export const api = {
     body: {
       visibility?: Visibility;
       public_hours?: number;
+      public_forever?: boolean;
       title?: string;
       spa_fallback?: boolean;
       comments_enabled?: boolean;

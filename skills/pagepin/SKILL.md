@@ -105,6 +105,16 @@ curl -fsS -X PATCH "$PAGEPIN_BASE/api/sites/my-demo" \
   -d '{"visibility":"public","public_hours":72}'
 ```
 
+Add `"public_forever":true` instead of `public_hours` for a page that stays
+public until someone flips it back — the response then has
+`"public_expires_at": null`:
+
+```bash
+curl -fsS -X PATCH "$PAGEPIN_BASE/api/sites/my-demo" \
+  -H "Authorization: Bearer $PP_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"visibility":"public","public_forever":true}'
+```
+
 ## Page layout — when you author the HTML yourself
 
 Keep the prose column readable (~70ch, 720–880px) and **never widen it to fit

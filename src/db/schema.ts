@@ -317,8 +317,10 @@ export function currentVersion(site: SiteRow): SiteVersion | null {
   return site.versions.find((v) => v.id === site.currentVersionId) ?? null;
 }
 
-/** 公开可见判定(对应 Site.is_publicly_visible)。 */
+/** 公开可见判定(对应 Site.is_publicly_visible)。
+ *  public + publicExpiresAt=null 表示永久公开(public_forever);非空则按窗口判到期。 */
 export function isPubliclyVisible(site: SiteRow, now: Date): boolean {
-  if (site.visibility !== 'public' || !site.publicExpiresAt) return false;
+  if (site.visibility !== 'public') return false;
+  if (!site.publicExpiresAt) return true;
   return now < new Date(site.publicExpiresAt);
 }
