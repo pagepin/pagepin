@@ -105,6 +105,26 @@ curl -fsS -X PATCH "$PAGEPIN_BASE/api/sites/my-demo" \
   -d '{"visibility":"public","public_hours":72}'
 ```
 
+## Page layout — when you author the HTML yourself
+
+Keep the prose column readable (~70ch, 720–880px) and **never widen it to fit
+wide content**. Break that content out of the column instead:
+
+```css
+.breakout { width: min(1400px, calc(100vw - 48px)); margin-left: 50%; transform: translateX(-50%); }
+.breakout iframe { display: block; width: 100%; height: min(85vh, 900px); border: 0; }
+```
+
+Wrap iframes, interactive charts, wide tables, and large images in `.breakout`.
+An embedded page lays itself out against the **iframe's** width, not the
+viewport's — squeezed into an 800px column it trips its own mobile breakpoint
+and collapses. Give it room (≥1000px on desktop); width matters more than
+scaling it down.
+
+In a multi-file site every embedded page also has its own URL, so caption each
+iframe with a link to it ("Open full screen ↗") for readers who want the whole
+viewport.
+
 ## Step 4 — the review-comment loop
 
 Colleagues drop pinned, element-level comments on a hosted page. **Comments are
