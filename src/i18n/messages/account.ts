@@ -32,11 +32,14 @@ export const account: Record<Locale, Record<string, string>> = {
     // —— /api/tokens ——
     'token.name.length': 'Name must be 1-64 characters',
     'token.limit.reached': 'Token limit reached ({max}); revoke unused tokens first',
+    'token.scopes.invalid': 'scopes must be an array of known values (publish/comment/read)',
     'token.notFound': 'Token not found',
 
     // —— /api/device ——
     'device.deviceCode.missing': 'Missing device_code',
     'device.userCode.missing': 'Missing user_code',
+    'device.scope.invalid':
+      'scope must be a space-separated list of known values (publish/comment/read)',
     'device.notFoundOrExpired':
       'Device code not found or expired; please restart login from your tool',
     'device.alreadyHandled': 'This device code has already been handled',
@@ -63,11 +66,13 @@ export const account: Record<Locale, Record<string, string>> = {
     // —— /api/tokens ——
     'token.name.length': '名称需 1-64 字符',
     'token.limit.reached': 'token 数量已达上限（{max}），请先吊销不用的',
+    'token.scopes.invalid': 'scopes 必须是数组，取值限 publish/comment/read',
     'token.notFound': 'token 不存在',
 
     // —— /api/device ——
     'device.deviceCode.missing': '缺少 device_code',
     'device.userCode.missing': '缺少 user_code',
+    'device.scope.invalid': 'scope 必须是空格分隔的已知取值（publish/comment/read）',
     'device.notFoundOrExpired': '设备码不存在或已过期，请在工具里重新发起登录',
     'device.alreadyHandled': '该设备码已被处理',
   },

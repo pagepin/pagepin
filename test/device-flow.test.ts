@@ -16,7 +16,7 @@ import { createMiddleware } from 'hono/factory';
 import { makeDeviceRoutes } from '../src/api/device.js';
 import { makeAuthMiddleware, type AuthMiddleware } from '../src/api/deps.js';
 import { loadConfig } from '../src/config.js';
-import { apiTokens, users } from '../src/db/index.js';
+import { apiTokens, deviceAuths, users } from '../src/db/index.js';
 import { makeTestDb } from './helpers/db.js';
 import type { Storage } from '../src/storage/index.js';
 import type { AppDeps, AppEnv } from '../src/types.js';
@@ -75,6 +75,10 @@ function post(app: Hono<AppEnv>, path: string, body?: unknown): Promise<Response
       }),
     ),
   );
+}
+
+function get(app: Hono<AppEnv>, path: string): Promise<Response> {
+  return Promise.resolve(app.fetch(new Request('http://localhost' + path)));
 }
 
 test('device flow: code → approve → one-time token delivery', async () => {
@@ -200,4 +204,64 @@ test('auth rejects an expired token but accepts a non-expiring one', async () =>
     );
   assert.equal((await get(expired)).status, 401);
   assert.equal((await get(evergreen)).status, 200);
+});
+
+// ---- scope parameter (the device-flow mint entry point) ----
+
+test('device flow: space-delimited scope is parsed and stored on the auth row', async () => {
+  const { app, deps } = await setup();
+
+  const scoped = (await (
+    await post(app, '/api/device/code', { scope: 'publish read publish' })
+  ).json()) as {
+    user_code: string;
+  };
+  const row = (
+    await deps.db.select().from(deviceAuths).where(eq(deviceAuths.userCode, scoped.user_code))
+  )[0]!;
+  assert.deepEqual(row.scopes, ['publish', 'read']); // parse of the space-delimited string + dedupe
+
+  const blank = (await (await post(app, '/api/device/code')).json()) as { user_code: string };
+  const blankRow = (
+    await deps.db.select().from(deviceAuths).where(eq(deviceAuths.userCode, blank.user_code))
+  )[0]!;
+  assert.equal(blankRow.scopes, null); // missing = full access
+});
+
+test('device flow: unknown or non-string scope values return 400', async () => {
+  const { app } = await setup();
+  assert.equal((await post(app, '/api/device/code', { scope: 'publish admin' })).status, 400);
+  assert.equal((await post(app, '/api/device/code', { scope: 42 })).status, 400);
+  assert.equal((await post(app, '/api/device/code', { scope: null })).status, 200); // explicit null = full access
+});
+
+test('device flow: approve bakes the stored scopes into the minted PAT', async () => {
+  const { app, deps } = await setup();
+  const code = (await (await post(app, '/api/device/code', { scope: 'publish read' })).json()) as {
+    device_code: string;
+    user_code: string;
+  };
+  assert.equal((await post(app, '/api/device/approve', { user_code: code.user_code })).status, 200);
+  const delivered = (await (
+    await post(app, '/api/device/token', { device_code: code.device_code })
+  ).json()) as { token: string };
+  const tokRow = (await deps.db.select().from(apiTokens))[0]!;
+  assert.deepEqual(tokRow.scopes, ['publish', 'read']); // approval copies the stashed scope into the PAT row
+});
+
+test('device flow: request lookup returns the pending scope for the approve screen', async () => {
+  const { app, deps } = await setup();
+  const code = (await (await post(app, '/api/device/code', { scope: 'comment' })).json()) as {
+    user_code: string;
+  };
+
+  const lookup = await get(app, '/api/device/request/' + code.user_code.toLowerCase()); // a lowercase code is normalized too
+  assert.equal(lookup.status, 200);
+  assert.deepEqual((await lookup.json()) as Record<string, unknown>, {
+    user_code: code.user_code,
+    status: 'pending',
+    scopes: ['comment'],
+  });
+
+  assert.equal((await get(app, '/api/device/request/ZZZZ-ZZZZ')).status, 404); // unknown code
 });
