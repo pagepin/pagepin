@@ -43,6 +43,13 @@
       "when": 1784184296467,
       "tag": "0005_pale_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1794837555835,
+      "tag": "0006_dapper_kang",
+      "breakpoints": true
     }
   ]
 }

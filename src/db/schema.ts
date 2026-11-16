@@ -6,7 +6,17 @@
  *   D1 用 `wrangler d1 migrations apply pagepin --remote`(见 package.json 的 cf:deploy)。
  */
 
-import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
+
+import type { SiteRole } from '../rbac.js';
 
 export interface SiteVersion {
   id: string; // uuid
@@ -186,6 +196,7 @@ export const apiTokens = sqliteTable(
     lastUsedAt: text('last_used_at'),
     expiresAt: text('expires_at'), // 非空 = 到期即拒(设备授权铸的 token 用;普通 PAT 为 null = 不过期)
     revokedAt: text('revoked_at'), // 软吊销;命中即拒
+    scopes: text('scopes', { mode: 'json' }).$type<string[]>(), // token-level scopes (wired by the token-scopes change): JSON string[]; null/empty = full access
   },
   (t) => [uniqueIndex('tokens_hash_uq').on(t.tokenHash), index('tokens_user_idx').on(t.userId)],
 );
@@ -232,6 +243,7 @@ export const deviceAuths = sqliteTable(
     createdAt: text('created_at').notNull(),
     expiresAt: text('expires_at').notNull(), // ISO;过期即作废
     approvedAt: text('approved_at'),
+    scopes: text('scopes', { mode: 'json' }).$type<string[]>(), // same as api_tokens.scopes; null = full access
   },
   (t) => [
     uniqueIndex('device_code_uq').on(t.deviceCode),
@@ -299,6 +311,48 @@ export const accountMerges = sqliteTable(
   (t) => [uniqueIndex('account_merges_loser_uq').on(t.loserId)],
 );
 
+/** Site members (RBAC, see src/rbac.ts) — explicit member rows and roles issued by the site owner; route wiring lands in a follow-up change.
+ *  The owner itself never has a member row: sites.ownerId stays authoritative. One row per (site, user); changing a role is an in-place UPDATE. */
+export const siteMembers = sqliteTable(
+  'site_members',
+  {
+    id: text('id').primaryKey(),
+    siteId: text('site_id').notNull(),
+    userId: text('user_id').notNull(),
+    role: text('role').$type<SiteRole>().notNull(), // owner|editor|commenter|viewer (the four stored values)
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('site_members_site_user_uq').on(t.siteId, t.userId),
+    index('site_members_user_idx').on(t.userId), // account-merge remap + user-side queries
+  ],
+);
+
+/** User -> IdP group mapping — the login path replaces the whole set (wired by the groups-ingestion change); group_name is stored verbatim and is case-sensitive. Composite primary key, no separate id. */
+export const userGroups = sqliteTable(
+  'user_groups',
+  {
+    userId: text('user_id').notNull(),
+    groupName: text('group_name').notNull(),
+    syncedAt: text('synced_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.groupName] })],
+);
+
+/** Group grants — the role a named group carries on one site (an IdP-side ACL); resolution caps the role at editor (see src/rbac.ts). */
+export const groupGrants = sqliteTable(
+  'group_grants',
+  {
+    id: text('id').primaryKey(),
+    siteId: text('site_id').notNull(),
+    groupName: text('group_name').notNull(), // must match user_groups.group_name exactly
+    role: text('role').$type<SiteRole>().notNull(),
+    createdBy: text('created_by').notNull(), // = users.id (the granting user)
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('group_grants_site_group_uq').on(t.siteId, t.groupName)],
+);
+
 export type UserRow = typeof users.$inferSelect;
 export type IdentityRow = typeof identities.$inferSelect;
 export type AccountMergeRow = typeof accountMerges.$inferSelect;
@@ -310,6 +364,9 @@ export type InviteRow = typeof invites.$inferSelect;
 export type DeviceAuthRow = typeof deviceAuths.$inferSelect;
 export type HandoffCodeRow = typeof handoffCodes.$inferSelect;
 export type DeploySessionRow = typeof deploySessions.$inferSelect;
+export type SiteMemberRow = typeof siteMembers.$inferSelect;
+export type UserGroupRow = typeof userGroups.$inferSelect;
+export type GroupGrantRow = typeof groupGrants.$inferSelect;
 
 /** site.versions 里找当前版本(对应 Site.current_version())。 */
 export function currentVersion(site: SiteRow): SiteVersion | null {

@@ -6,15 +6,18 @@
  *   两边都有内容 → 记 conflict、不自动合并(两个 handle 都在 URL 里,只能人工双向确认)。
  */
 
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 
 import {
   accountMerges,
   apiTokens,
   deploySessions,
   deviceAuths,
+  groupGrants,
   identities,
+  siteMembers,
   sites,
+  userGroups,
   users,
   type UserRow,
 } from '../db/index.js';
@@ -123,6 +126,38 @@ async function reconcileOne(
     .set({ ownerId: survivor.id })
     .where(eq(deploySessions.ownerId, loser.id));
   await db.update(deviceAuths).set({ userId: survivor.id }).where(eq(deviceAuths.userId, loser.id));
+
+  // RBAC rows move by the same rule: first delete loser rows that collide with the survivor on a unique key (the survivor keeps its own role), then remap the rest.
+  // Load the survivor keys into memory before the DELETE: MySQL 1093 forbids IN (subquery) against the table being deleted (verified on 8.4); the in-memory form works on all three dialects.
+  const survivorSiteIds = (
+    await db
+      .select({ siteId: siteMembers.siteId })
+      .from(siteMembers)
+      .where(eq(siteMembers.userId, survivor.id))
+  ).map((r) => r.siteId);
+  if (survivorSiteIds.length > 0) {
+    await db
+      .delete(siteMembers)
+      .where(and(eq(siteMembers.userId, loser.id), inArray(siteMembers.siteId, survivorSiteIds)));
+  }
+  await db.update(siteMembers).set({ userId: survivor.id }).where(eq(siteMembers.userId, loser.id));
+  const survivorGroups = (
+    await db
+      .select({ groupName: userGroups.groupName })
+      .from(userGroups)
+      .where(eq(userGroups.userId, survivor.id))
+  ).map((r) => r.groupName);
+  if (survivorGroups.length > 0) {
+    await db
+      .delete(userGroups)
+      .where(and(eq(userGroups.userId, loser.id), inArray(userGroups.groupName, survivorGroups)));
+  }
+  await db.update(userGroups).set({ userId: survivor.id }).where(eq(userGroups.userId, loser.id));
+  // created_by is not a unique key: remap it directly (after the merge, no row may reference the loser id).
+  await db
+    .update(groupGrants)
+    .set({ createdBy: survivor.id })
+    .where(eq(groupGrants.createdBy, loser.id));
 
   // canonical 槽:先腾空 loser(若它占着),再让 survivor 认领(部分唯一索引保证只一个 owner;email 取自触发参数不依赖 loser 行)。
   await db.update(users).set({ canonicalEmail: null, oidcSub: null }).where(eq(users.id, loser.id));
