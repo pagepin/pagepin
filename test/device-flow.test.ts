@@ -264,4 +264,59 @@ test('device flow: request lookup returns the pending scope for the approve scre
   });
 
   assert.equal((await get(app, '/api/device/request/ZZZZ-ZZZZ')).status, 404); // unknown code
+
+  // an expired row answers 404 as well (the same convention as the approve route's expiry handling)
+  await deps.db
+    .update(deviceAuths)
+    .set({ expiresAt: new Date(Date.now() - 1000).toISOString() })
+    .where(eq(deviceAuths.userCode, code.user_code));
+  assert.equal((await get(app, '/api/device/request/' + code.user_code)).status, 404);
+});
+
+test('device flow: request lookup is cookie-only (anonymous 401, PAT 403)', async () => {
+  // the real middleware (same as case 4): proves this read route requires a cookie session — a regression to currentUser would fail here
+  const db = await makeTestDb();
+  await db.insert(users).values({
+    id: 'u-test',
+    email: 'admin@example.com',
+    passwordHash: null,
+    oidcSub: null,
+    handle: 'admin',
+    displayName: 'Admin',
+    isAdmin: true,
+    disabled: false,
+    createdAt: nowIso(),
+    lastLoginAt: null,
+  });
+  const deps: AppDeps = { config: cfg, db, storage: {} as unknown as Storage };
+  const app = makeDeviceRoutes(deps, makeAuthMiddleware(deps));
+
+  assert.equal(
+    (await app.fetch(new Request('http://localhost/api/device/request/ABCD-EFGH'))).status,
+    401,
+  );
+
+  const raw = 'pp_cookiegate00000000000000000000000000000';
+  const shaRaw = async (s: string) => {
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  };
+  await db.insert(apiTokens).values({
+    id: 'tok-gate',
+    userId: 'u-test',
+    name: 't',
+    tokenHash: await shaRaw(raw),
+    prefix: raw.slice(0, 15),
+    createdAt: nowIso(),
+    lastUsedAt: null,
+    expiresAt: null,
+    revokedAt: null,
+    scopes: ['read'],
+  });
+  const viaPat = await app.fetch(
+    new Request('http://localhost/api/device/request/ABCD-EFGH', {
+      headers: { Authorization: `Bearer ${raw}` },
+    }),
+  );
+  assert.equal(viaPat.status, 403); // even a valid PAT fails — this management read route accepts cookie sessions only (auth.token.consoleOnly)
 });

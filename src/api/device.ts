@@ -190,6 +190,7 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
   });
 
   // Approve-screen readout (the console picks it up in a follow-up change): a cookie session reads the scope a pending code requested, so the human sees what will be granted.
+  // Any logged-in session may read it (the same trust shape as approve/deny: a high-entropy user_code plus a short TTL blocks probing); scopes=null means the request asks for full access.
   app.get('/api/device/request/:userCode', mw.cookieUser, async (c) => {
     const userCode = c.req.param('userCode').trim().toUpperCase(); // normalized like the approve route
     const rec = (await db.select().from(deviceAuths).where(eq(deviceAuths.userCode, userCode)))[0];
