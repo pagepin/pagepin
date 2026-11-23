@@ -25,6 +25,7 @@ interface Discovery {
   authorization_endpoint: string;
   token_endpoint: string;
   userinfo_endpoint: string;
+  end_session_endpoint?: string; // optional per spec; no RP-initiated logout without it
 }
 
 export interface OidcIdentity {
@@ -87,12 +88,25 @@ export async function buildAuthorizeUrl(
   return `${disc.authorization_endpoint}${sep}${params.toString()}`;
 }
 
+/** RP-initiated logout: end-session URL + id_token_hint. Throws an OidcError when
+ *  discovery exposes no end_session_endpoint — the caller must then fall back to a local logout. */
+export async function buildEndSessionUrl(cfg: OidcConfig, idTokenHint: string): Promise<string> {
+  const disc = await discover(cfg.issuer);
+  if (!disc.end_session_endpoint) throw new OidcError('auth.oidc.noEndSession');
+  const params = new URLSearchParams({ id_token_hint: idTokenHint });
+  const sep = disc.end_session_endpoint.includes('?') ? '&' : '?';
+  return `${disc.end_session_endpoint}${sep}${params.toString()}`;
+}
+
+/** exchangeCode result: the caller identity plus the IdP id_token when the IdP returned one. */
+export type OidcLogin = OidcIdentity & { idToken?: string };
+
 /** code 换 token 再取 userinfo;返回最小身份三元组。 */
 export async function exchangeCode(
   cfg: OidcConfig,
   code: string,
   redirectUri: string,
-): Promise<OidcIdentity> {
+): Promise<OidcLogin> {
   const disc = await discover(cfg.issuer);
 
   let tokenResp: Response;
@@ -118,6 +132,8 @@ export async function exchangeCode(
   if (typeof accessToken !== 'string' || !accessToken) {
     throw new OidcError('auth.oidc.noAccessToken');
   }
+  // The raw id_token is kept only to send back as id_token_hint at logout (never trusted as identity here).
+  const idToken = typeof tok.id_token === 'string' && tok.id_token ? tok.id_token : undefined;
 
   let userinfoResp: Response;
   try {
@@ -143,5 +159,5 @@ export async function exchangeCode(
       : undefined;
   const email = typeof info.email === 'string' && info.email ? info.email : undefined;
   const emailVerified = info.email_verified === true;
-  return { sub: String(sub), name, preferredUsername, email, emailVerified };
+  return { sub: String(sub), name, preferredUsername, email, emailVerified, idToken };
 }

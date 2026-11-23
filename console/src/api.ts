@@ -342,6 +342,18 @@ export function acceptInvite(
 }
 
 export async function logout(): Promise<void> {
+  const cfg = await fetchAuthConfig();
+  if (cfg.mode === 'oidc') {
+    // Top-level POST navigation on oidc: the server 302s to the IdP end-session URL,
+    // and a fetch with redirect:'manual' would swallow that redirect and keep the
+    // IdP SSO session alive invisible to the user.
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/auth/logout';
+    document.body.appendChild(form);
+    form.submit();
+    return;
+  }
   try {
     await fetch('/auth/logout', {
       method: 'POST',
