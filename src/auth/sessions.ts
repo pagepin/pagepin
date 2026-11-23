@@ -149,8 +149,14 @@ export async function renewSessionCookies(
   }
 }
 
-/** 与 renewSessionCookies 同口径的序列化 Set-Cookie 值(裸 Response 补头用)。 */
-export async function renewalCookieHeaders(cfg: Config, claims: SessionClaims): Promise<string[]> {
+/** A serialized set-cookie value in the same shape as renewSessionCookies (used to add the headers to a bare Response).
+ *  idTokenHint slides on the session plane only (single-mode content serving renews
+ *  the session cookie through here); the dual-mode content plane has no logout UI. */
+export async function renewalCookieHeaders(
+  cfg: Config,
+  claims: SessionClaims,
+  idTokenHint?: string,
+): Promise<string[]> {
   const attrs =
     `; Max-Age=${ttl(cfg)}; Path=/; SameSite=Lax` + (cfg.secureCookies ? '; Secure' : '');
   if (claims.pln === 'view') {
@@ -160,6 +166,8 @@ export async function renewalCookieHeaders(cfg: Config, claims: SessionClaims): 
   const tok = await mint(cfg, 'session', claims.sub, claims.hdl, claims.epo ?? 0, claims.csrf);
   const out = [`${SESSION_COOKIE}=${tok}${attrs}; HttpOnly`];
   if (claims.csrf) out.push(`${CSRF_COOKIE}=${claims.csrf}${attrs}`);
+  // Slide the RP-logout hint with the session so it outlives the first TTL window.
+  if (idTokenHint) out.push(`${ID_TOKEN_COOKIE}=${idTokenHint}${attrs}; HttpOnly`);
   return out;
 }
 
