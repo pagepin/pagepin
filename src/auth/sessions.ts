@@ -16,6 +16,7 @@ export const VIEW_COOKIE = 'pp_view';
 export const SESSION_COOKIE = 'pp_session';
 export const CSRF_COOKIE = 'pp_csrf'; // 非 httpOnly:SPA 读它回填 X-CSRF-Token 头
 export const OAUTH_NONCE_COOKIE = 'pp_oauth'; // OAuth/OIDC 登录态绑定(host-only,防 login CSRF)
+export const ID_TOKEN_COOKIE = 'pp_id_token'; // IdP id_token kept at login; sent back as id_token_hint at logout
 
 export type Plane = 'view' | 'session';
 
@@ -142,11 +143,20 @@ export async function renewSessionCookies(
       common,
     );
     if (claims.csrf) setCookie(c, CSRF_COOKIE, claims.csrf, { ...common, httpOnly: false });
+    // Slide the RP-logout hint with the session so it outlives the first TTL window.
+    const hint = getCookie(c, ID_TOKEN_COOKIE);
+    if (hint) setCookie(c, ID_TOKEN_COOKIE, hint, common);
   }
 }
 
-/** 与 renewSessionCookies 同口径的序列化 Set-Cookie 值(裸 Response 补头用)。 */
-export async function renewalCookieHeaders(cfg: Config, claims: SessionClaims): Promise<string[]> {
+/** A serialized set-cookie value in the same shape as renewSessionCookies (used to add the headers to a bare Response).
+ *  idTokenHint slides on the session plane only (single-mode content serving renews
+ *  the session cookie through here); the dual-mode content plane has no logout UI. */
+export async function renewalCookieHeaders(
+  cfg: Config,
+  claims: SessionClaims,
+  idTokenHint?: string,
+): Promise<string[]> {
   const attrs =
     `; Max-Age=${ttl(cfg)}; Path=/; SameSite=Lax` + (cfg.secureCookies ? '; Secure' : '');
   if (claims.pln === 'view') {
@@ -156,6 +166,8 @@ export async function renewalCookieHeaders(cfg: Config, claims: SessionClaims): 
   const tok = await mint(cfg, 'session', claims.sub, claims.hdl, claims.epo ?? 0, claims.csrf);
   const out = [`${SESSION_COOKIE}=${tok}${attrs}; HttpOnly`];
   if (claims.csrf) out.push(`${CSRF_COOKIE}=${claims.csrf}${attrs}`);
+  // Slide the RP-logout hint with the session so it outlives the first TTL window.
+  if (idTokenHint) out.push(`${ID_TOKEN_COOKIE}=${idTokenHint}${attrs}; HttpOnly`);
   return out;
 }
 
@@ -166,6 +178,28 @@ export function clearLoginCookies(c: Context, plane: Plane): void {
     deleteCookie(c, SESSION_COOKIE, { path: '/' });
     deleteCookie(c, CSRF_COOKIE, { path: '/' });
   }
+}
+
+/** Store the IdP id_token at login so logout can send it back as id_token_hint.
+ *  Same attributes as the session cookie: httpOnly, host-only, session TTL. */
+export function setIdTokenCookie(c: Context, cfg: Config, idToken: string): void {
+  setCookie(c, ID_TOKEN_COOKIE, idToken, {
+    httpOnly: true,
+    secure: cfg.secureCookies,
+    sameSite: 'Lax',
+    maxAge: ttl(cfg),
+    path: '/',
+  });
+}
+
+/** The login-time hint, if this browser still holds one (absent on social or pre-fix logins). */
+export function readIdTokenCookie(c: Context): string | undefined {
+  const v = getCookie(c, ID_TOKEN_COOKIE);
+  return v || undefined;
+}
+
+export function clearIdTokenCookie(c: Context): void {
+  deleteCookie(c, ID_TOKEN_COOKIE, { path: '/' });
 }
 
 /** OAuth/OIDC 起跳:种一个 host-only 短时 nonce,并返回它(嵌进签名 state)。

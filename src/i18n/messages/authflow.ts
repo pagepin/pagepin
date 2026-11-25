@@ -43,6 +43,7 @@ export const authflow: Record<Locale, Record<string, string>> = {
     'auth.oidc.userinfoRequestFailed': 'Request to the IdP userinfo endpoint failed',
     'auth.oidc.userinfoHttp': 'IdP userinfo endpoint returned HTTP {status}',
     'auth.oidc.userinfoMissingSub': 'IdP userinfo is missing sub',
+    'auth.oidc.noEndSession': 'The IdP does not expose an end-session endpoint',
 
     // —— 社交登录交换(social.ts,OidcError → 502) ——
     'auth.social.endpointRequestFailed': 'Request to the social login provider endpoint failed',
@@ -89,6 +90,7 @@ export const authflow: Record<Locale, Record<string, string>> = {
     'auth.oidc.userinfoRequestFailed': 'IdP userinfo 端点请求失败',
     'auth.oidc.userinfoHttp': 'IdP userinfo 端点返回 HTTP {status}',
     'auth.oidc.userinfoMissingSub': 'IdP userinfo 缺 sub',
+    'auth.oidc.noEndSession': 'IdP 未提供 end-session 端点',
 
     // —— 社交登录交换(social.ts,OidcError → 502) ——
     'auth.social.endpointRequestFailed': '社交登录 provider 端点请求失败',

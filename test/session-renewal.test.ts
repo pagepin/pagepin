@@ -165,9 +165,10 @@ test('API auth: near-expiry session gets re-minted with csrf preserved; fresh on
 test('serving: near-expiry viewer session renews on HTML navigation (raw-Response header path)', async () => {
   const { app } = await setup();
   const old = await agedSession(3600);
+  const ID_TOKEN = 'fake-hdr.fake-pld.fake-sig';
   const res = await app.fetch(
     new Request('http://localhost/p/alice/demo/', {
-      headers: { cookie: `pp_session=${old}`, accept: 'text/html' },
+      headers: { cookie: `pp_session=${old}; pp_id_token=${ID_TOKEN}`, accept: 'text/html' },
     }),
   );
   assert.equal(res.status, 200);
@@ -175,11 +176,16 @@ test('serving: near-expiry viewer session renews on HTML navigation (raw-Respons
   const sess = sessionSetCookies(res).find((v) => v.startsWith('pp_session='));
   assert.ok(sess, 'viewer-plane renewal lands on the finished response');
   assert.match(sess!, /Max-Age=1209600/);
+  // The session-plane renewal must also slide the OIDC logout hint (RP-initiated logout).
+  const hint = sessionSetCookies(res).find((v) => v.startsWith('pp_id_token='));
+  assert.ok(hint, 'renewal slides the id-token hint alongside the session');
+  assert.equal(hint!.split(';')[0], `pp_id_token=${ID_TOKEN}`, 'same id_token, not a new one');
+  assert.match(hint!, /Max-Age=1209600/, 'hint re-issued to the full sliding TTL');
 
   // 静态资源请求(非 HTML 导航)不续期
   const asset = await app.fetch(
     new Request('http://localhost/p/alice/demo/index.html', {
-      headers: { cookie: `pp_session=${old}`, accept: '*/*' },
+      headers: { cookie: `pp_session=${old}; pp_id_token=${ID_TOKEN}`, accept: '*/*' },
     }),
   );
   assert.equal(sessionSetCookies(asset).length, 0);
