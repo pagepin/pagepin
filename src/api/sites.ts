@@ -34,7 +34,7 @@ import { purgeSiteStorage, type Storage } from '../storage/index.js';
 import { guessContentType } from '../storage/mime.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { normalizeSitePath, nowIso, shortId, tombstoneSlug, uuid, validSlug } from '../util.js';
-import type { AuthMiddleware } from './deps.js';
+import { requireScope, type AuthMiddleware } from './deps.js';
 
 /** 409 handle 未设置:错误体附机器可读 hint(英文,面向 agent 非人)。
  *  agent 靠错误体自愈比靠文档可靠 —— 它手里的 skill.md 可能是旧缓存。 */
@@ -459,6 +459,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   // ---- 部署(单请求 multipart;小站点一行 curl 即可。>~90MB 的大站点走分批 /deploys) ----
   // 注:单请求整站塞进一个 body,受 Cloudflare 100MB 请求体上限约束(Free/Pro);超过请用分批端点。
   r.post('/:slug/deploy', mw.mutatingUser, mw.requireVerified, async (c) => {
+    const scopeErr = requireScope(c, 'publish');
+    if (scopeErr) return scopeErr;
     const user = c.get('user');
     const slug = c.req.param('slug');
     if (user.handle == null) return handleRequiredError(c);
@@ -517,6 +519,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
   // ---- 分批部署 begin:开一个草稿版本,文件后续分多请求推上来,commit 才发布 ----
   // 解除单请求 100MB 上限:大站点把文件分批(每批 <~90MB)推到同一版本前缀,最后 commit 原子切换。
   r.post('/:slug/deploys', mw.mutatingUser, mw.requireVerified, async (c) => {
+    const scopeErr = requireScope(c, 'publish');
+    if (scopeErr) return scopeErr;
     const user = c.get('user');
     const slug = c.req.param('slug');
     if (user.handle == null) return handleRequiredError(c);
@@ -557,6 +561,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
 
   // ---- 分批部署:上传一批文件(可多次调用;每批控制在 ~90MB 内) ----
   r.post('/:slug/deploys/:deployId/files', mw.mutatingUser, async (c) => {
+    const scopeErr = requireScope(c, 'publish');
+    if (scopeErr) return scopeErr;
     const user = c.get('user');
     const session = await ownedSession(db, user.id, c.req.param('slug'), c.req.param('deployId'));
     if (!session) return jsonError(c, 404, 'site.deploy.session.notFound');
@@ -590,6 +596,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
 
   // ---- 分批部署 commit:据累计清单生成 index 兜底 → 原子发布 + 版本 GC → 删草稿 ----
   r.post('/:slug/deploys/:deployId/commit', mw.mutatingUser, async (c) => {
+    const scopeErr = requireScope(c, 'publish');
+    if (scopeErr) return scopeErr;
     const user = c.get('user');
     const session = await ownedSession(db, user.id, c.req.param('slug'), c.req.param('deployId'));
     if (!session) return jsonError(c, 404, 'site.deploy.session.notFound');
@@ -640,6 +648,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
 
   // ---- 分批部署 abort:丢弃草稿并回收已上传的存储 ----
   r.delete('/:slug/deploys/:deployId', mw.mutatingUser, async (c) => {
+    const scopeErr = requireScope(c, 'publish');
+    if (scopeErr) return scopeErr;
     const user = c.get('user');
     const session = await ownedSession(db, user.id, c.req.param('slug'), c.req.param('deployId'));
     if (!session) return jsonError(c, 404, 'site.deploy.session.notFound');
@@ -905,6 +915,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
 
   // ---- 标记已解决 / 重开(PAT 可调,AI 处理完意见后闭环) ----
   r.patch('/:slug/comments/:tid', mw.mutatingUser, async (c) => {
+    const scopeErr = requireScope(c, 'comment');
+    if (scopeErr) return scopeErr;
     const user = c.get('user');
     const body = await readJson<{ resolved?: unknown }>(c);
     if (body === null || typeof body.resolved !== 'boolean') {
@@ -922,6 +934,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
 
   // ---- 给评论留言(PAT 可调,AI 说明「已按 X 修改」) ----
   r.post('/:slug/comments/:tid/replies', mw.mutatingUser, async (c) => {
+    const scopeErr = requireScope(c, 'comment');
+    if (scopeErr) return scopeErr;
     const user = c.get('user');
     const body = await readJson<{ text?: unknown }>(c);
     if (body === null) return jsonError(c, 422, 'request.body.malformed');
@@ -984,6 +998,8 @@ export function makeSiteRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv> 
 
   // ---- 回滚(current_version_id 指回旧 version) ----
   r.post('/:slug/rollback', mw.mutatingUser, async (c) => {
+    const scopeErr = requireScope(c, 'publish');
+    if (scopeErr) return scopeErr;
     const user = c.get('user');
     const body = await readJson<{ version_id?: unknown }>(c);
     if (body === null || typeof body.version_id !== 'string') {

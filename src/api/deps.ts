@@ -76,6 +76,7 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     if (!user) return jsonError(c, 401, 'auth.token.userNotFound');
     if (user.disabled) return jsonError(c, 403, 'auth.account.disabled');
     c.set('authVia', 'token');
+    c.set('tokenScopes', rec.scopes); // null/empty = full access; cookie sessions never set it, and requireScope always lets them pass
     // last_used_at 节流写(5 分钟粒度足够审计,省掉每请求一次写库)
     if (!rec.lastUsedAt || Date.now() - Date.parse(rec.lastUsedAt) > 300_000) {
       await db.update(apiTokens).set({ lastUsedAt: nowIso() }).where(eq(apiTokens.id, rec.id));
@@ -181,4 +182,16 @@ export function makeAuthMiddleware(deps: AppDeps): AuthMiddleware {
     adminMutatingUser,
     requireVerified,
   };
+}
+
+/** Token-level scope kinds (independent of the site role enum; token-specific): publish = the deploy family; comment = comment-thread writes. */
+export type ScopeKind = 'publish' | 'comment';
+
+/** Token-level scope gate: the tokenUser middleware injects the stored scopes; a request passes only when the stored set contains the kind, otherwise the gate answers 403.
+ *  Unset (cookie sessions / content-plane guests), null, and an empty array all mean full access — existing tokens and browser paths are never narrowed.
+ *  Read-class routes are never gated: a valid token can always read (comment export, version list). Call sites must place the gate before every DB query. */
+export function requireScope(c: Context<AppEnv>, kind: ScopeKind): Response | undefined {
+  const scopes = c.get('tokenScopes');
+  if (scopes == null || scopes.length === 0 || scopes.includes(kind)) return undefined;
+  return jsonError(c, 403, 'auth.token.scope');
 }

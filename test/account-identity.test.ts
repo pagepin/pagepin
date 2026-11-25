@@ -20,12 +20,20 @@ import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
 import { attachIdentity, makeAuthRoutes, upsertFederatedUser } from '../src/auth/routes.js';
-import { reconcileByVerifiedEmail } from '../src/auth/reconcile.js';
+import { reconcileByVerifiedEmail, resumeSweep } from '../src/auth/reconcile.js';
 import type { AuthMw } from '../src/api/me.js';
 import { makeMeRoutes } from '../src/api/me.js';
 import { canPublish } from '../src/api/deps.js';
 import { loadConfig } from '../src/config.js';
-import { accountMerges, identities, sites, users } from '../src/db/index.js';
+import {
+  accountMerges,
+  groupGrants,
+  identities,
+  siteMembers,
+  sites,
+  userGroups,
+  users,
+} from '../src/db/index.js';
 import { nowIso, uuid } from '../src/util.js';
 import type { UserRow } from '../src/db/index.js';
 import { makeTestDb } from './helpers/db.js';
@@ -460,4 +468,88 @@ test('reconcile: 两边都有内容(两个 handle)→ 记 conflict,绝不自动�
     .from(accountMerges)
     .where(eq(accountMerges.status, 'conflict'));
   assert.ok(conflicts.length >= 1, '记了 conflict 等人工');
+});
+
+test('reconcile: site_members/user_groups 撞唯一键先删 loser 行其余重指;group_grants.created_by 同搬', async () => {
+  const { app, deps, db } = await setup({}, { send: async () => {} } as Mailer);
+  await postJson(app, '/auth/signup', { email: 'admin7@example.com', password: 'password123' }); // the first signup becomes admin
+  await postJson(app, '/auth/signup', { email: 'kai@example.com', password: 'password123' });
+  const A = (await db.select().from(users).where(eq(users.canonicalEmail, 'kai@example.com')))[0]!; // the empty loser
+  const B = await upsertFederatedUser(deps, {
+    provider: 'github',
+    sub: 'github:kai',
+    email: 'kai@example.com',
+    emailVerified: true,
+  });
+  assert.notEqual(A.id, B.id);
+  await db.update(users).set({ handle: 'kai' }).where(eq(users.id, B.id)); // B has content -> the survivor
+  const siteId = uuid();
+  await db.insert(sites).values({
+    id: siteId,
+    ownerId: B.id,
+    ownerHandle: 'kai',
+    slug: 's',
+    versions: [],
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+  const loneSiteId = uuid(); // no sites row needed: the members table has no foreign key; this exercises only the remap
+  await db.insert(siteMembers).values([
+    { id: uuid(), siteId, userId: B.id, role: 'editor', createdAt: nowIso() },
+    { id: uuid(), siteId, userId: A.id, role: 'viewer', createdAt: nowIso() }, // collides on the site_id key -> deleted
+    { id: uuid(), siteId: loneSiteId, userId: A.id, role: 'viewer', createdAt: nowIso() }, // the survivor has none -> remapped
+  ]);
+  await db.insert(userGroups).values([
+    { userId: B.id, groupName: 'team-x', syncedAt: nowIso() },
+    { userId: A.id, groupName: 'team-x', syncedAt: nowIso() }, // collides on the (user_id, group_name) PK -> deleted
+    { userId: A.id, groupName: 'team-a', syncedAt: nowIso() }, // the survivor has none -> remapped
+  ]);
+  await db.insert(groupGrants).values({
+    id: uuid(),
+    siteId,
+    groupName: 'team-x',
+    role: 'editor',
+    createdBy: A.id,
+    createdAt: nowIso(),
+  });
+
+  await db.update(users).set({ emailVerified: true }).where(eq(users.id, A.id)); // simulate the verification click that triggers the merge
+  await reconcileByVerifiedEmail(deps, 'kai@example.com');
+
+  const members = await db.select().from(siteMembers);
+  const shared = members.filter((m) => m.siteId === siteId);
+  assert.equal(shared.length, 1, '撞键 loser 行已删,幸存者保住自己的角色');
+  assert.equal(shared[0]!.userId, B.id);
+  assert.equal(shared[0]!.role, 'editor');
+  const moved = members.filter((m) => m.siteId === loneSiteId);
+  assert.equal(moved.length, 1);
+  assert.equal(moved[0]!.userId, B.id, 'loser-only 成员行重指到幸存者');
+  assert.equal(moved[0]!.role, 'viewer');
+  assert.equal(members.filter((m) => m.userId === A.id).length, 0, '合并后无成员行引用 loser id');
+
+  const groups = await db.select().from(userGroups);
+  assert.deepEqual(groups.map((g) => `${g.userId}|${g.groupName}`).sort(), [
+    `${B.id}|team-a`,
+    `${B.id}|team-x`,
+  ]);
+
+  const grants = await db.select().from(groupGrants);
+  assert.equal(grants.length, 1);
+  assert.equal(grants[0]!.createdBy, B.id, 'group_grants.created_by 同块重指');
+
+  // Re-run for idempotence: after a mid-sequence crash, resumeSweep replays the whole reconcileOne; the new delete/remap steps must be safe to re-enter.
+  await db.update(accountMerges).set({ status: 'moving' }).where(eq(accountMerges.loserId, A.id));
+  await resumeSweep(deps);
+  const members2 = await db.select().from(siteMembers);
+  assert.equal(members2.length, 2, '第二次合并无行增删');
+  assert.deepEqual(
+    members2.map((m) => `${m.siteId}|${m.userId}|${m.role}`).sort(),
+    members.map((m) => `${m.siteId}|${m.userId}|${m.role}`).sort(),
+    '成员行不变',
+  );
+  const groups2 = await db.select().from(userGroups);
+  assert.equal(groups2.length, 2, '组行不变');
+  const grants2 = await db.select().from(groupGrants);
+  assert.equal(grants2.length, 1, '授予行不增');
+  assert.equal(grants2[0]!.createdBy, B.id, '授予行不变');
 });

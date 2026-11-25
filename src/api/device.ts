@@ -19,7 +19,7 @@ import { jsonError } from '../i18n/locale.js';
 import type { AppDeps, AppEnv } from '../types.js';
 import { nowIso, uuid } from '../util.js';
 import type { AuthMiddleware } from './deps.js';
-import { mintToken } from './tokens.js';
+import { mintToken, normalizeScopes } from './tokens.js';
 
 /** 设备码有效期(秒);足够人去浏览器点确认。 */
 const DEVICE_TTL_S = 600;
@@ -61,6 +61,17 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
 
   // 发起授权:匿名。返回展示给人的短码与浏览器确认地址。
   app.post('/api/device/code', async (c) => {
+    // scope: an RFC 8628-style space-delimited string; missing/null = full access. Unknown values answer 400 (fixed choice, not 422).
+    const reqBody = await readJson<{ scope?: unknown }>(c);
+    const rawScope = reqBody?.scope;
+    if (rawScope !== undefined && rawScope !== null && typeof rawScope !== 'string') {
+      return jsonError(c, 400, 'device.scope.invalid');
+    }
+    const scopes = normalizeScopes(
+      typeof rawScope === 'string' ? rawScope.split(/\s+/).filter(Boolean) : [],
+    );
+    if (scopes === 'invalid') return jsonError(c, 400, 'device.scope.invalid');
+
     await db.delete(deviceAuths).where(lt(deviceAuths.expiresAt, nowIso())); // 顺手清过期,避免无界增长
 
     const deviceCode = newDeviceCode();
@@ -88,6 +99,7 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
       createdAt: nowIso(),
       expiresAt,
       approvedAt: null,
+      scopes, // the authorization surface the initiator asked for; approval copies it into the minted PAT
     });
 
     const base = consoleBase(cfg);
@@ -148,7 +160,7 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
     const ttlDays = cfg.deviceTokenTtlDays;
     const expiresAt =
       ttlDays > 0 ? new Date(Date.now() + ttlDays * 86_400_000).toISOString() : null;
-    const minted = await mintToken(db, user.id, name, expiresAt);
+    const minted = await mintToken(db, user.id, name, expiresAt, rec.scopes); // copies the scope the initiator requested
     await db
       .update(deviceAuths)
       .set({
@@ -175,6 +187,17 @@ export function makeDeviceRoutes(deps: AppDeps, mw: AuthMiddleware): Hono<AppEnv
       await db.update(deviceAuths).set({ status: 'denied' }).where(eq(deviceAuths.id, rec.id));
     }
     return c.json({ ok: true });
+  });
+
+  // Approve-screen readout (the console picks it up in a follow-up change): a cookie session reads the scope a pending code requested, so the human sees what will be granted.
+  // Any logged-in session may read it (the same trust shape as approve/deny: a high-entropy user_code plus a short TTL blocks probing); scopes=null means the request asks for full access.
+  app.get('/api/device/request/:userCode', mw.cookieUser, async (c) => {
+    const userCode = c.req.param('userCode').trim().toUpperCase(); // normalized like the approve route
+    const rec = (await db.select().from(deviceAuths).where(eq(deviceAuths.userCode, userCode)))[0];
+    if (!rec || Date.parse(rec.expiresAt) <= Date.now()) {
+      return jsonError(c, 404, 'device.notFoundOrExpired');
+    }
+    return c.json({ user_code: rec.userCode, status: rec.status, scopes: rec.scopes });
   });
 
   return app;

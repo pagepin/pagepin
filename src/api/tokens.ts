@@ -26,6 +26,24 @@ export interface AuthMw {
 
 export const MAX_TOKENS_PER_USER = 10;
 
+/** Token-scope whitelist: publish = the deploy/release family; comment = comment-thread writes; read = a read-only marker (read routes always pass). */
+export const SCOPE_VALUES = ['publish', 'comment', 'read'] as const;
+
+const scopeSet = new Set<string>(SCOPE_VALUES);
+
+/** Normalizer shared by both mint entry points (the array from /api/tokens and the split space-delimited string from the device flow):
+ *  trims, dedupes, and validates against the whitelist; an empty set collapses to null (= full access); an invalid member (non-string or unknown value) -> 'invalid', and the caller answers 400. */
+export function normalizeScopes(list: readonly unknown[]): string[] | null | 'invalid' {
+  const out: string[] = [];
+  for (const v of list) {
+    if (typeof v !== 'string') return 'invalid';
+    const s = v.trim();
+    if (!scopeSet.has(s)) return 'invalid';
+    if (!out.includes(s)) out.push(s);
+  }
+  return out.length === 0 ? null : out;
+}
+
 /** 新明文 token:pp_ + 40 个 hex(20 随机字节)。 */
 function newRawToken(): string {
   const buf = new Uint8Array(20);
@@ -47,12 +65,14 @@ export interface MintedToken {
 
 /** 铸一个新 PAT 并落库(只存 hash),明文随返回值一次性交付。
  * POST /api/tokens 与设备授权(api/device.ts)共用,保证认证路径完全一致。
- * expiresAt:ISO 字符串则到期即拒;null(默认)= 不过期(普通 PAT)。 */
+ * expiresAt: an ISO string rejects the token at that time; null (the default) never expires (a plain PAT).
+ * scopes: the token-level restriction list (publish/comment/read); null (the default) = full access. Set once at mint; rotation never changes it. */
 export async function mintToken(
   db: Db,
   userId: string,
   name: string,
   expiresAt: string | null = null,
+  scopes: string[] | null = null,
 ): Promise<MintedToken> {
   const raw = newRawToken();
   const row: ApiTokenRow = {
@@ -65,6 +85,7 @@ export async function mintToken(
     lastUsedAt: null,
     expiresAt,
     revokedAt: null,
+    scopes,
   };
   await db.insert(apiTokens).values(row);
   return { row, plaintext: raw };
@@ -78,20 +99,22 @@ function out(t: ApiTokenRow) {
     created_at: t.createdAt,
     last_used_at: t.lastUsedAt,
     expires_at: t.expiresAt, // null = 不过期;设备授权铸的 token 有到期时间
+    scopes: t.scopes, // null = full access; carried by the create/list/rotate responses; rotation copies the stored value unchanged
   };
 }
 
-/** 读 JSON body 里的 name 字段;缺失/非法一律折叠成 ''(后续 1-64 校验自然拦下)。 */
-async function readNameField(c: Context<AppEnv>): Promise<string> {
+/** Read name + scopes from the JSON body in one pass (a Hono body can be streamed only once).
+ * a missing or invalid name folds to '' (the 1-64 validation below rejects it); scopes goes to the normalizer unchanged. */
+async function readMintBody(c: Context<AppEnv>): Promise<{ name: string; scopes: unknown }> {
   try {
     const body = (await c.req.json()) as unknown;
     if (typeof body === 'object' && body !== null) {
-      const n = (body as Record<string, unknown>).name;
-      if (typeof n === 'string') return n;
+      const b = body as Record<string, unknown>;
+      return { name: typeof b.name === 'string' ? b.name : '', scopes: b.scopes };
     }
-    return '';
+    return { name: '', scopes: undefined };
   } catch {
-    return '';
+    return { name: '', scopes: undefined };
   }
 }
 
@@ -121,14 +144,21 @@ export function makeTokenRoutes(deps: AppDeps, mw: AuthMw): Hono<AppEnv> {
 
   app.post('/api/tokens', mw.cookieMutatingUser, mw.requireVerified, async (c) => {
     const user = c.get('user');
-    const name = (await readNameField(c)).trim();
+    const { name: rawName, scopes: rawScopes } = await readMintBody(c);
+    const name = rawName.trim();
     if (name.length < 1 || name.length > 64) return jsonError(c, 422, 'token.name.length');
+    // scopes: missing/null = full access; a non-array body or an invalid member -> 400 (fixed choice; does not follow the 422 body-validation convention)
+    if (!Array.isArray(rawScopes) && rawScopes !== undefined && rawScopes !== null) {
+      return jsonError(c, 400, 'token.scopes.invalid');
+    }
+    const scopes = normalizeScopes(rawScopes ?? []);
+    if (scopes === 'invalid') return jsonError(c, 400, 'token.scopes.invalid');
     const row = (await db.select({ n: count() }).from(apiTokens).where(activeOf(user.id)))[0];
     if ((row?.n ?? 0) >= MAX_TOKENS_PER_USER) {
       return jsonError(c, 409, 'token.limit.reached', { max: MAX_TOKENS_PER_USER });
     }
 
-    const minted = await mintToken(db, user.id, name);
+    const minted = await mintToken(db, user.id, name, null, scopes);
     console.log(`token created handle=${user.handle} name=${name} prefix=${minted.row.prefix}`);
     // 明文仅此一次:列表接口(out)不含 token 字段,之后只能轮换拿新值。
     return c.json({ ...out(minted.row), token: minted.plaintext });

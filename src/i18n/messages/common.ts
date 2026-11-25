@@ -33,6 +33,7 @@ export const common: Record<Locale, Record<string, string>> = {
     'auth.token.invalidOrRevoked': 'Token is invalid or revoked',
     'auth.token.expired': 'Token expired, sign in again to obtain a new one',
     'auth.token.userNotFound': 'Token refers to a non-existent user',
+    'auth.token.scope': 'This token lacks the scope for this action',
 
     // —— 评论(comments.ts) ——
     'comment.text.empty': 'Comment cannot be empty',
@@ -83,6 +84,7 @@ export const common: Record<Locale, Record<string, string>> = {
     'auth.token.invalidOrRevoked': 'token 无效或已吊销',
     'auth.token.expired': 'token 已过期，请重新登录获取',
     'auth.token.userNotFound': 'token 对应用户不存在',
+    'auth.token.scope': 'token scope 不足，无法执行该操作',
 
     // —— 评论(comments.ts) ——
     'comment.text.empty': '评论内容不能为空',

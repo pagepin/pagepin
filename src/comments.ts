@@ -29,6 +29,8 @@ import { localeOf } from './i18n/locale.js';
 import type { AppDeps, AppEnv } from './types.js';
 import { normalizeSitePath, nowIso, shortId } from './util.js';
 
+import { requireScope } from './api/deps.js';
+
 const MAX_TEXT = 4000;
 const MAX_SELECTOR = 600;
 /** 意图标签(null = 普通评论);"@page" 整页锚点由前端约定,后端不特判 */
@@ -403,6 +405,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   app.post(
     '/api/comments/:handle/:slug',
     wrap(async (c) => {
+      // shortcut: PATs never reach the content plane (this plane has no Bearer auth path), so the gate is a standing guard; it takes effect once tokens join this plane
+      const scopeErr = requireScope(c, 'comment');
+      if (scopeErr) return scopeErr;
       // 对齐 FastAPI:请求体校验先于鉴权(pydantic 在 handler 前跑)
       const body = parseThreadCreate(await readJson(c));
       const handle = c.req.param('handle') ?? '';
@@ -451,6 +456,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   app.post(
     '/api/comments/threads/:tid/replies',
     wrap(async (c) => {
+      // shortcut: PATs never reach the content plane (this plane has no Bearer auth path), so the gate is a standing guard; it takes effect once tokens join this plane
+      const scopeErr = requireScope(c, 'comment');
+      if (scopeErr) return scopeErr;
       const raw = await readJson(c);
       if (
         typeof raw !== 'object' ||
@@ -481,6 +489,9 @@ export function makeCommentRoutes(deps: AppDeps): Hono<AppEnv> {
   app.patch(
     '/api/comments/threads/:tid',
     wrap(async (c) => {
+      // shortcut: PATs never reach the content plane (this plane has no Bearer auth path), so the gate is a standing guard; it takes effect once tokens join this plane
+      const scopeErr = requireScope(c, 'comment');
+      if (scopeErr) return scopeErr;
       const raw = await readJson(c);
       if (typeof raw !== 'object' || raw === null)
         throw new ApiError(422, 'request.body.malformed');

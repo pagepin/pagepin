@@ -15,7 +15,7 @@ import type { ColumnKit } from './columns.js';
 // 注:JSON 列不在此处 .$type<T>() —— 工厂列类型放松成 any,精确行类型由 db/index.ts 统一从
 // 规范 sqlite schema cast 得到(见该文件)。这里只关心运行时 DDL/取值映射正确。
 export function buildSchema(kit: ColumnKit) {
-  const { table, str, longStr, bool, int, real, json, unique, index } = kit;
+  const { table, str, longStr, bool, int, real, json, unique, index, primaryKey } = kit;
 
   const users = table(
     'users',
@@ -144,6 +144,7 @@ export function buildSchema(kit: ColumnKit) {
       lastUsedAt: str('last_used_at', 40),
       expiresAt: str('expires_at', 40),
       revokedAt: str('revoked_at', 40),
+      scopes: json('scopes'), // JSON column without a DB default (semantics: see the scopes comment in schema.ts)
     },
     (t: any) => [unique('tokens_hash_uq').on(t.tokenHash), index('tokens_user_idx').on(t.userId)],
   );
@@ -182,6 +183,7 @@ export function buildSchema(kit: ColumnKit) {
       createdAt: str('created_at', 40).notNull(),
       expiresAt: str('expires_at', 40).notNull(),
       approvedAt: str('approved_at', 40),
+      scopes: json('scopes'), // same as api_tokens.scopes; JSON column without a DB default
     },
     (t: any) => [
       unique('device_code_uq').on(t.deviceCode),
@@ -235,6 +237,45 @@ export function buildSchema(kit: ColumnKit) {
     (t: any) => [unique('account_merges_loser_uq').on(t.loserId)],
   );
 
+  // RBAC tables (structurally identical to site_members/user_groups/group_grants in schema.ts; role semantics: see src/rbac.ts).
+  const siteMembers = table(
+    'site_members',
+    {
+      id: str('id', 64).primaryKey(),
+      siteId: str('site_id', 64).notNull(),
+      userId: str('user_id', 64).notNull(),
+      role: str('role', 16).notNull(),
+      createdAt: str('created_at', 40).notNull(),
+    },
+    (t: any) => [
+      unique('site_members_site_user_uq').on(t.siteId, t.userId),
+      index('site_members_user_idx').on(t.userId),
+    ],
+  );
+
+  const userGroups = table(
+    'user_groups',
+    {
+      userId: str('user_id', 64).notNull(),
+      groupName: str('group_name', 255).notNull(),
+      syncedAt: str('synced_at', 40).notNull(),
+    },
+    (t: any) => [primaryKey({ columns: [t.userId, t.groupName] })],
+  );
+
+  const groupGrants = table(
+    'group_grants',
+    {
+      id: str('id', 64).primaryKey(),
+      siteId: str('site_id', 64).notNull(),
+      groupName: str('group_name', 255).notNull(),
+      role: str('role', 16).notNull(),
+      createdBy: str('created_by', 64).notNull(),
+      createdAt: str('created_at', 40).notNull(),
+    },
+    (t: any) => [unique('group_grants_site_group_uq').on(t.siteId, t.groupName)],
+  );
+
   return {
     users,
     identities,
@@ -248,5 +289,8 @@ export function buildSchema(kit: ColumnKit) {
     handoffCodes,
     deploySessions,
     accountMerges,
+    siteMembers,
+    userGroups,
+    groupGrants,
   };
 }

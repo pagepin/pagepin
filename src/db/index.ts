@@ -18,14 +18,17 @@ export type {
   CommentThreadRow,
   DeploySessionRow,
   DeviceAuthRow,
+  GroupGrantRow,
   HandoffCodeRow,
   IdentityRow,
   InviteRow,
   PendingFile,
   ShareLinkRow,
+  SiteMemberRow,
   SiteRow,
   SiteVersion,
   ThreadComment,
+  UserGroupRow,
   UserRow,
 } from './schema.js';
 export { currentVersion, isPubliclyVisible } from './schema.js';
@@ -60,3 +63,6 @@ export const deviceAuths = t.deviceAuths as typeof sqliteSchema.deviceAuths;
 export const handoffCodes = t.handoffCodes as typeof sqliteSchema.handoffCodes;
 export const deploySessions = t.deploySessions as typeof sqliteSchema.deploySessions;
 export const accountMerges = t.accountMerges as typeof sqliteSchema.accountMerges;
+export const siteMembers = t.siteMembers as typeof sqliteSchema.siteMembers;
+export const userGroups = t.userGroups as typeof sqliteSchema.userGroups;
+export const groupGrants = t.groupGrants as typeof sqliteSchema.groupGrants;

@@ -14,11 +14,14 @@ import {
   commentThreads,
   deploySessions,
   deviceAuths,
+  groupGrants,
   handoffCodes,
   identities,
   instanceSettings,
   invites,
+  siteMembers,
   sites,
+  userGroups,
   users,
   type Db,
 } from '../../src/db/index.js';
@@ -51,6 +54,9 @@ async function resetDb(db: Db): Promise<void> {
   await db.delete(apiTokens);
   await db.delete(invites);
   await db.delete(accountMerges);
+  await db.delete(groupGrants);
+  await db.delete(siteMembers);
+  await db.delete(userGroups);
   await db.delete(identities);
   await db.delete(sites);
   await db.delete(instanceSettings);
