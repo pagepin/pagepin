@@ -10,6 +10,7 @@
 import {
   index as sqIndex,
   integer as sqInt,
+  primaryKey as sqPrimaryKey,
   real as sqReal,
   sqliteTable,
   text as sqText,
@@ -22,6 +23,7 @@ import {
   integer as pgInt,
   jsonb as pgJsonb,
   pgTable,
+  primaryKey as pgPrimaryKey,
   text as pgText,
   uniqueIndex as pgUnique,
   varchar as pgVarchar,
@@ -33,6 +35,7 @@ import {
   int as myInt,
   json as myJson,
   mysqlTable,
+  primaryKey as myPrimaryKey,
   text as myText,
   uniqueIndex as myUnique,
   varchar as myVarchar,
@@ -58,6 +61,8 @@ export interface ColumnKit {
   json: (name: string) => Col;
   unique: (name: string) => { on: (...c: Col[]) => Col };
   index: (name: string) => { on: (...c: Col[]) => Col };
+  /** Composite primary key (one or more columns as a tuple); a single-column key uses col(...).primaryKey() directly, not this kit. */
+  primaryKey: (cfg: { columns: [Col, ...Col[]] }) => Col;
 }
 
 const DEFAULT_LEN = 255;
@@ -73,6 +78,7 @@ export const sqliteKit: ColumnKit = {
   json: (n) => sqText(n, { mode: 'json' }),
   unique: (n) => sqUnique(n),
   index: (n) => sqIndex(n),
+  primaryKey: (cfg) => sqPrimaryKey(cfg),
 };
 
 export const pgKit: ColumnKit = {
@@ -86,6 +92,7 @@ export const pgKit: ColumnKit = {
   json: (n) => pgJsonb(n),
   unique: (n) => pgUnique(n),
   index: (n) => pgIndex(n),
+  primaryKey: (cfg) => pgPrimaryKey(cfg),
 };
 
 export const mysqlKit: ColumnKit = {
@@ -99,6 +106,7 @@ export const mysqlKit: ColumnKit = {
   json: (n) => myJson(n),
   unique: (n) => myUnique(n),
   index: (n) => myIndex(n),
+  primaryKey: (cfg) => myPrimaryKey(cfg),
 };
 
 export const KITS: Record<Dialect, ColumnKit> = { sqlite: sqliteKit, pg: pgKit, mysql: mysqlKit };

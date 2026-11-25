@@ -65,6 +65,7 @@ export async function mintToken(
     lastUsedAt: null,
     expiresAt,
     revokedAt: null,
+    scopes: null, // null = full access; the mint scopes argument lands in a follow-up change
   };
   await db.insert(apiTokens).values(row);
   return { row, plaintext: raw };

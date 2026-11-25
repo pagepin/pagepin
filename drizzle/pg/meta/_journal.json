@@ -43,6 +43,13 @@
       "when": 1784184295438,
       "tag": "0005_puzzling_kronos",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794837553053,
+      "tag": "0006_slippery_diamondback",
+      "breakpoints": true
     }
   ]
 }

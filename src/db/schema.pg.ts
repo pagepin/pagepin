@@ -16,4 +16,7 @@ export const {
   handoffCodes,
   deploySessions,
   accountMerges,
+  siteMembers,
+  userGroups,
+  groupGrants,
 } = buildSchema(pgKit);
